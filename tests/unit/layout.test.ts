@@ -10,6 +10,9 @@ describe('computeBounds', () => {
     expect(bounds.tabStrip).toEqual({ x: 840, y: 0, width: 560, height: 36 });
     expect(bounds.navBar).toEqual({ x: 840, y: 36, width: 560, height: 32 });
     expect(bounds.ghTab).toEqual({ x: 840, y: 68, width: 560, height: 832 });
+    expect(bounds.titleBar).toBeNull();
+    expect(bounds.terminal).toBeNull();
+    expect(bounds.terminalSplitter).toBeNull();
   });
 
   it('clamps the pane to both width limits', () => {
@@ -26,6 +29,9 @@ describe('computeBounds', () => {
     expect(bounds.splitter).toBeNull();
     expect(bounds.tabStrip).toBeNull();
     expect(bounds.navBar).toBeNull();
+    expect(bounds.titleBar).toBeNull();
+    expect(bounds.terminal).toBeNull();
+    expect(bounds.terminalSplitter).toBeNull();
   });
 
   it('keeps all regions within undersized dimensions', () => {

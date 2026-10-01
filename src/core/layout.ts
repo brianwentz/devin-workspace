@@ -13,12 +13,22 @@ export interface PaneState {
   paneWidth: number;
 }
 
+export interface LayoutState {
+  paneOpen: boolean;
+  paneFraction: number; // pane share of (windowWidth - RAIL_WIDTH - SPLITTER_WIDTH); 0..1
+  terminalOpen: boolean;
+  terminalHeight: number; // px
+}
+
 export interface WindowBounds {
   devin: Rect;
   ghTab: Rect | null;
   splitter: Rect | null;
   tabStrip: Rect | null;
   navBar: Rect | null;
+  titleBar: Rect | null;
+  terminal: Rect | null;
+  terminalSplitter: Rect | null;
   rail: Rect;
   paneCollapsed: boolean;
 }
@@ -30,6 +40,8 @@ export const NAV_BAR_HEIGHT = 32;
 export const MIN_PANE_WIDTH = 320;
 export const MIN_DEVIN_WIDTH = 768;
 export const DEFAULT_PANE_WIDTH = 560;
+export const DEFAULT_PANE_FRACTION = 0.5;
+export const DEFAULT_TERMINAL_HEIGHT = 280;
 
 export function clampPaneWidth(width: number, windowWidth: number): number {
   const max = Math.max(
@@ -61,6 +73,9 @@ export function computeBounds(
       splitter: null,
       tabStrip: null,
       navBar: null,
+      titleBar: null,
+      terminal: null,
+      terminalSplitter: null,
       paneCollapsed: false,
     };
   }
@@ -116,6 +131,9 @@ export function computeBounds(
       width: paneActualWidth,
       height: Math.max(0, height - chromeHeight),
     },
+    titleBar: null,
+    terminal: null,
+    terminalSplitter: null,
     paneCollapsed,
   };
 }
