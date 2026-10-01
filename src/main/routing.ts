@@ -1,0 +1,175 @@
+import { shell } from 'electron';
+import {
+  route,
+  routeUrl,
+  type RouteDecision,
+  type RouteDisposition,
+  type RouteSource,
+} from '../core/linkRouter';
+import { log } from './log';
+import { allowExternalEnabled } from './settings';
+import { fixtureOrigins, state, type ViewName } from './state';
+import { GLOBAL } from '../core/tabModel';
+import { applyLayout, notifyShell } from './window';
+import { handleShortcut } from './shortcuts';
+
+export function routeContext(): { tenantUrl: string; githubOrigins: string[] } {
+  return { tenantUrl: state.tenantUrl, githubOrigins: fixtureOrigins };
+}
+
+export function sourceOf(view: ViewName): RouteSource {
+  if (view === 'devin') return 'devin';
+  if (view === 'shell') return 'shell';
+  return 'github';
+}
+
+export function recordDecision(
+  view: ViewName,
+  event: string,
+  url: string,
+  decision: string,
+): void {
+  log(view, event, { url, decision });
+}
+
+export function openExternal(
+  url: string,
+  view: ViewName,
+  event = 'external-open',
+  decision = 'external',
+): void {
+  recordDecision(view, event, url, decision);
+  if (!allowExternalEnabled()) return;
+  void shell.openExternal(url).catch((error: unknown) => {
+    log(view, 'external-error', { url, detail: { message: String(error) } });
+  });
+}
+
+function openGitHubTab(url: string, background: boolean): string | undefined {
+  state.paneOpen = true;
+  // P8: scope = the currently visible scope (the session open in Cloud). Local
+  // chat links therefore land on the session the user was looking at.
+  const scope = state.tabManager?.currentScope ?? state.currentSessionId ?? GLOBAL;
+  const id = state.tabManager?.open(url, {
+    background,
+    ...(scope ? { originSessionId: scope } : {}),
+  });
+  applyLayout();
+  return id;
+}
+
+// Navigate the Cloud view (also used by the scope menu — F7).
+export function loadInDevinView(url: string): void {
+  if (!state.devinView) return;
+  state.surface = 'cloud';
+  state.devinView.webContents.loadURL(url).catch((error: unknown) => {
+    log('devin', 'load-error', { url, detail: { message: String(error) } });
+  });
+}
+
+// Apply a LinkRouter decision. Returns the decision so callers can preventDefault etc.
+// Decision labels in the log: github-tab | github-tab-background | allow-in-view | devin |
+// external | mailto | deny (the e2e matrix asserts on these).
+export function applyDecision(
+  rawUrl: string,
+  view: ViewName,
+  event: string,
+  disposition: RouteDisposition,
+): RouteDecision {
+  const decision = route(rawUrl, sourceOf(view), disposition, routeContext());
+  switch (decision.kind) {
+    case 'gh-tab':
+      openGitHubTab(rawUrl, decision.background);
+      recordDecision(view, event, rawUrl, decision.background ? 'github-tab-background' : 'github-tab');
+      break;
+    case 'in-place':
+      recordDecision(view, event, rawUrl, 'allow-in-view');
+      break;
+    case 'devin':
+      loadInDevinView(rawUrl);
+      recordDecision(view, event, rawUrl, 'devin');
+      applyLayout();
+      break;
+    case 'external':
+      openExternal(rawUrl, view, event, routeUrl(rawUrl, routeContext()) === 'mailto' ? 'mailto' : 'external');
+      break;
+    case 'deny':
+      recordDecision(view, event, rawUrl, 'deny');
+      break;
+  }
+  return decision;
+}
+
+function popupDisposition(details: Electron.HandlerDetails): RouteDisposition {
+  // Ctrl/middle-click report 'background-tab'; everything else is a foreground popup.
+  return details.disposition === 'background-tab' ? 'background' : 'new-window';
+}
+
+export function attachRouting(webContents: Electron.WebContents, view: ViewName): void {
+  webContents.setWindowOpenHandler((details) => {
+    applyDecision(details.url, view, 'window-open', popupDisposition(details));
+    // Never create a BrowserWindow: every popup is routed by the LinkRouter.
+    return { action: 'deny' };
+  });
+
+  webContents.on('will-navigate', (event, url) => {
+    const decision = route(url, sourceOf(view), 'navigate', routeContext());
+    if (decision.kind === 'in-place') {
+      recordDecision(view, 'will-navigate', url, 'allow-in-view');
+      return;
+    }
+    event.preventDefault();
+    applyDecision(url, view, 'will-navigate', 'navigate');
+  });
+
+  webContents.on('will-frame-navigate', (event) => {
+    const url = event.url;
+    if (event.isMainFrame) return;
+    // Sub-frames navigate in place (iframe content is part of the hosting page); only
+    // non-web schemes are denied. `_top` links from iframes surface as main-frame
+    // will-navigate and are routed there.
+    const kind = routeUrl(url, routeContext());
+    if (kind === 'deny') {
+      event.preventDefault();
+      recordDecision(view, 'will-frame-navigate', url, 'deny-subframe');
+    } else {
+      recordDecision(view, 'will-frame-navigate', url, 'allow-subframe');
+    }
+  });
+
+  webContents.on('will-redirect', (_event, url, isInPlace, isMainFrame) => {
+    log(view, 'will-redirect', {
+      url,
+      decision: 'allow',
+      detail: { isInPlace, isMainFrame },
+    });
+  });
+
+  webContents.on('did-navigate', (_event, url) => {
+    log(view, 'did-navigate', { url, decision: 'allow' });
+  });
+  webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      log(view, 'did-fail-load', {
+        url: validatedURL,
+        decision: 'failure',
+        detail: { errorCode, errorDescription, isMainFrame },
+      });
+    },
+  );
+  webContents.on('focus', () => {
+    if (view !== 'shell') state.lastFocused = webContents;
+    notifyShell();
+  });
+  webContents.on('before-input-event', (event, input) =>
+    handleShortcut(webContents, view, event, input),
+  );
+}
+
+// Links clicked in shell-owned UI (Local chat, settings) and the `__devinworkspaces.routeLink`
+// test hook: treated as new-window requests from the shell.
+export function handleLink(url: string, source: ViewName = 'shell'): void {
+  applyDecision(url, source, 'link-open', 'new-window');
+  applyLayout();
+}

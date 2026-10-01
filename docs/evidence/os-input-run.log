@@ -1,0 +1,11 @@
+
+> devin-desk-p0@0.1.0 os:input
+> npm run build && node out/scripts/os-input.cjs
+
+
+> devin-desk-p0@0.1.0 build
+> node scripts/build.mjs
+
+{"scale":1,"devicePixelRatio":1,"window":{"width":1400,"height":900},"firstDrag":{"releaseRegion":"devin","x":600,"paneWidth":794},"secondDrag":{"releaseRegion":"github","x":1074,"paneWidth":320},"escape":{"restoredWidth":320},"shortcutViews":["shell","devin","gh:c904dea8-c6e6-4aa9-a9bd-fb42c7fd7737","gh:c174ac0e-7d72-4268-8fdd-9b92c7e5f8be"],"screenshot":"/home/ubuntu/repos/devin-desk/docs/evidence/os-input-100-mid-drag.png","eventLog":"/home/ubuntu/repos/devin-desk/docs/evidence/os-input-100.jsonl","status":"passed"}
+{"scale":1.5,"devicePixelRatio":1.5,"window":{"width":2100,"height":1351},"firstDrag":{"releaseRegion":"devin","x":600,"paneWidth":794},"secondDrag":{"releaseRegion":"github","x":1074,"paneWidth":320},"escape":{"restoredWidth":320},"shortcutViews":["shell","devin","gh:2290db0d-e0c6-400d-83fb-8fdab508bf33","gh:0b0e6fe1-1085-46ec-9969-9544c4e71fdc"],"screenshot":"/home/ubuntu/repos/devin-desk/docs/evidence/os-input-150-mid-drag.png","eventLog":"/home/ubuntu/repos/devin-desk/docs/evidence/os-input-150.jsonl","status":"passed"}
+{"scale":2,"devicePixelRatio":2,"window":{"width":2800,"height":1800},"firstDrag":{"releaseRegion":"devin","x":600,"paneWidth":794},"secondDrag":{"releaseRegion":"github","x":1074,"paneWidth":320},"escape":{"restoredWidth":320},"shortcutViews":["shell","devin","gh:a57606af-8866-4207-8ec3-9cb616eda61e","gh:33c42543-9a33-431f-9486-a8a7214044da"],"screenshot":"/home/ubuntu/repos/devin-desk/docs/evidence/os-input-200-mid-drag.png","eventLog":"/home/ubuntu/repos/devin-desk/docs/evidence/os-input-200.jsonl","status":"passed"}

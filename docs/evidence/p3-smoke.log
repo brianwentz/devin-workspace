@@ -1,0 +1,31 @@
+2026-10-01T23:55:35.666+02:00 Installer: C:\Users\brian\source\repos\Devin-console\dist\DevinWorkspaces-Setup-0.1.0.exe (122.58 MB, 128538760 bytes)
+2026-10-01T23:55:35.671+02:00 InstallDir: C:\Users\brian\AppData\Local\Programs\devin-workspaces-smoke
+2026-10-01T23:55:35.673+02:00 Profile: C:\Users\brian\AppData\Local\Temp\devin-workspaces-smoke-profile
+2026-10-01T23:55:35.679+02:00 Machine: BRIAN-FRACTAL, user: brian, elevated: False
+2026-10-01T23:55:35.697+02:00 install: "C:\Users\brian\source\repos\Devin-console\dist\DevinWorkspaces-Setup-0.1.0.exe" /S /currentuser /D=C:\Users\brian\AppData\Local\Programs\devin-workspaces-smoke
+2026-10-01T23:55:44.847+02:00 install exit code: 0
+2026-10-01T23:55:44.887+02:00 Installed: 254 files, 411.54 MB
+2026-10-01T23:55:44.906+02:00 Uninstall registry: key='1f69b7bc-532a-5b53-bb75-cfe47a155a29' DisplayName='Devin Workspaces 0.1.0' DisplayVersion='0.1.0' UninstallString='"C:\Users\brian\AppData\Local\Programs\devin-workspaces-smoke\Uninstall Devin Workspaces.exe" /currentuser'
+2026-10-01T23:55:44.908+02:00 Running smoke spec (phase=fresh)
+
+Running 2 tests using 1 worker
+
+[1/2] tests\smoke\installed.spec.ts:147:5 GǦ installed exe has the expected fuse wire
+[2/2] tests\smoke\installed.spec.ts:167:5 GǦ installed app launches, creates views, and persists across relaunch
+  2 passed (4.6s)
+2026-10-01T23:55:50.803+02:00 upgrade-in-place: "C:\Users\brian\source\repos\Devin-console\dist\DevinWorkspaces-Setup-0.1.0.exe" /S /currentuser /D=C:\Users\brian\AppData\Local\Programs\devin-workspaces-smoke
+2026-10-01T23:56:04.954+02:00 upgrade-in-place exit code: 0
+2026-10-01T23:56:04.957+02:00 Profile survived upgrade-in-place (settings.json present)
+2026-10-01T23:56:04.960+02:00 Running smoke spec (phase=upgrade)
+
+Running 2 tests using 1 worker
+
+[1/2] tests\smoke\installed.spec.ts:147:5 GǦ installed exe has the expected fuse wire
+[2/2] tests\smoke\installed.spec.ts:167:5 GǦ installed app launches, creates views, and persists across relaunch
+  2 passed (4.2s)
+2026-10-01T23:56:10.468+02:00 uninstall: "C:\Users\brian\AppData\Local\Programs\devin-workspaces-smoke\Uninstall Devin Workspaces.exe" /S /currentuser _?=C:\Users\brian\AppData\Local\Programs\devin-workspaces-smoke
+2026-10-01T23:56:14.771+02:00 uninstall exit code: 0
+2026-10-01T23:56:15.788+02:00 Install dir removed: C:\Users\brian\AppData\Local\Programs\devin-workspaces-smoke
+2026-10-01T23:56:15.797+02:00 Uninstall registry key removed
+2026-10-01T23:56:15.800+02:00 Profile retained after uninstall (deleteAppDataOnUninstall=false; smoke profile is env-overridden): True
+2026-10-01T23:56:15.845+02:00 RESULT: PASS

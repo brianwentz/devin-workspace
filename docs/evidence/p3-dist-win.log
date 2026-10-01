@@ -1,0 +1,16 @@
+  • electron-builder  version=26.16.1 os=10.0.26200
+  • loaded configuration  file=package.json ("build" field)
+  • executing @electron/rebuild  electronVersion=44.4.5 arch=x64 buildFromSource=false workspaceRoot=C:\Users\brian\source\repos\Devin-console-p3 projectDir=./ appDir=./
+  • installing native dependencies  arch=x64
+  • completed installing native dependencies
+  • packaging       platform=win32 arch=x64 electron=44.4.5 appOutDir=dist\win-unpacked
+  • downloaded      label=electron progress=100%
+  • downloaded electron zip extracted successfully  output=C:\Users\brian\source\repos\Devin-console-p3\dist\win-unpacked
+  • searching for node modules  pm=npm searchDir=C:\Users\brian\source\repos\Devin-console-p3
+  • updating asar integrity executable resource  executablePath=dist\win-unpacked\Devin Desk.exe
+  • executing @electron/fuses  electronPath=dist\win-unpacked\Devin Desk.exe
+  • file signing skipped via signExecutable configuration  file=dist\win-unpacked\Devin Desk.exe
+  • building        target=nsis file=dist\DevinDesk-Setup-0.1.0.exe archs=x64 oneClick=false perMachine=false
+  • file signing skipped via signExecutable configuration  file=dist\DevinDesk-Setup-0.1.0.__uninstaller.exe
+  • file signing skipped via signExecutable configuration  file=dist\DevinDesk-Setup-0.1.0.exe
+  • building block map  blockMapFile=dist\DevinDesk-Setup-0.1.0.exe.blockmap

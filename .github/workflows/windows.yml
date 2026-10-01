@@ -1,0 +1,63 @@
+name: windows
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+
+      # Runner display is 1024x768; the 1400x900 test window needs more room.
+      # Best-effort raise — the launchApp width check is the real gate.
+      # (Also benefits the smoke:install step below.)
+      - run: pwsh scripts/ci-display.ps1
+
+      # Playwright drives Electron via _electron.launch (no browser download needed).
+      - run: npm run test:e2e
+
+      # NSIS installer (unsigned; fuses flipped in afterPack).
+      - run: npm run dist:win
+
+      # Silent per-user install -> smoke -> upgrade-in-place -> smoke -> silent uninstall.
+      - run: npm run smoke:install
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: devin-workspaces-windows-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+            docs/evidence/*smoke*
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-${{ github.sha }}
+          if-no-files-found: ignore
+          path: test-results/

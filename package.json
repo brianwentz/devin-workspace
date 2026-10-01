@@ -1,0 +1,110 @@
+{
+  "name": "devin-workspaces",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Devin Workspaces desktop client",
+  "author": "brianwentz",
+  "main": "out/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "test:unit": "vitest run tests/unit",
+    "test:e2e": "npm run build && playwright test",
+    "typecheck": "tsc --noEmit",
+    "acp:probe": "npm run build:acp && node out/scripts/acp-probe.cjs",
+    "build:acp": "node scripts/build-acp.mjs",
+    "os:input": "npm run build && node out/scripts/os-input.cjs",
+    "icon": "node scripts/make-icon.mjs",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "smoke:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-install.ps1",
+    "test:smoke": "playwright test --config playwright.smoke.config.ts",
+    "measure:tabs": "npm run build && node out/scripts/measure-tabs.cjs",
+    "rebuild:native": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.13.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.4.5",
+    "electron-builder": "26.16.1",
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vitest": "5.0.1"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "6.3.1",
+    "@dnd-kit/sortable": "10.0.0",
+    "@dnd-kit/utilities": "3.2.2",
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@electron/fuses": "2.1.3",
+    "electron-updater": "6.8.9",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "zod": "4.6.5",
+    "node-pty": "1.1.0",
+    "@xterm/xterm": "6.0.0",
+    "@xterm/addon-fit": "0.11.0"
+  },
+  "build": {
+    "appId": "ai.devin.workspaces",
+    "productName": "Devin Workspaces",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json",
+      "node_modules/node-pty/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Devin Workspaces",
+      "artifactName": "DevinWorkspaces-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "brianwentz",
+        "repo": "devin-workspace"
+      }
+    ],
+    "afterPack": "scripts/after-pack.cjs",
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": false,
+      "grantFileProtocolExtraPrivileges": true
+    },
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "npmRebuild": false
+  }
+}

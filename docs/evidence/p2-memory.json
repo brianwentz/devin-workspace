@@ -1,0 +1,112 @@
+{
+  "generatedAt": "2026-10-01T14:54:58.878Z",
+  "platform": "win32 x64",
+  "electron": "see package.json",
+  "fixturePage": "/heavy/<n> (~2 MB DOM: 6000-row table)",
+  "thresholdMB": 2048,
+  "exceedsThreshold": true,
+  "approxPerTabMB": 379,
+  "decision": "State-safe discard enabled (TabManager.discardIdle: inactive tabs idle >= settings.discardIdleMinutes, default 30, are closed with webContents.close({waitForBeforeUnload:true}); beforeunload cancels; chrome kept; reload on activation)",
+  "samples": [
+    {
+      "tabs": 0,
+      "totalWorkingSetMB": 474,
+      "totalPrivateMB": 238,
+      "processes": 5,
+      "byType": {
+        "Browser": {
+          "count": 1,
+          "workingSetMB": 114
+        },
+        "GPU": {
+          "count": 1,
+          "workingSetMB": 135
+        },
+        "Utility": {
+          "count": 1,
+          "workingSetMB": 49
+        },
+        "Tab": {
+          "count": 2,
+          "workingSetMB": 175
+        }
+      },
+      "mainRssMB": 115
+    },
+    {
+      "tabs": 5,
+      "totalWorkingSetMB": 2285,
+      "totalPrivateMB": 1718,
+      "processes": 10,
+      "byType": {
+        "Browser": {
+          "count": 1,
+          "workingSetMB": 121
+        },
+        "GPU": {
+          "count": 1,
+          "workingSetMB": 159
+        },
+        "Utility": {
+          "count": 1,
+          "workingSetMB": 51
+        },
+        "Tab": {
+          "count": 7,
+          "workingSetMB": 1954
+        }
+      },
+      "mainRssMB": 121
+    },
+    {
+      "tabs": 10,
+      "totalWorkingSetMB": 4159,
+      "totalPrivateMB": 3251,
+      "processes": 15,
+      "byType": {
+        "Browser": {
+          "count": 1,
+          "workingSetMB": 127
+        },
+        "GPU": {
+          "count": 1,
+          "workingSetMB": 159
+        },
+        "Utility": {
+          "count": 1,
+          "workingSetMB": 51
+        },
+        "Tab": {
+          "count": 12,
+          "workingSetMB": 3823
+        }
+      },
+      "mainRssMB": 127
+    },
+    {
+      "tabs": 20,
+      "totalWorkingSetMB": 8046,
+      "totalPrivateMB": 6449,
+      "processes": 25,
+      "byType": {
+        "Browser": {
+          "count": 1,
+          "workingSetMB": 138
+        },
+        "GPU": {
+          "count": 1,
+          "workingSetMB": 158
+        },
+        "Utility": {
+          "count": 1,
+          "workingSetMB": 52
+        },
+        "Tab": {
+          "count": 22,
+          "workingSetMB": 7698
+        }
+      },
+      "mainRssMB": 138
+    }
+  ]
+}

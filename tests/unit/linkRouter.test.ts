@@ -1,0 +1,157 @@
+import { describe, expect, it } from 'vitest';
+import {
+  route,
+  routeUrl,
+  type RouteDecision,
+  type RouteDisposition,
+  type RouteSource,
+} from '../../src/core/linkRouter';
+
+const context = {
+  tenantUrl: 'https://cloudbeds.devinenterprise.com',
+  githubOrigins: ['http://127.0.0.1:43111', 'http://localhost:43112'],
+};
+
+describe('routeUrl (host class)', () => {
+  it.each([
+    'https://github.com/org/repo',
+    'http://github.com/org/repo',
+    'https://www.github.com/org/repo',
+    'https://gist.github.com/user/id',
+    'https://GitHub.com/Org/Repo',
+    'https://github.com./org/repo',
+    'https://githubusercontent.com/file',
+    'https://raw.githubusercontent.com/org/repo/main/file',
+    'http://raw.githubusercontent.com/org/repo/main/file',
+    'https://objects.githubusercontent.com/item',
+    'https://user-images.githubusercontent.com/1/x.png',
+    'http://127.0.0.1:43111/page',
+    'http://localhost:43112/page',
+  ])('routes %s to GitHub', (url) => {
+    expect(routeUrl(url, context)).toBe('github');
+  });
+
+  it.each([
+    'https://evil-github.com/org/repo',
+    'https://github.com.evil.com/org/repo',
+    'https://githubusercontent.com.evil.com/file',
+    'https://cloudbeds.devinenterprise.com.evil.com/session',
+    'http://127.0.0.1:43113/page',
+  ])('does not confuse %s with an allowed host', (url) => {
+    expect(routeUrl(url, context)).toBe('external');
+  });
+
+  it('routes the configured tenant and other web origins', () => {
+    expect(routeUrl('https://cloudbeds.devinenterprise.com/sessions/1', context)).toBe('devin');
+    expect(routeUrl('https://CLOUDBEDS.devinenterprise.com./sessions/1', context)).toBe('devin');
+    expect(routeUrl('https://example.org/path', context)).toBe('external');
+  });
+
+  it('routes mailto separately and denies non-web schemes and invalid URLs', () => {
+    expect(routeUrl('mailto:support@example.org', context)).toBe('mailto');
+    expect(routeUrl('javascript:alert(1)', context)).toBe('deny');
+    expect(routeUrl('data:text/html,hello', context)).toBe('deny');
+    expect(routeUrl('file:///etc/passwd', context)).toBe('deny');
+    expect(routeUrl('not a url', context)).toBe('deny');
+    expect(routeUrl('https://example.org/', { tenantUrl: 'not a url' })).toBe('deny');
+  });
+});
+
+type HostClass = 'github' | 'tenant' | 'external' | 'mailto' | 'javascript' | 'data';
+
+const hostSamples: Record<HostClass, string[]> = {
+  github: [
+    'https://github.com/org/repo/pull/1',
+    'https://gist.github.com/user/id',
+    'https://raw.githubusercontent.com/org/repo/main/file',
+    'https://objects.githubusercontent.com/item',
+    'https://GITHUB.COM/org/repo',
+    'https://github.com./org/repo',
+    'http://127.0.0.1:43111/page',
+  ],
+  tenant: ['https://cloudbeds.devinenterprise.com/sessions/abc'],
+  external: ['https://example.org/path', 'https://okta.example.com/sso'],
+  mailto: ['mailto:desk@example.org'],
+  javascript: ['javascript:alert(1)'],
+  data: ['data:text/html,denied'],
+};
+
+const sources: RouteSource[] = ['devin', 'github', 'local', 'shell'];
+const dispositions: RouteDisposition[] = ['new-window', 'navigate', 'background'];
+
+function expected(
+  hostClass: HostClass,
+  source: RouteSource,
+  disposition: RouteDisposition,
+): RouteDecision {
+  if (hostClass === 'javascript' || hostClass === 'data') return { kind: 'deny' };
+  if (hostClass === 'mailto') return { kind: 'external' };
+  const hosted = source === 'devin' || source === 'github';
+  if (disposition === 'navigate' && hosted) {
+    if (hostClass === 'github' && source === 'devin') return { kind: 'gh-tab', background: false };
+    return { kind: 'in-place' };
+  }
+  if (hostClass === 'github') return { kind: 'gh-tab', background: disposition === 'background' };
+  if (hostClass === 'tenant') return { kind: 'devin' };
+  return { kind: 'external' };
+}
+
+describe('route (host class x source x disposition)', () => {
+  const rows: Array<[HostClass, string, RouteSource, RouteDisposition]> = [];
+  for (const [hostClass, urls] of Object.entries(hostSamples) as Array<[HostClass, string[]]>) {
+    for (const url of urls) {
+      for (const source of sources) {
+        for (const disposition of dispositions) rows.push([hostClass, url, source, disposition]);
+      }
+    }
+  }
+
+  it.each(rows)('%s %s from %s via %s', (hostClass, url, source, disposition) => {
+    expect(route(url, source, disposition, context)).toEqual(
+      expected(hostClass, source, disposition),
+    );
+  });
+
+  it('spells out the key rules', () => {
+    // Every new-window GitHub link opens a tab, from any source.
+    expect(route('https://github.com/o/r', 'devin', 'new-window', context)).toEqual({
+      kind: 'gh-tab',
+      background: false,
+    });
+    expect(route('https://github.com/o/r', 'github', 'new-window', context)).toEqual({
+      kind: 'gh-tab',
+      background: false,
+    });
+    // Ctrl/middle-click keeps the current tab focused.
+    expect(route('https://github.com/o/r', 'github', 'background', context)).toEqual({
+      kind: 'gh-tab',
+      background: true,
+    });
+    // Link-initiated top-frame navigation from devinView to GitHub is intercepted.
+    expect(route('https://github.com/o/r', 'devin', 'navigate', context)).toEqual({
+      kind: 'gh-tab',
+      background: false,
+    });
+    // Inside a gh tab, every navigation stays put (SAML/SSO chains are never split).
+    expect(route('https://github.com/o/r', 'github', 'navigate', context)).toEqual({
+      kind: 'in-place',
+    });
+    expect(route('https://okta.example.com/saml', 'github', 'navigate', context)).toEqual({
+      kind: 'in-place',
+    });
+    // Devin SSO hop (tenant -> IdP) stays in devinView.
+    expect(route('https://okta.example.com/saml', 'devin', 'navigate', context)).toEqual({
+      kind: 'in-place',
+    });
+    // Tenant popups go to the devin view; other popups go to the system browser.
+    expect(route('https://cloudbeds.devinenterprise.com/x', 'github', 'new-window', context)).toEqual(
+      { kind: 'devin' },
+    );
+    expect(route('https://example.org/', 'devin', 'new-window', context)).toEqual({
+      kind: 'external',
+    });
+    expect(route('mailto:a@b.c', 'devin', 'navigate', context)).toEqual({ kind: 'external' });
+    expect(route('javascript:alert(1)', 'devin', 'new-window', context)).toEqual({ kind: 'deny' });
+    expect(route('not a url', 'shell', 'new-window', context)).toEqual({ kind: 'deny' });
+  });
+});

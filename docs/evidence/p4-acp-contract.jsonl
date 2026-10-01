@@ -1,0 +1,36 @@
+{"ts":"2026-10-01T14:22:02.748Z","kind":"start","devin":"C:\\Users\\brian\\AppData\\Local\\devin\\cli\\bin\\devin.exe","workspace":"C:\\Users\\brian\\AppData\\Local\\Temp\\devin-desk-p4-8Du6BQ","platform":"win32"}
+{"ts":"2026-10-01T14:22:02.955Z","kind":"initialize","response":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":true},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{}},"auth":{},"_meta":{"cognition.ai/multiRootWorkspace":true,"cognition.ai/sessionListOrderBy":["updated_at","created_at"],"cognition.ai/sessionRename":true,"cognition.ai/sessionShare":true,"cognition.ai/documentLifecycle":true,"cognition.ai/userEdits":true,"cognition.ai/terminalLifecycle":true,"cognition.ai/userConfig":true,"cognition.ai/userShellCommand":true,"cognition.ai/editableCommands":true,"cognition.ai/commandRevision":true,"cognition.ai/chains":true,"cognition.ai/megaplan":true,"cognition.ai/ruleMentions":true}},"authMethods":[{"id":"devin-browser","name":"Log in with browser","description":"Sign in via your browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"},"_meta":{"mcpConfigPath":"C:\\Users\\brian\\AppData\\Roaming\\devin\\mcp_config.json"}}}
+{"ts":"2026-10-01T14:22:02.956Z","kind":"check","name":"initialize.protocolVersion === 1","ok":true,"detail":1}
+{"ts":"2026-10-01T14:22:02.956Z","kind":"check","name":"agentCapabilities.loadSession is boolean","ok":true,"detail":true}
+{"ts":"2026-10-01T14:22:02.956Z","kind":"check","name":"agentCapabilities.sessionCapabilities present","ok":true,"detail":{"sessionList":true}}
+{"ts":"2026-10-01T14:22:05.119Z","kind":"session/update","sessionId":"charming-trick","update":"config_option_update"}
+{"ts":"2026-10-01T14:22:05.120Z","kind":"session/update","sessionId":"charming-trick","update":"current_mode_update"}
+{"ts":"2026-10-01T14:22:05.132Z","kind":"session/update","sessionId":"charming-trick","update":"available_commands_update"}
+{"ts":"2026-10-01T14:22:05.132Z","kind":"session/new","response":{"sessionId":"charming-trick"}}
+{"ts":"2026-10-01T14:22:05.132Z","kind":"check","name":"session/new returns sessionId","ok":true}
+{"ts":"2026-10-01T14:22:05.134Z","kind":"session/update","sessionId":"charming-trick","update":"session_info_update"}
+{"ts":"2026-10-01T14:22:08.862Z","kind":"session/update","sessionId":"charming-trick","update":"agent_message_chunk"}
+{"ts":"2026-10-01T14:22:09.895Z","kind":"session/update","sessionId":"charming-trick","update":"agent_message_chunk"}
+{"ts":"2026-10-01T14:22:09.917Z","kind":"session/update","sessionId":"charming-trick","update":"usage_update"}
+{"ts":"2026-10-01T14:22:09.918Z","kind":"session/update","sessionId":"charming-trick","update":"usage_update"}
+{"ts":"2026-10-01T14:22:09.922Z","kind":"session/prompt","stopReason":"end_turn","updates":["session_info_update","agent_message_chunk","agent_message_chunk","usage_update","usage_update"]}
+{"ts":"2026-10-01T14:22:09.922Z","kind":"check","name":"prompt stopReason end_turn","ok":true,"detail":"end_turn"}
+{"ts":"2026-10-01T14:22:09.923Z","kind":"check","name":"prompt streamed agent_message_chunk","ok":true,"detail":5}
+{"ts":"2026-10-01T14:22:10.854Z","kind":"session/update","sessionId":"charming-trick","update":"session_info_update"}
+{"ts":"2026-10-01T14:22:12.444Z","kind":"session/cancel","stopReason":"cancelled"}
+{"ts":"2026-10-01T14:22:12.444Z","kind":"check","name":"cancel → stopReason cancelled","ok":true,"detail":"cancelled"}
+{"ts":"2026-10-01T14:22:12.446Z","kind":"session/list","count":1,"ids":["charming-trick"]}
+{"ts":"2026-10-01T14:22:12.446Z","kind":"check","name":"session/list includes our session","ok":true}
+{"ts":"2026-10-01T14:22:12.936Z","kind":"session/update","sessionId":"charming-trick","update":"user_message_chunk"}
+{"ts":"2026-10-01T14:22:12.936Z","kind":"session/update","sessionId":"charming-trick","update":"agent_message_chunk"}
+{"ts":"2026-10-01T14:22:12.936Z","kind":"session/update","sessionId":"charming-trick","update":"user_message_chunk"}
+{"ts":"2026-10-01T14:22:12.947Z","kind":"session/update","sessionId":"charming-trick","update":"session_info_update"}
+{"ts":"2026-10-01T14:22:12.981Z","kind":"session/update","sessionId":"charming-trick","update":"config_option_update"}
+{"ts":"2026-10-01T14:22:12.982Z","kind":"session/update","sessionId":"charming-trick","update":"current_mode_update"}
+{"ts":"2026-10-01T14:22:12.982Z","kind":"session/update","sessionId":"charming-trick","update":"session_info_update"}
+{"ts":"2026-10-01T14:22:13.004Z","kind":"session/update","sessionId":"charming-trick","update":"available_commands_update"}
+{"ts":"2026-10-01T14:22:13.005Z","kind":"session/update","sessionId":"charming-trick","update":"usage_update"}
+{"ts":"2026-10-01T14:22:13.006Z","kind":"session/update","sessionId":"charming-trick","update":"usage_update"}
+{"ts":"2026-10-01T14:22:13.006Z","kind":"session/load","replayed":["user_message_chunk","agent_message_chunk","user_message_chunk","session_info_update","config_option_update","current_mode_update","session_info_update","available_commands_update","usage_update","usage_update"]}
+{"ts":"2026-10-01T14:22:13.007Z","kind":"check","name":"session/load replays user_message_chunk","ok":true,"detail":10}
+{"ts":"2026-10-01T14:22:13.096Z","kind":"finished","status":"pass","checks":[{"name":"initialize.protocolVersion === 1","ok":true},{"name":"agentCapabilities.loadSession is boolean","ok":true},{"name":"agentCapabilities.sessionCapabilities present","ok":true},{"name":"session/new returns sessionId","ok":true},{"name":"prompt stopReason end_turn","ok":true},{"name":"prompt streamed agent_message_chunk","ok":true},{"name":"cancel → stopReason cancelled","ok":true},{"name":"session/list includes our session","ok":true},{"name":"session/load replays user_message_chunk","ok":true}],"passed":9,"total":9}

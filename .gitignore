@@ -1,0 +1,16 @@
+node_modules/
+out/
+dist/
+playwright-report/
+test-results/
+
+.idea/
+
+# never commit local profiles, env files or raw event logs
+.env
+.env.*
+*.local
+**/events.jsonl
+**/settings.json
+**/credentials.json
+**/secrets.json

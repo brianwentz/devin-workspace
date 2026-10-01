@@ -1,0 +1,20 @@
+
+> devin-desk@0.1.0 test:unit
+> vitest run tests/unit
+
+
+ RUN  v5.0.1 C:/Users/brian/source/repos/Devin-console-p5
+
+ ✓ tests/unit/linkRouter.test.ts (14 tests) 7ms
+ ✓ tests/unit/sessions.test.ts (8 tests) 9ms
+ ✓ tests/unit/tabModel.test.ts (3 tests) 8ms
+ ✓ tests/unit/layout.test.ts (7 tests) 12ms
+ ✓ tests/unit/devinApi.test.ts (10 tests) 16ms
+ ✓ tests/unit/notifyModel.test.ts (11 tests) 15ms
+ ✓ tests/unit/settings.test.ts (9 tests) 7ms
+
+ Test Files  7 passed (7)
+      Tests  62 passed (62)
+   Start at  16:22:13
+   Duration  485ms (import 50%, transform 39%, tests 7%, worker 4%)
+

@@ -1,0 +1,30 @@
+{
+  "scale": 1,
+  "devicePixelRatio": 1,
+  "window": {
+    "width": 1400,
+    "height": 900
+  },
+  "firstDrag": {
+    "releaseRegion": "devin",
+    "x": 600,
+    "paneWidth": 794
+  },
+  "secondDrag": {
+    "releaseRegion": "github",
+    "x": 1074,
+    "paneWidth": 320
+  },
+  "escape": {
+    "restoredWidth": 320
+  },
+  "shortcutViews": [
+    "shell",
+    "devin",
+    "gh:c904dea8-c6e6-4aa9-a9bd-fb42c7fd7737",
+    "gh:c174ac0e-7d72-4268-8fdd-9b92c7e5f8be"
+  ],
+  "screenshot": "/home/ubuntu/repos/devin-desk/docs/evidence/os-input-100-mid-drag.png",
+  "eventLog": "/home/ubuntu/repos/devin-desk/docs/evidence/os-input-100.jsonl",
+  "status": "passed"
+}

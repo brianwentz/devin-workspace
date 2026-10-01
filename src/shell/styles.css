@@ -1,0 +1,255 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", sans-serif;
+  background: transparent;
+  color: #e8edf5;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tab {
+  min-width: 115px;
+  max-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-right: 1px solid #39475a;
+  padding: 0 8px;
+  background: #18212e;
+}
+
+.tab.active {
+  background: #27364a;
+}
+
+.tab {
+  flex: 0 0 170px;
+  height: 100%;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+  outline-offset: -2px;
+}
+
+.tab:focus-visible {
+  outline: 2px solid #83b6ff;
+}
+
+.tab.discarded .tabTitle,
+.tab.discarded .favicon {
+  opacity: 0.55;
+}
+
+.tab.dragging {
+  background: #31455f;
+  box-shadow: 0 0 0 1px #54749c inset;
+}
+
+.tab .dragHandle,
+.tab .closeMark {
+  background: transparent;
+  border: 0;
+  padding: 0 2px;
+  line-height: 1;
+  flex: none;
+}
+
+.tab .dragHandle {
+  color: #5f7390;
+  cursor: grab;
+  font-size: 11px;
+  width: 10px;
+  opacity: 0;
+}
+
+.tab:hover .dragHandle,
+.tab .dragHandle:focus-visible,
+.tab.dragging .dragHandle {
+  opacity: 1;
+}
+
+.tab .dragHandle:focus-visible {
+  outline: 2px solid #83b6ff;
+  outline-offset: 1px;
+}
+
+.tabTitle {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  font-size: 12px;
+}
+
+.favicon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid #72829a;
+  border-top-color: #83b6ff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.closeMark {
+  color: #9fb0c6;
+  padding: 0 2px;
+}
+
+.closeMark:hover {
+  color: #fff;
+}
+
+body.dragging,
+body.dragging * {
+  cursor: col-resize !important;
+}
+
+body.dragging .shell-chrome {
+  background: transparent;
+  border-color: transparent;
+}
+
+body.dragging .shell-chrome button {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Devin Local markdown (react-markdown output; styled here, never inline) */
+.md {
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md pre,
+.md blockquote,
+.md table {
+  margin: 0.4em 0;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.4em;
+}
+
+.md ul {
+  list-style: disc;
+}
+
+.md ol {
+  list-style: decimal;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 0.6em 0 0.3em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.md h1 {
+  font-size: 1.25em;
+}
+
+.md h2 {
+  font-size: 1.15em;
+}
+
+.md h3 {
+  font-size: 1.05em;
+}
+
+.md a {
+  color: #83b6ff;
+  text-decoration: underline;
+}
+
+.md code {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 0.9em;
+  background: #0d141d;
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+
+.md pre {
+  background: #0d141d;
+  border: 1px solid #39475a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow: auto;
+}
+
+.md pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.md blockquote {
+  border-left: 3px solid #39475a;
+  padding-left: 0.8em;
+  color: #aeb9c8;
+}
+
+.md table {
+  border-collapse: collapse;
+}
+
+.md th,
+.md td {
+  border: 1px solid #39475a;
+  padding: 2px 6px;
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid #39475a;
+}

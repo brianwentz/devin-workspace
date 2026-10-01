@@ -1,0 +1,394 @@
+// Pure reducers for the Devin Local (ACP) surface. No electron, no SDK runtime
+// imports — the update shapes below are structurally compatible with ACP v1
+// `session/update` notifications from `@agentclientprotocol/sdk`.
+
+export type Block =
+  | { type: 'text'; text: string }
+  | { type: 'thought'; text: string }
+  | { type: 'tool_call'; id: string };
+
+export type Message = { role: 'user' | 'agent'; blocks: Block[]; messageId?: string };
+
+export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export type ToolCall = {
+  id: string;
+  title: string;
+  kind?: string;
+  status: ToolCallStatus;
+  content?: unknown[];
+  locations?: Array<{ path: string; line?: number | null }>;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+};
+
+export type PlanEntry = {
+  content: string;
+  priority: 'high' | 'medium' | 'low';
+  status: 'pending' | 'in_progress' | 'completed';
+};
+
+export type PermissionOption = { optionId: string; name: string; kind: string };
+
+export type PendingPermission = {
+  requestId: string;
+  toolCallId: string;
+  title: string;
+  options: PermissionOption[];
+};
+
+export type StopReason =
+  | 'end_turn'
+  | 'max_tokens'
+  | 'max_turn_requests'
+  | 'refusal'
+  | 'cancelled'
+  | 'error';
+
+export type HistorySource = 'agent' | 'local-index';
+
+export type LocalSession = {
+  id: string;
+  workspace: string;
+  title: string;
+  createdAt: string;
+  messages: Message[];
+  plan?: PlanEntry[];
+  toolCalls: Record<string, ToolCall>;
+  pendingPermission?: PendingPermission;
+  running: boolean;
+  lastStopReason?: StopReason;
+  error?: string;
+  historySource: HistorySource;
+  loaded: boolean;
+};
+
+export type AgentStatus = 'missing-cli' | 'starting' | 'ready' | 'crashed' | 'stopped';
+
+export type AgentCapabilities = { loadSession: boolean; sessionList: boolean };
+
+export type LocalAgent = {
+  workspace: string;
+  status: AgentStatus;
+  protocolVersion?: number;
+  capabilities?: AgentCapabilities;
+  agentName?: string;
+  error?: string;
+  restarts: number;
+  retryInMs?: number;
+};
+
+export type LocalState = {
+  cliPath: string | null;
+  installGuidance: string;
+  agents: Record<string, LocalAgent>;
+  sessions: Record<string, LocalSession>;
+};
+
+export const INSTALL_GUIDANCE =
+  'The Devin CLI was not found on PATH. Install it from https://docs.devin.ai/desktop and restart Devin Workspaces, or set local.devinPath in settings.json.';
+
+export function emptyLocalState(cliPath: string | null = null): LocalState {
+  return { cliPath, installGuidance: cliPath ? '' : INSTALL_GUIDANCE, agents: {}, sessions: {} };
+}
+
+// ---- ACP update shapes (structural subset of the SDK types) ----
+
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data?: string; mimeType?: string }
+  | { type: 'audio'; data?: string; mimeType?: string }
+  | { type: 'resource_link'; uri: string; name?: string }
+  | { type: 'resource'; resource: unknown };
+
+type ContentChunk = { content: ContentBlock; messageId?: string | null };
+
+type ToolCallUpdateFields = {
+  toolCallId: string;
+  title?: string | null;
+  kind?: string | null;
+  status?: ToolCallStatus | null;
+  content?: unknown[] | null;
+  locations?: Array<{ path: string; line?: number | null }> | null;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+};
+
+export type SessionUpdate =
+  | (ContentChunk & { sessionUpdate: 'user_message_chunk' })
+  | (ContentChunk & { sessionUpdate: 'agent_message_chunk' })
+  | (ContentChunk & { sessionUpdate: 'agent_thought_chunk' })
+  | (ToolCallUpdateFields & { sessionUpdate: 'tool_call' })
+  | (ToolCallUpdateFields & { sessionUpdate: 'tool_call_update' })
+  | { sessionUpdate: 'plan'; entries: PlanEntry[] }
+  | { sessionUpdate: 'session_info_update'; title?: string | null }
+  | { sessionUpdate: string; [key: string]: unknown };
+
+export const TITLE_MAX = 60;
+
+export function titleFromPrompt(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > TITLE_MAX ? `${flat.slice(0, TITLE_MAX - 1)}…` : flat;
+}
+
+export function newSession(
+  input: Pick<LocalSession, 'id' | 'workspace'> &
+    Partial<Pick<LocalSession, 'title' | 'createdAt' | 'historySource' | 'loaded'>>,
+): LocalSession {
+  return {
+    id: input.id,
+    workspace: input.workspace,
+    title: input.title ?? '',
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    messages: [],
+    toolCalls: {},
+    running: false,
+    historySource: input.historySource ?? 'agent',
+    loaded: input.loaded ?? true,
+  };
+}
+
+function contentText(block: ContentBlock): string {
+  switch (block.type) {
+    case 'text':
+      return block.text;
+    case 'image':
+      return '[image]';
+    case 'audio':
+      return '[audio]';
+    case 'resource_link':
+      return block.name ? `[${block.name}](${block.uri})` : block.uri;
+    case 'resource':
+      return '[resource]';
+    default:
+      return '';
+  }
+}
+
+function replaceSession(state: LocalState, session: LocalSession): LocalState {
+  return { ...state, sessions: { ...state.sessions, [session.id]: session } };
+}
+
+// Append a text-ish block to the message stream: continue the last message when
+// the role (and messageId, if provided) match, otherwise start a new message.
+function appendChunk(
+  session: LocalSession,
+  role: Message['role'],
+  block: Block,
+  messageId?: string | null,
+): LocalSession {
+  const messages = [...session.messages];
+  const last = messages[messages.length - 1];
+  // Agent chunks continue the open agent message unless the messageId changes.
+  // User chunks (replays) only merge when they share an explicit messageId, so
+  // each replayed prompt becomes its own message.
+  const sameMessage =
+    last &&
+    last.role === role &&
+    (role === 'user'
+      ? Boolean(messageId) && last.messageId === messageId
+      : !messageId || !last.messageId || last.messageId === messageId);
+  if (!sameMessage) {
+    messages.push({ role, blocks: [block], ...(messageId ? { messageId } : {}) });
+    return { ...session, messages };
+  }
+  const blocks = [...last.blocks];
+  const tail = blocks[blocks.length - 1];
+  if (tail && block.type !== 'tool_call' && tail.type === block.type) {
+    blocks[blocks.length - 1] = { type: tail.type, text: `${tail.text}${block.text}` } as Block;
+  } else {
+    blocks.push(block);
+  }
+  messages[messages.length - 1] = {
+    ...last,
+    blocks,
+    ...(messageId && !last.messageId ? { messageId } : {}),
+  };
+  return { ...session, messages };
+}
+
+function mergeToolCall(existing: ToolCall | undefined, update: ToolCallUpdateFields): ToolCall {
+  const base: ToolCall = existing ?? {
+    id: update.toolCallId,
+    title: update.title ?? update.toolCallId,
+    status: 'pending',
+  };
+  return {
+    ...base,
+    ...(update.title != null ? { title: update.title } : {}),
+    ...(update.kind != null ? { kind: update.kind } : {}),
+    ...(update.status != null ? { status: update.status } : {}),
+    ...(update.content != null ? { content: update.content } : {}),
+    ...(update.locations != null ? { locations: update.locations } : {}),
+    ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+    ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
+  };
+}
+
+export function applyUpdate(state: LocalState, sessionId: string, update: SessionUpdate): LocalState {
+  const session = state.sessions[sessionId];
+  if (!session) return state;
+  switch (update.sessionUpdate) {
+    case 'user_message_chunk': {
+      // While a prompt is running the user message already came from startPrompt;
+      // agents that echo the prompt live would otherwise duplicate it. Replays
+      // (session/load) happen with running === false and are kept.
+      if (session.running) return state;
+      const chunk = update as ContentChunk;
+      const text = contentText(chunk.content);
+      let next = appendChunk(session, 'user', { type: 'text', text }, chunk.messageId);
+      if (!next.title && text.trim()) next = { ...next, title: titleFromPrompt(text) };
+      return replaceSession(state, next);
+    }
+    case 'agent_message_chunk': {
+      const chunk = update as ContentChunk;
+      return replaceSession(
+        state,
+        appendChunk(session, 'agent', { type: 'text', text: contentText(chunk.content) }, chunk.messageId),
+      );
+    }
+    case 'agent_thought_chunk': {
+      const chunk = update as ContentChunk;
+      return replaceSession(
+        state,
+        appendChunk(session, 'agent', { type: 'thought', text: contentText(chunk.content) }, chunk.messageId),
+      );
+    }
+    case 'tool_call': {
+      const call = update as ToolCallUpdateFields;
+      const merged = mergeToolCall(session.toolCalls[call.toolCallId], call);
+      const withCall = { ...session, toolCalls: { ...session.toolCalls, [merged.id]: merged } };
+      const alreadyReferenced = session.toolCalls[call.toolCallId] !== undefined;
+      return replaceSession(
+        state,
+        alreadyReferenced ? withCall : appendChunk(withCall, 'agent', { type: 'tool_call', id: merged.id }),
+      );
+    }
+    case 'tool_call_update': {
+      const call = update as ToolCallUpdateFields;
+      const existing = session.toolCalls[call.toolCallId];
+      const merged = mergeToolCall(existing, call);
+      const withCall = { ...session, toolCalls: { ...session.toolCalls, [merged.id]: merged } };
+      return replaceSession(
+        state,
+        existing ? withCall : appendChunk(withCall, 'agent', { type: 'tool_call', id: merged.id }),
+      );
+    }
+    case 'plan': {
+      const plan = update as { entries: PlanEntry[] };
+      return replaceSession(state, { ...session, plan: plan.entries.map((entry) => ({ ...entry })) });
+    }
+    case 'session_info_update': {
+      const info = update as { title?: string | null };
+      if (!info.title) return state;
+      return replaceSession(state, { ...session, title: info.title });
+    }
+    default:
+      return state;
+  }
+}
+
+export function startPrompt(state: LocalState, sessionId: string, text: string): LocalState {
+  const session = state.sessions[sessionId];
+  if (!session) return state;
+  const next: LocalSession = {
+    ...session,
+    messages: [...session.messages, { role: 'user', blocks: [{ type: 'text', text }] }],
+    running: true,
+    title: session.title || titleFromPrompt(text),
+  };
+  delete next.lastStopReason;
+  delete next.error;
+  return replaceSession(state, next);
+}
+
+export function finishPrompt(
+  state: LocalState,
+  sessionId: string,
+  stopReason: StopReason,
+  error?: string,
+): LocalState {
+  const session = state.sessions[sessionId];
+  if (!session) return state;
+  const next: LocalSession = { ...session, running: false, lastStopReason: stopReason };
+  delete next.pendingPermission;
+  if (error) next.error = error;
+  else delete next.error;
+  return replaceSession(state, next);
+}
+
+export function setPermission(
+  state: LocalState,
+  sessionId: string,
+  permission: PendingPermission,
+): LocalState {
+  const session = state.sessions[sessionId];
+  if (!session) return state;
+  return replaceSession(state, { ...session, pendingPermission: permission });
+}
+
+export function clearPermission(state: LocalState, sessionId: string): LocalState {
+  const session = state.sessions[sessionId];
+  if (!session || !session.pendingPermission) return state;
+  const next = { ...session };
+  delete next.pendingPermission;
+  return replaceSession(state, next);
+}
+
+export function resetHistory(state: LocalState, sessionId: string): LocalState {
+  const session = state.sessions[sessionId];
+  if (!session) return state;
+  const next: LocalSession = { ...session, messages: [], toolCalls: {}, loaded: true };
+  delete next.plan;
+  return replaceSession(state, next);
+}
+
+export function upsertSession(state: LocalState, session: LocalSession): LocalState {
+  const existing = state.sessions[session.id];
+  if (!existing) return replaceSession(state, session);
+  // Listing never clobbers already-streamed content; it only refreshes metadata.
+  return replaceSession(state, {
+    ...existing,
+    title: existing.title || session.title,
+    createdAt: existing.createdAt || session.createdAt,
+    historySource: session.historySource,
+  });
+}
+
+export type AgentPatch = {
+  [K in keyof Omit<LocalAgent, 'workspace'>]?: Omit<LocalAgent, 'workspace'>[K] | undefined;
+};
+
+export function upsertAgent(
+  state: LocalState,
+  workspace: string,
+  patch: AgentPatch,
+): LocalState {
+  const existing: LocalAgent = state.agents[workspace] ?? {
+    workspace,
+    status: 'starting',
+    restarts: 0,
+  };
+  const next: LocalAgent = { ...existing };
+  for (const [key, value] of Object.entries(patch) as [keyof AgentPatch, unknown][]) {
+    if (value === undefined) delete (next as Record<string, unknown>)[key];
+    else (next as Record<string, unknown>)[key] = value;
+  }
+  return { ...state, agents: { ...state.agents, [workspace]: next } };
+}
+
+export function removeWorkspace(state: LocalState, workspace: string): LocalState {
+  const agents = { ...state.agents };
+  delete agents[workspace];
+  const sessions = Object.fromEntries(
+    Object.entries(state.sessions).filter(([, session]) => session.workspace !== workspace),
+  );
+  return { ...state, agents, sessions };
+}
+
+// Sessions in a workspace, newest first.
+export function sessionsFor(state: LocalState, workspace: string): LocalSession[] {
+  return Object.values(state.sessions)
+    .filter((session) => session.workspace === workspace)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+}
