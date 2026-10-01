@@ -1,7 +1,7 @@
 {
   "phase": "upgrade",
-  "executablePath": "C:\\Users\\brian\\AppData\\Local\\Programs\\devin-desk-smoke\\Devin Desk.exe",
-  "startedAt": "2026-10-01T14:18:02.639Z",
+  "executablePath": "C:\\Users\\brian\\AppData\\Local\\Programs\\devin-workspaces-smoke\\Devin Workspaces.exe",
+  "startedAt": "2026-10-01T21:56:06.640Z",
   "fuses": {
     "runAsNode": 48,
     "cookieEncryption": 49,
@@ -10,7 +10,7 @@
     "asarIntegrity": 49,
     "onlyLoadAppFromAsar": 49
   },
-  "profile": "C:\\Users\\brian\\AppData\\Local\\Temp\\devin-desk-smoke-profile",
+  "profile": "C:\\Users\\brian\\AppData\\Local\\Temp\\devin-workspaces-smoke-profile",
   "settingsBeforeUpgradeLaunch": {
     "tenantUrl": "https://cloudbeds.devinenterprise.com",
     "apiBase": "https://api.devin.ai",
@@ -22,20 +22,37 @@
       "open": true,
       "width": 500
     },
+    "local": {
+      "devinPath": null
+    },
     "surface": "cloud",
-    "tabs": {
+    "tabSnapshot": {
+      "version": 2,
       "tabs": [
         {
-          "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
-          "url": "http://127.0.0.1:57073/page/persisted",
+          "id": "eeb6dce7-55dc-43e6-b576-25cb0df98608",
+          "url": "http://127.0.0.1:53985/page/persisted",
           "title": "127.0.0.1"
         }
       ],
-      "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+      "activeByScope": {
+        "": "eeb6dce7-55dc-43e6-b576-25cb0df98608"
+      },
+      "lastSeenByScope": {
+        "": 1790891749205
+      }
+    },
+    "tabs": {
+      "keepAliveHours": 24,
+      "maxLiveTabs": 8
+    },
+    "notifications": {
+      "enabled": true,
+      "orgId": ""
     }
   },
   "updaterEvent": {
-    "ts": "2026-10-01T14:18:03.402Z",
+    "ts": "2026-10-01T21:56:07.077Z",
     "view": "shell",
     "event": "updater-disabled",
     "detail": {
@@ -43,7 +60,7 @@
       "testMode": true
     }
   },
-  "pid": 33716,
+  "pid": 27516,
   "restoredAfterUpgrade": {
     "paneOpen": true,
     "paneWidth": 500,
@@ -61,31 +78,61 @@
         "open": true,
         "width": 500
       },
+      "local": {
+        "devinPath": null
+      },
       "surface": "cloud",
-      "tabs": {
+      "tabSnapshot": {
+        "version": 2,
         "tabs": [
           {
-            "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
-            "url": "http://127.0.0.1:57073/page/persisted",
+            "id": "eeb6dce7-55dc-43e6-b576-25cb0df98608",
+            "url": "http://127.0.0.1:53985/page/persisted",
             "title": "127.0.0.1"
           }
         ],
-        "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+        "activeByScope": {
+          "": "eeb6dce7-55dc-43e6-b576-25cb0df98608"
+        },
+        "lastSeenByScope": {
+          "": 1790891749205
+        }
+      },
+      "tabs": {
+        "keepAliveHours": 24,
+        "maxLiveTabs": 8
+      },
+      "notifications": {
+        "enabled": true,
+        "orgId": ""
       }
     },
     "tabs": {
       "tabs": [
         {
-          "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
-          "url": "http://127.0.0.1:57073/page/persisted",
+          "id": "eeb6dce7-55dc-43e6-b576-25cb0df98608",
+          "url": "http://127.0.0.1:53985/page/persisted",
           "title": "127.0.0.1",
           "loading": false,
           "canGoBack": false,
           "canGoForward": false
         }
       ],
-      "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+      "activeId": "eeb6dce7-55dc-43e6-b576-25cb0df98608",
+      "scope": "",
+      "hiddenTabCount": 0
+    },
+    "credentialMatch": null,
+    "credentials": [],
+    "notifications": {
+      "waitingCount": 0,
+      "lastPollAt": null,
+      "authError": false,
+      "lastError": null,
+      "enabled": true,
+      "hasToken": false,
+      "currentSessionPrCount": 0
     }
   },
-  "finishedAt": "2026-10-01T14:18:06.765Z"
+  "finishedAt": "2026-10-01T21:56:10.347Z"
 }
