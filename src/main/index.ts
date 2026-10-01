@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { app, BaseWindow, dialog, session, webContents, WebContentsView } from 'electron';
+import { app, BaseWindow, dialog, screen, session, webContents, WebContentsView } from 'electron';
 import { clampPaneWidth } from '../core/layout';
 import { auditCookies, startCookieAudit } from './cookieAudit';
 import { CredentialStore } from './credentials';
@@ -171,6 +171,28 @@ async function createWindow(): Promise<void> {
     title: 'Devin Workspaces',
     show: true,
   });
+
+  // Test mode: Chromium clamps creation bounds to the work area, which on
+  // small CI displays (1024x768) auto-collapses the pane and silently breaks
+  // pane-dependent specs. A post-creation setContentSize is not clamped on
+  // Windows — force it and log what we actually got for the fail-fast check.
+  if (testMode) {
+    const match = /^(\d+)x(\d+)$/.exec(
+      process.env.DEVIN_WORKSPACES_TEST_WINDOW_SIZE ?? '1400x900',
+    );
+    if (match) {
+      const [w, h] = [Number(match[1]), Number(match[2])];
+      state.windowRef.setContentSize(w, h);
+      state.windowRef.center();
+      log('shell', 'window-size', {
+        detail: {
+          requested: { w, h },
+          actual: state.windowRef.getContentBounds(),
+          display: screen.getPrimaryDisplay().workAreaSize,
+        },
+      });
+    }
+  }
 
   state.shellView = new WebContentsView({
     webPreferences: {

@@ -29,6 +29,11 @@ jobs:
       - run: npm run test:unit
       - run: npm run build
 
+      # Runner display is 1024x768; the 1400x900 test window needs more room.
+      # Best-effort raise — the launchApp width check is the real gate.
+      # (Also benefits the smoke:install step below.)
+      - run: pwsh scripts/ci-display.ps1
+
       # Playwright drives Electron via _electron.launch (no browser download needed).
       - run: npm run test:e2e
 

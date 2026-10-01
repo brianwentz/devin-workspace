@@ -79,6 +79,31 @@ export async function launchApp(
   };
   app.context().pages().forEach(dismissDialogs);
   app.context().on('page', dismissDialogs);
+
+  // Fail fast when the display clamps the window below the pane threshold —
+  // otherwise every pane-dependent assertion just times out mysteriously.
+  await expect
+    .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
+    .toBe(true);
+  const width = await app.evaluate(
+    ({ BaseWindow }) => BaseWindow.getAllWindows()[0]?.getContentBounds().width ?? 0,
+  );
+  if (width < 1400) {
+    let detail = '';
+    try {
+      detail =
+        readFileSync(logFile, 'utf8')
+          .split('\n')
+          .filter((line) => line.includes('window-size'))
+          .pop() ?? '';
+    } catch {
+      // log may not exist yet
+    }
+    throw new Error(
+      `runner display too small: window content width ${width}px (<1400) — ${detail}. ` +
+        `see scripts/ci-display.ps1`,
+    );
+  }
   return app;
 }
 

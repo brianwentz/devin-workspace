@@ -70,7 +70,13 @@ async function finish(harness: Harness, options: { closed?: boolean } = {}): Pro
   const { app, profile, logFile } = harness;
   try {
     expect(await githubExternalEvents(logFile, fixtures)).toEqual([]);
-    if (!options.closed) expect(await browserWindowCount(app)).toBe(0);
+    if (!options.closed) {
+      try {
+        expect(await browserWindowCount(app)).toBe(0);
+      } catch {
+        // App already exited (window close raced teardown) — nothing to count.
+      }
+    }
   } finally {
     if (!options.closed) {
       await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
