@@ -8,7 +8,7 @@ Electron desktop client for Devin (BaseWindow + WebContentsViews; React shell is
 - `npm run build` — esbuild (main/preload/scripts → `out/*.cjs`) + `vite build` (shell → `out/shell`)
 - `npm run test:e2e` — build + Playwright `_electron` (`tests/e2e`, fixture servers in `tests/fixtures/http.ts`)
 - `npm run dist:win` — build + electron-builder NSIS per-user x64 installer → `dist/DevinWorkspaces-Setup-<version>.exe` (unsigned, fuses flipped in `scripts/after-pack.cjs`, icon from `build/icon.ico` via `npm run icon`)
-- `npm run smoke:install` — `scripts/smoke-install.ps1`: silent install → `tests/smoke/installed.spec.ts` (CDP-driven, `playwright.smoke.config.ts`) → upgrade-in-place → uninstall; evidence in `docs/evidence/p3-smoke*`
+- `npm run smoke:install` — `scripts/smoke-install.ps1`: silent install → `tests/smoke/installed.spec.ts` (CDP-driven, `playwright.smoke.config.ts`) → upgrade-in-place → uninstall; evidence in `docs/evidence/p3-smoke*`. Run before pushing when packaging or the settings schema changes (it reads `settings.json` directly).
 - `npm start` / `npm run acp:probe`
 - CI: `.github/workflows/windows.yml` (push/PR: typecheck, unit, build, e2e, dist:win, smoke:install); `release.yml` (tag `v*`: `electron-builder --publish always` to GitHub Releases, feed used by `src/main/updater.ts`)
 

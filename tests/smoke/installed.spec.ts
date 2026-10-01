@@ -180,7 +180,8 @@ test('installed app launches, creates views, and persists across relaunch', asyn
     evidence.settingsBeforeUpgradeLaunch = before;
     expect(before.pane?.width).toBe(500);
     // Fixture ports differ between runs; the persisted URL keeps the old port.
-    expect(pathOf(before.tabs?.tabs?.[0]?.url)).toBe('/page/persisted');
+    // P8: the snapshot lives at settings.tabSnapshot (settings.tabs is settings).
+    expect(pathOf(before.tabSnapshot?.tabs?.[0]?.url)).toBe('/page/persisted');
   }
   rmSync(logFile, { force: true });
 
@@ -234,7 +235,7 @@ test('installed app launches, creates views, and persists across relaunch', asyn
     const settings = JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8'));
     evidence.settingsAfterFirstRun = settings;
     expect(settings.pane?.width).toBe(500);
-    expect(settings.tabs?.tabs?.[0]?.url).toBe(persistedUrl);
+    expect(settings.tabSnapshot?.tabs?.[0]?.url).toBe(persistedUrl);
     // Separate partitions exist on disk.
     expect(existsSync(join(profile, 'Partitions', 'devin'))).toBe(true);
     expect(existsSync(join(profile, 'Partitions', 'github'))).toBe(true);

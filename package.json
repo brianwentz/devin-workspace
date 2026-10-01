@@ -88,7 +88,7 @@
       {
         "provider": "github",
         "owner": "brianwentz",
-        "repo": "Devin-console"
+        "repo": "devin-workspace"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",
