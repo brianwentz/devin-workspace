@@ -1,0 +1,184 @@
+{"ts":"2026-10-01T14:55:55.247Z","view":"shell","event":"did-navigate","url":"app://shell/index.html","decision":"allow"}
+{"ts":"2026-10-01T14:55:55.265Z","view":"shell","event":"console-message","detail":{"level":3,"message":"The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.","line":8,"sourceId":"app://shell/index.html"}}
+{"ts":"2026-10-01T14:55:55.309Z","view":"shell","event":"shell-ready","url":"app://shell/index.html"}
+{"ts":"2026-10-01T14:55:55.336Z","view":"shell","event":"window-created","url":"http://localhost:56869","detail":{"userData":"C:\\Users\\brian\\AppData\\Local\\Temp\\devin-desk-e2e-cStNVR","logFile":"C:\\Users\\brian\\source\\repos\\Devin-console-p2\\docs\\evidence\\e2e-fixture-events.jsonl","testMode":true,"fixtureOrigins":["http://127.0.0.1:56870","http://localhost:56872"]}}
+{"ts":"2026-10-01T14:55:55.701Z","view":"devin","event":"did-navigate","url":"http://localhost:56869/","decision":"allow"}
+{"ts":"2026-10-01T14:55:55.710Z","view":"devin","event":"will-frame-navigate","url":"http://localhost:56869/frame","decision":"allow-subframe"}
+{"ts":"2026-10-01T14:55:55.890Z","view":"shell","event":"did-start-loading","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030"},"url":""}
+{"ts":"2026-10-01T14:55:55.899Z","view":"shell","event":"tab-activate","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030"}}
+{"ts":"2026-10-01T14:55:55.901Z","view":"shell","event":"tab-open","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/blank"}
+{"ts":"2026-10-01T14:55:55.916Z","view":"devin","event":"window-open","url":"http://127.0.0.1:56870/page/blank","decision":"github-tab"}
+{"ts":"2026-10-01T14:55:55.968Z","view":"gh:b4dd63b9-b80c-45c5-b18b-e23cdd6da030","event":"did-navigate","url":"http://127.0.0.1:56870/page/blank","decision":"allow"}
+{"ts":"2026-10-01T14:55:55.970Z","view":"shell","event":"title","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030","title":"GitHub fixture: blank"},"url":"http://127.0.0.1:56870/page/blank"}
+{"ts":"2026-10-01T14:55:55.989Z","view":"shell","event":"did-stop-loading","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030"},"url":"http://127.0.0.1:56870/page/blank"}
+{"ts":"2026-10-01T14:55:55.992Z","view":"shell","event":"favicon","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/blank"}
+{"ts":"2026-10-01T14:55:56.051Z","view":"shell","event":"did-start-loading","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9"},"url":""}
+{"ts":"2026-10-01T14:55:56.066Z","view":"shell","event":"tab-activate","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9"}}
+{"ts":"2026-10-01T14:55:56.068Z","view":"shell","event":"tab-open","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/window-open"}
+{"ts":"2026-10-01T14:55:56.077Z","view":"devin","event":"window-open","url":"http://127.0.0.1:56870/page/window-open","decision":"github-tab"}
+{"ts":"2026-10-01T14:55:56.124Z","view":"gh:33a5b618-e821-4fa3-ac6a-5bf411e1cbc9","event":"did-navigate","url":"http://127.0.0.1:56870/page/window-open","decision":"allow"}
+{"ts":"2026-10-01T14:55:56.128Z","view":"shell","event":"title","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9","title":"GitHub fixture: window-open"},"url":"http://127.0.0.1:56870/page/window-open"}
+{"ts":"2026-10-01T14:55:56.164Z","view":"shell","event":"did-stop-loading","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9"},"url":"http://127.0.0.1:56870/page/window-open"}
+{"ts":"2026-10-01T14:55:56.167Z","view":"shell","event":"favicon","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/window-open"}
+{"ts":"2026-10-01T14:55:56.235Z","view":"devin","event":"will-frame-navigate","url":"http://127.0.0.1:56870/page/iframe-normal","decision":"allow-subframe"}
+{"ts":"2026-10-01T14:55:56.381Z","view":"devin","event":"will-navigate","url":"http://localhost:56869/","decision":"allow-in-view"}
+{"ts":"2026-10-01T14:55:56.397Z","view":"devin","event":"did-navigate","url":"http://localhost:56869/","decision":"allow"}
+{"ts":"2026-10-01T14:55:56.399Z","view":"devin","event":"will-frame-navigate","url":"http://localhost:56869/frame","decision":"allow-subframe"}
+{"ts":"2026-10-01T14:55:56.519Z","view":"shell","event":"did-start-loading","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121"},"url":""}
+{"ts":"2026-10-01T14:55:56.534Z","view":"shell","event":"tab-activate","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121"}}
+{"ts":"2026-10-01T14:55:56.537Z","view":"shell","event":"tab-open","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/same-tab"}
+{"ts":"2026-10-01T14:55:56.549Z","view":"devin","event":"will-navigate","url":"http://127.0.0.1:56870/page/same-tab","decision":"github-tab"}
+{"ts":"2026-10-01T14:55:56.601Z","view":"gh:2bf63e48-c81c-47f0-ab7b-0460e0688121","event":"did-navigate","url":"http://127.0.0.1:56870/page/same-tab","decision":"allow"}
+{"ts":"2026-10-01T14:55:56.604Z","view":"shell","event":"title","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121","title":"GitHub fixture: same-tab"},"url":"http://127.0.0.1:56870/page/same-tab"}
+{"ts":"2026-10-01T14:55:56.627Z","view":"shell","event":"did-stop-loading","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121"},"url":"http://127.0.0.1:56870/page/same-tab"}
+{"ts":"2026-10-01T14:55:56.629Z","view":"shell","event":"favicon","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/same-tab"}
+{"ts":"2026-10-01T14:55:56.692Z","view":"shell","event":"did-start-loading","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7"},"url":""}
+{"ts":"2026-10-01T14:55:56.701Z","view":"shell","event":"tab-activate","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7"}}
+{"ts":"2026-10-01T14:55:56.702Z","view":"shell","event":"tab-open","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/iframe-top"}
+{"ts":"2026-10-01T14:55:56.718Z","view":"devin","event":"will-navigate","url":"http://127.0.0.1:56870/page/iframe-top","decision":"github-tab"}
+{"ts":"2026-10-01T14:55:56.760Z","view":"gh:8efd75a0-34e7-4337-a4eb-649bc2eda3e7","event":"did-navigate","url":"http://127.0.0.1:56870/page/iframe-top","decision":"allow"}
+{"ts":"2026-10-01T14:55:56.763Z","view":"shell","event":"title","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7","title":"GitHub fixture: iframe-top"},"url":"http://127.0.0.1:56870/page/iframe-top"}
+{"ts":"2026-10-01T14:55:56.787Z","view":"shell","event":"did-stop-loading","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7"},"url":"http://127.0.0.1:56870/page/iframe-top"}
+{"ts":"2026-10-01T14:55:56.791Z","view":"shell","event":"favicon","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/iframe-top"}
+{"ts":"2026-10-01T14:55:56.840Z","view":"devin","event":"window-open","url":"http://localhost:56873/away","decision":"external"}
+{"ts":"2026-10-01T14:55:56.845Z","view":"devin","event":"window-open","url":"mailto:desk@example.org","decision":"mailto"}
+{"ts":"2026-10-01T14:55:56.849Z","view":"devin","event":"window-open","url":"about:blank","decision":"deny"}
+{"ts":"2026-10-01T14:55:56.851Z","view":"devin","event":"window-open","url":"data:text/html,denied","decision":"deny"}
+{"ts":"2026-10-01T14:55:56.854Z","view":"shell","event":"link-open","url":"javascript:alert(1)","decision":"deny"}
+{"ts":"2026-10-01T14:55:56.857Z","view":"shell","event":"link-open","url":"data:text/html,denied","decision":"deny"}
+{"ts":"2026-10-01T14:55:56.902Z","view":"shell","event":"did-start-loading","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021"},"url":""}
+{"ts":"2026-10-01T14:55:56.913Z","view":"shell","event":"tab-activate","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021"}}
+{"ts":"2026-10-01T14:55:56.915Z","view":"shell","event":"tab-open","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/redirect"}
+{"ts":"2026-10-01T14:55:56.926Z","view":"gh:16560c15-b3cc-47df-8e6d-f2554975a021","event":"will-redirect","url":"http://127.0.0.1:56870/page/redirected","decision":"allow","detail":{"isInPlace":false,"isMainFrame":true}}
+{"ts":"2026-10-01T14:55:56.983Z","view":"gh:16560c15-b3cc-47df-8e6d-f2554975a021","event":"did-navigate","url":"http://127.0.0.1:56870/page/redirected","decision":"allow"}
+{"ts":"2026-10-01T14:55:56.987Z","view":"shell","event":"title","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021","title":"GitHub fixture: redirected"},"url":"http://127.0.0.1:56870/page/redirected"}
+{"ts":"2026-10-01T14:55:57.013Z","view":"shell","event":"did-stop-loading","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021"},"url":"http://127.0.0.1:56870/page/redirected"}
+{"ts":"2026-10-01T14:55:57.014Z","view":"shell","event":"favicon","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/redirected"}
+{"ts":"2026-10-01T14:55:57.088Z","view":"shell","event":"did-start-loading","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f"},"url":""}
+{"ts":"2026-10-01T14:55:57.099Z","view":"shell","event":"tab-activate","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f"}}
+{"ts":"2026-10-01T14:55:57.102Z","view":"shell","event":"tab-open","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/sso"}
+{"ts":"2026-10-01T14:55:57.115Z","view":"gh:715651cf-30c7-4168-9b50-748ae80e7c1f","event":"will-redirect","url":"http://localhost:56873/finish","decision":"allow","detail":{"isInPlace":false,"isMainFrame":true}}
+{"ts":"2026-10-01T14:55:57.426Z","view":"gh:715651cf-30c7-4168-9b50-748ae80e7c1f","event":"will-redirect","url":"http://127.0.0.1:56870/page/sso-complete","decision":"allow","detail":{"isInPlace":false,"isMainFrame":true}}
+{"ts":"2026-10-01T14:55:57.441Z","view":"gh:715651cf-30c7-4168-9b50-748ae80e7c1f","event":"did-navigate","url":"http://127.0.0.1:56870/page/sso-complete","decision":"allow"}
+{"ts":"2026-10-01T14:55:57.443Z","view":"shell","event":"title","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f","title":"GitHub fixture: sso-complete"},"url":"http://127.0.0.1:56870/page/sso-complete"}
+{"ts":"2026-10-01T14:55:57.465Z","view":"shell","event":"did-stop-loading","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f"},"url":"http://127.0.0.1:56870/page/sso-complete"}
+{"ts":"2026-10-01T14:55:57.467Z","view":"shell","event":"favicon","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/sso-complete"}
+{"ts":"2026-10-01T14:55:57.483Z","view":"shell","event":"did-start-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":""}
+{"ts":"2026-10-01T14:55:57.493Z","view":"shell","event":"tab-activate","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"}}
+{"ts":"2026-10-01T14:55:57.495Z","view":"shell","event":"tab-open","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:57.559Z","view":"gh:fba17d72-443c-43a2-b6e0-1a1d0fc255f9","event":"did-navigate","url":"http://127.0.0.1:56870/page/history-start","decision":"allow"}
+{"ts":"2026-10-01T14:55:57.563Z","view":"shell","event":"title","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9","title":"GitHub fixture: history-start"},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:57.588Z","view":"shell","event":"did-stop-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:57.591Z","view":"shell","event":"favicon","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:57.624Z","view":"shell","event":"did-start-loading","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf"},"url":""}
+{"ts":"2026-10-01T14:55:57.635Z","view":"shell","event":"tab-activate","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf"}}
+{"ts":"2026-10-01T14:55:57.637Z","view":"shell","event":"tab-open","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/popup-child"}
+{"ts":"2026-10-01T14:55:57.646Z","view":"gh:fba17d72-443c-43a2-b6e0-1a1d0fc255f9","event":"window-open","url":"http://127.0.0.1:56870/page/popup-child","decision":"github-tab"}
+{"ts":"2026-10-01T14:55:57.688Z","view":"gh:f50fefdc-9a58-427a-8665-06168be069cf","event":"did-navigate","url":"http://127.0.0.1:56870/page/popup-child","decision":"allow"}
+{"ts":"2026-10-01T14:55:57.692Z","view":"shell","event":"title","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf","title":"GitHub fixture: popup-child"},"url":"http://127.0.0.1:56870/page/popup-child"}
+{"ts":"2026-10-01T14:55:57.714Z","view":"shell","event":"did-stop-loading","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf"},"url":"http://127.0.0.1:56870/page/popup-child"}
+{"ts":"2026-10-01T14:55:57.716Z","view":"shell","event":"favicon","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/popup-child"}
+{"ts":"2026-10-01T14:55:57.767Z","view":"shell","event":"tab-activate","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"}}
+{"ts":"2026-10-01T14:55:57.780Z","view":"shell","event":"did-start-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:57.782Z","view":"gh:fba17d72-443c-43a2-b6e0-1a1d0fc255f9","event":"will-navigate","url":"http://127.0.0.1:56870/page/next","decision":"allow-in-view"}
+{"ts":"2026-10-01T14:55:57.811Z","view":"gh:fba17d72-443c-43a2-b6e0-1a1d0fc255f9","event":"did-navigate","url":"http://127.0.0.1:56870/page/next","decision":"allow"}
+{"ts":"2026-10-01T14:55:57.814Z","view":"shell","event":"title","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9","title":"GitHub fixture: next"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:57.818Z","view":"shell","event":"did-stop-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:57.909Z","view":"shell","event":"did-start-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:57.934Z","view":"gh:fba17d72-443c-43a2-b6e0-1a1d0fc255f9","event":"did-navigate","url":"http://127.0.0.1:56870/page/history-start","decision":"allow"}
+{"ts":"2026-10-01T14:55:57.935Z","view":"shell","event":"title","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9","title":"GitHub fixture: history-start"},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:57.941Z","view":"shell","event":"did-stop-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:58.032Z","view":"shell","event":"did-start-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/history-start"}
+{"ts":"2026-10-01T14:55:58.059Z","view":"gh:fba17d72-443c-43a2-b6e0-1a1d0fc255f9","event":"did-navigate","url":"http://127.0.0.1:56870/page/next","decision":"allow"}
+{"ts":"2026-10-01T14:55:58.060Z","view":"shell","event":"title","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9","title":"GitHub fixture: next"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:58.065Z","view":"shell","event":"did-stop-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:58.157Z","view":"shell","event":"did-start-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:58.165Z","view":"shell","event":"did-start-loading","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"},"url":""}
+{"ts":"2026-10-01T14:55:58.184Z","view":"shell","event":"tab-activate","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"}}
+{"ts":"2026-10-01T14:55:58.186Z","view":"shell","event":"tab-open","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:55:58.208Z","view":"gh:fba17d72-443c-43a2-b6e0-1a1d0fc255f9","event":"did-navigate","url":"http://127.0.0.1:56870/page/next","decision":"allow"}
+{"ts":"2026-10-01T14:55:58.218Z","view":"shell","event":"did-stop-loading","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:58.237Z","view":"gh:5aa79ad4-8f07-46dd-8bed-6b7adad17fa5","event":"did-navigate","url":"http://127.0.0.1:56870/page/download-fixture","decision":"allow"}
+{"ts":"2026-10-01T14:55:58.241Z","view":"shell","event":"title","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5","title":"GitHub fixture: download-fixture"},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:55:58.266Z","view":"shell","event":"did-stop-loading","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:55:58.268Z","view":"shell","event":"favicon","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:55:58.323Z","view":"shell","event":"did-start-loading","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:55:58.327Z","view":"gh:5aa79ad4-8f07-46dd-8bed-6b7adad17fa5","event":"will-navigate","url":"http://127.0.0.1:56870/download","decision":"allow-in-view"}
+{"ts":"2026-10-01T14:55:58.335Z","view":"shell","event":"did-stop-loading","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:55:58.341Z","view":"gh:download","event":"download-start","url":"http://127.0.0.1:56870/download","decision":"configured-directory","detail":{"filename":"fixture-download.txt","webContentsId":11}}
+{"ts":"2026-10-01T14:55:58.343Z","view":"gh:download","event":"download-progress","url":"http://127.0.0.1:56870/download","detail":{"state":"progressing","receivedBytes":0,"totalBytes":0}}
+{"ts":"2026-10-01T14:55:58.344Z","view":"gh:download","event":"download-progress","url":"http://127.0.0.1:56870/download","detail":{"state":"progressing","receivedBytes":25,"totalBytes":0}}
+{"ts":"2026-10-01T14:55:58.344Z","view":"gh:download","event":"download-progress","url":"http://127.0.0.1:56870/download","detail":{"state":"progressing","receivedBytes":25,"totalBytes":0}}
+{"ts":"2026-10-01T14:55:58.345Z","view":"gh:download","event":"download-progress","url":"http://127.0.0.1:56870/download","detail":{"state":"progressing","receivedBytes":25,"totalBytes":25}}
+{"ts":"2026-10-01T14:55:58.524Z","view":"gh:download","event":"download-progress","url":"http://127.0.0.1:56870/download","detail":{"state":"progressing","receivedBytes":25,"totalBytes":25}}
+{"ts":"2026-10-01T14:55:58.535Z","view":"gh:download","event":"download-done","url":"http://127.0.0.1:56870/download","decision":"completed","detail":{"path":"C:\\Users\\brian\\AppData\\Local\\Temp\\devin-desk-e2e-cStNVR\\downloads\\fixture-download.txt"}}
+{"ts":"2026-10-01T14:55:58.700Z","view":"shell","event":"did-start-loading","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d"},"url":""}
+{"ts":"2026-10-01T14:55:58.710Z","view":"shell","event":"tab-activate","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d"}}
+{"ts":"2026-10-01T14:55:58.712Z","view":"shell","event":"tab-open","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.764Z","view":"gh:88378013-8bbe-4445-8eb0-711e4550926d","event":"did-navigate","url":"http://127.0.0.1:56870/beforeunload","decision":"allow"}
+{"ts":"2026-10-01T14:55:58.767Z","view":"shell","event":"title","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d","title":"Before unload"},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.780Z","view":"shell","event":"did-stop-loading","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d"},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.782Z","view":"shell","event":"favicon","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.848Z","view":"gh:88378013-8bbe-4445-8eb0-711e4550926d","event":"beforeunload-prompt","decision":"stay"}
+{"ts":"2026-10-01T14:55:58.849Z","view":"shell","event":"will-prevent-unload","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d","leave":false},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.912Z","view":"shell","event":"tab-close-cancelled","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d"},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.921Z","view":"gh:88378013-8bbe-4445-8eb0-711e4550926d","event":"beforeunload-prompt","decision":"close"}
+{"ts":"2026-10-01T14:55:58.922Z","view":"shell","event":"will-prevent-unload","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d","leave":true},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.927Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d"},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:58.934Z","view":"shell","event":"tab-activate","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"}}
+{"ts":"2026-10-01T14:55:58.937Z","view":"shell","event":"tab-close","detail":{"id":"88378013-8bbe-4445-8eb0-711e4550926d"},"url":"http://127.0.0.1:56870/beforeunload"}
+{"ts":"2026-10-01T14:55:59.295Z","view":"shell","event":"tab-reorder","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030","toIndex":1}}
+{"ts":"2026-10-01T14:55:59.470Z","view":"shell","event":"tab-activate","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9"}}
+{"ts":"2026-10-01T14:55:59.497Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9"},"url":"http://127.0.0.1:56870/page/window-open"}
+{"ts":"2026-10-01T14:55:59.502Z","view":"shell","event":"tab-activate","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030"}}
+{"ts":"2026-10-01T14:55:59.505Z","view":"shell","event":"tab-close","detail":{"id":"33a5b618-e821-4fa3-ac6a-5bf411e1cbc9"},"url":"http://127.0.0.1:56870/page/window-open"}
+{"ts":"2026-10-01T14:55:59.620Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030"},"url":"http://127.0.0.1:56870/page/blank"}
+{"ts":"2026-10-01T14:55:59.626Z","view":"shell","event":"tab-activate","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121"}}
+{"ts":"2026-10-01T14:55:59.628Z","view":"shell","event":"tab-close","detail":{"id":"b4dd63b9-b80c-45c5-b18b-e23cdd6da030"},"url":"http://127.0.0.1:56870/page/blank"}
+{"ts":"2026-10-01T14:55:59.747Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121"},"url":"http://127.0.0.1:56870/page/same-tab"}
+{"ts":"2026-10-01T14:55:59.752Z","view":"shell","event":"tab-activate","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7"}}
+{"ts":"2026-10-01T14:55:59.753Z","view":"shell","event":"tab-close","detail":{"id":"2bf63e48-c81c-47f0-ab7b-0460e0688121"},"url":"http://127.0.0.1:56870/page/same-tab"}
+{"ts":"2026-10-01T14:55:59.764Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7"},"url":"http://127.0.0.1:56870/page/iframe-top"}
+{"ts":"2026-10-01T14:55:59.775Z","view":"shell","event":"tab-activate","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021"}}
+{"ts":"2026-10-01T14:55:59.777Z","view":"shell","event":"tab-close","detail":{"id":"8efd75a0-34e7-4337-a4eb-649bc2eda3e7"},"url":"http://127.0.0.1:56870/page/iframe-top"}
+{"ts":"2026-10-01T14:55:59.791Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021"},"url":"http://127.0.0.1:56870/page/redirected"}
+{"ts":"2026-10-01T14:55:59.798Z","view":"shell","event":"tab-activate","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f"}}
+{"ts":"2026-10-01T14:55:59.800Z","view":"shell","event":"tab-close","detail":{"id":"16560c15-b3cc-47df-8e6d-f2554975a021"},"url":"http://127.0.0.1:56870/page/redirected"}
+{"ts":"2026-10-01T14:55:59.831Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f"},"url":"http://127.0.0.1:56870/page/sso-complete"}
+{"ts":"2026-10-01T14:55:59.840Z","view":"shell","event":"tab-activate","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"}}
+{"ts":"2026-10-01T14:55:59.843Z","view":"shell","event":"tab-close","detail":{"id":"715651cf-30c7-4168-9b50-748ae80e7c1f"},"url":"http://127.0.0.1:56870/page/sso-complete"}
+{"ts":"2026-10-01T14:55:59.858Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:59.873Z","view":"shell","event":"tab-activate","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf"}}
+{"ts":"2026-10-01T14:55:59.876Z","view":"shell","event":"tab-close","detail":{"id":"fba17d72-443c-43a2-b6e0-1a1d0fc255f9"},"url":"http://127.0.0.1:56870/page/next"}
+{"ts":"2026-10-01T14:55:59.896Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf"},"url":"http://127.0.0.1:56870/page/popup-child"}
+{"ts":"2026-10-01T14:55:59.907Z","view":"shell","event":"tab-activate","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"}}
+{"ts":"2026-10-01T14:55:59.911Z","view":"shell","event":"tab-close","detail":{"id":"f50fefdc-9a58-427a-8665-06168be069cf"},"url":"http://127.0.0.1:56870/page/popup-child"}
+{"ts":"2026-10-01T14:55:59.942Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:55:59.944Z","view":"shell","event":"tab-close","detail":{"id":"5aa79ad4-8f07-46dd-8bed-6b7adad17fa5"},"url":"http://127.0.0.1:56870/page/download-fixture"}
+{"ts":"2026-10-01T14:56:00.005Z","view":"shell","event":"did-start-loading","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"},"url":""}
+{"ts":"2026-10-01T14:56:00.026Z","view":"shell","event":"tab-activate","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"}}
+{"ts":"2026-10-01T14:56:00.029Z","view":"shell","event":"tab-open","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51","background":false,"originSessionId":null},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:00.120Z","view":"gh:c1eeb7a0-5db8-4caf-bd1c-dca42008ce51","event":"did-navigate","url":"http://127.0.0.1:56870/page/persisted","decision":"allow"}
+{"ts":"2026-10-01T14:56:00.123Z","view":"shell","event":"title","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51","title":"GitHub fixture: persisted"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:00.154Z","view":"shell","event":"did-stop-loading","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:00.158Z","view":"shell","event":"favicon","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:00.168Z","view":"shell","event":"window-close-start","detail":{"webContentsCount":3}}
+{"ts":"2026-10-01T14:56:00.204Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:00.205Z","view":"shell","event":"window-close-complete","detail":{"webContentsCountBefore":3,"webContentsCountAfter":0}}
+{"ts":"2026-10-01T14:56:00.218Z","view":"shell","event":"window-closed"}
+{"ts":"2026-10-01T14:56:00.910Z","view":"shell","event":"did-start-loading","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"},"url":""}
+{"ts":"2026-10-01T14:56:00.928Z","view":"shell","event":"tab-activate","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"}}
+{"ts":"2026-10-01T14:56:01.094Z","view":"gh:c1eeb7a0-5db8-4caf-bd1c-dca42008ce51","event":"did-navigate","url":"http://127.0.0.1:56870/page/persisted","decision":"allow"}
+{"ts":"2026-10-01T14:56:01.112Z","view":"shell","event":"title","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51","title":"GitHub fixture: persisted"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:01.129Z","view":"shell","event":"did-stop-loading","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:01.131Z","view":"shell","event":"favicon","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51","favicon":"data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:01.134Z","view":"shell","event":"did-navigate","url":"app://shell/index.html","decision":"allow"}
+{"ts":"2026-10-01T14:56:01.148Z","view":"shell","event":"console-message","detail":{"level":3,"message":"The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.","line":8,"sourceId":"app://shell/index.html"}}
+{"ts":"2026-10-01T14:56:01.200Z","view":"shell","event":"shell-ready","url":"app://shell/index.html"}
+{"ts":"2026-10-01T14:56:01.221Z","view":"shell","event":"window-created","url":"http://localhost:56869","detail":{"userData":"C:\\Users\\brian\\AppData\\Local\\Temp\\devin-desk-e2e-cStNVR","logFile":"C:\\Users\\brian\\source\\repos\\Devin-console-p2\\docs\\evidence\\e2e-fixture-events.jsonl","testMode":true,"fixtureOrigins":["http://127.0.0.1:56870","http://localhost:56872"]}}
+{"ts":"2026-10-01T14:56:01.378Z","view":"shell","event":"webcontents-destroyed","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:01.379Z","view":"shell","event":"tab-close","detail":{"id":"c1eeb7a0-5db8-4caf-bd1c-dca42008ce51"},"url":"http://127.0.0.1:56870/page/persisted"}
+{"ts":"2026-10-01T14:56:01.411Z","view":"shell","event":"window-close-start","detail":{"webContentsCount":2}}
+{"ts":"2026-10-01T14:56:01.435Z","view":"devin","event":"load-error","url":"http://localhost:56869","detail":{"message":"Error: ERR_FAILED (-2) loading 'http://localhost:56869'"}}
+{"ts":"2026-10-01T14:56:01.437Z","view":"shell","event":"window-close-complete","detail":{"webContentsCountBefore":2,"webContentsCountAfter":0}}
+{"ts":"2026-10-01T14:56:01.453Z","view":"shell","event":"window-closed"}

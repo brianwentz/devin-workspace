@@ -1,0 +1,177 @@
+import { describe, expect, it } from 'vitest';
+import type { DevinSession } from '../../src/core/devinApi';
+import {
+  ACTIVE_POLL_MS,
+  IDLE_POLL_MS,
+  archivedScopes,
+  scopeLabel,
+  backoffMs,
+  diffStatuses,
+  effectiveStatus,
+  isActive,
+  isWaiting,
+  pollInterval,
+  prTitle,
+  prsForSession,
+  snapshotOf,
+} from '../../src/core/notifyModel';
+import { badgeLabel, encodePng, renderBadgePng } from '../../src/core/badgePng';
+
+const make = (id: string, status: string, detail: string | null = null): DevinSession => ({
+  session_id: id,
+  title: id,
+  status,
+  status_detail: detail,
+  updated_at: 0,
+  pull_requests: [],
+});
+
+describe('effectiveStatus / isWaiting / isActive', () => {
+  it('derives waiting from status_detail case-insensitively and treats blocked as waiting', () => {
+    expect(effectiveStatus(make('a', 'running', 'Waiting_For_User'))).toBe('waiting_for_user');
+    expect(isWaiting(make('a', 'running', 'waiting_for_approval'))).toBe(true);
+    expect(isWaiting(make('a', 'BLOCKED'))).toBe(true);
+    expect(isWaiting(make('a', 'running', 'working'))).toBe(false);
+    expect(isWaiting(make('a', 'suspended', 'inactivity'))).toBe(false);
+  });
+
+  it('counts working/running/claimed/resuming/new as active but not waiting or finished', () => {
+    expect(isActive(make('a', 'running', 'working'))).toBe(true);
+    expect(isActive(make('a', 'claimed'))).toBe(true);
+    expect(isActive(make('a', 'resuming'))).toBe(true);
+    expect(isActive(make('a', 'new'))).toBe(true);
+    expect(isActive(make('a', 'running', 'waiting_for_user'))).toBe(false);
+    expect(isActive(make('a', 'running', 'finished'))).toBe(false);
+    expect(isActive(make('a', 'suspended'))).toBe(false);
+    expect(isActive(make('a', 'exit'))).toBe(false);
+  });
+});
+
+describe('diffStatuses', () => {
+  it('never reports newly waiting on the first poll but still counts waiting sessions', () => {
+    const next = snapshotOf([make('a', 'running', 'waiting_for_user'), make('b', 'running', 'working')]);
+    expect(diffStatuses(null, next)).toEqual({ newlyWaiting: [], waitingCount: 1 });
+  });
+
+  it('reports transitions into waiting and new sessions that appear waiting', () => {
+    const prev = snapshotOf([
+      make('a', 'running', 'working'),
+      make('b', 'running', 'waiting_for_user'),
+      make('c', 'suspended'),
+    ]);
+    const next = snapshotOf([
+      make('a', 'running', 'waiting_for_approval'),
+      make('b', 'running', 'waiting_for_user'),
+      make('c', 'running', 'working'),
+      make('d', 'blocked'),
+    ]);
+    expect(diffStatuses(prev, next)).toEqual({ newlyWaiting: ['a', 'd'], waitingCount: 3 });
+  });
+
+  it('does not re-notify when a waiting session switches between waiting kinds', () => {
+    const prev = snapshotOf([make('a', 'running', 'waiting_for_user')]);
+    const next = snapshotOf([make('a', 'running', 'waiting_for_approval')]);
+    expect(diffStatuses(prev, next)).toEqual({ newlyWaiting: [], waitingCount: 1 });
+  });
+
+  it('drops the count when sessions resume or disappear', () => {
+    const prev = snapshotOf([make('a', 'running', 'waiting_for_user')]);
+    expect(diffStatuses(prev, snapshotOf([make('a', 'running', 'working')]))).toEqual({
+      newlyWaiting: [],
+      waitingCount: 0,
+    });
+    expect(diffStatuses(prev, snapshotOf([]))).toEqual({ newlyWaiting: [], waitingCount: 0 });
+  });
+});
+
+describe('pollInterval / backoffMs', () => {
+  it('polls fast while any session is active, slow otherwise', () => {
+    expect(pollInterval([make('a', 'running', 'working'), make('b', 'suspended')])).toBe(ACTIVE_POLL_MS);
+    expect(pollInterval([make('a', 'running', 'waiting_for_user'), make('b', 'exit')])).toBe(IDLE_POLL_MS);
+    expect(pollInterval([])).toBe(IDLE_POLL_MS);
+    expect(pollInterval([make('a', 'claimed')], { active: 500, idle: 3000 })).toBe(500);
+  });
+
+  it('doubles per failure and caps at five minutes', () => {
+    expect(backoffMs(1, 10_000)).toBe(10_000);
+    expect(backoffMs(2, 10_000)).toBe(20_000);
+    expect(backoffMs(3, 10_000)).toBe(40_000);
+    expect(backoffMs(20, 10_000)).toBe(300_000);
+  });
+});
+
+describe('badge png', () => {
+  it('labels 1-9 and 9+', () => {
+    expect(badgeLabel(0)).toBe('');
+    expect(badgeLabel(1)).toBe('1');
+    expect(badgeLabel(9)).toBe('9');
+    expect(badgeLabel(10)).toBe('9+');
+    expect(badgeLabel(42)).toBe('9+');
+  });
+
+  it('emits a well-formed PNG with the requested dimensions', () => {
+    const png = renderBadgePng(3, { size: 16 });
+    expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(png.subarray(12, 16).toString('ascii')).toBe('IHDR');
+    expect(png.readUInt32BE(16)).toBe(16);
+    expect(png.readUInt32BE(20)).toBe(16);
+    expect(png.subarray(png.length - 8, png.length - 4).toString('ascii')).toBe('IEND');
+    expect(renderBadgePng(12).length).toBeGreaterThan(50);
+    expect(() => encodePng(2, 2, new Uint8Array(3))).toThrow();
+  });
+});
+
+describe('archivedScopes (P8)', () => {
+  const before = [make('s1', 'running'), make('s2', 'running'), make('s3', 'running')];
+
+  it('closes scopes whose session is archived', () => {
+    const next = [make('s1', 'archived'), make('s2', 'running'), make('s3', 'running')];
+    expect(archivedScopes(before, next, true)).toEqual(['s1']);
+    expect(archivedScopes(before, next, false)).toEqual(['s1']);
+  });
+
+  it('closes scopes missing from a complete list only', () => {
+    const next = [make('s1', 'running'), make('s2', 'running')];
+    expect(archivedScopes(before, next, true)).toEqual(['s3']);
+    // Partial page: absence just means it fell off page 1 — do not close.
+    expect(archivedScopes(before, next, false)).toEqual([]);
+    expect(archivedScopes([], next, true)).toEqual([]);
+  });
+});
+
+describe('scopeLabel (F10)', () => {
+  const sessions = [make('abcdef123456', 'running')];
+  sessions[0]!.title = 'Fix the flaky test';
+  it('uses the session title, short id, or GLOBAL label', () => {
+    expect(scopeLabel('abcdef123456', sessions)).toBe('Fix the flaky test');
+    expect(scopeLabel('unknown-id-999', sessions)).toBe('Session unknown-');
+    expect(scopeLabel('', sessions)).toBe('Outside any session');
+  });
+
+  it('truncates long titles at 60 chars', () => {
+    const long = [{ ...make('s1', 'running'), title: 'x'.repeat(80) }];
+    expect(scopeLabel('s1', long)).toBe(`${'x'.repeat(60)}…`);
+  });
+});
+
+describe('prsForSession / prTitle', () => {
+  it('lists PRs for the current session only, with owner/repo#N titles', () => {
+    const sessions: DevinSession[] = [
+      {
+        ...make('s1', 'running'),
+        pull_requests: [
+          { pr_url: 'https://github.com/acme/widgets/pull/42', pr_state: 'open' },
+          { pr_url: 'https://example.org/x/y', pr_state: null },
+        ],
+      },
+      { ...make('s2', 'running'), pull_requests: [{ pr_url: 'https://github.com/a/b/pull/1', pr_state: null }] },
+    ];
+    expect(prsForSession(sessions, 's1')).toEqual([
+      { sessionId: 's1', title: 'acme/widgets#42 (open)', url: 'https://github.com/acme/widgets/pull/42' },
+      { sessionId: 's1', title: 'example.org/x/y', url: 'https://example.org/x/y' },
+    ]);
+    expect(prsForSession(sessions, null)).toEqual([]);
+    expect(prsForSession(sessions, 'missing')).toEqual([]);
+    expect(prTitle('not a url')).toBe('not a url');
+  });
+});

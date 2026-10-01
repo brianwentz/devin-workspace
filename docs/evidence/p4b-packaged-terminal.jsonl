@@ -1,0 +1,4 @@
+{"ts":"2026-10-01T18:04:49.411Z","view":"local","event":"terminal-open","detail":{"id":"83d596ce-1f2f-4da3-ac95-9a01d071a27e","workspace":"C:\\Users\\brian\\AppData\\Local\\Temp\\p4b-ws-E5tjwd","ok":true,"pid":7992}}
+{"ts":"2026-10-01T18:04:49.453Z","view":"local","event":"terminal-data","detail":{"id":"83d596ce-1f2f-4da3-ac95-9a01d071a27e","bytes":16}}
+{"ts":"2026-10-01T18:04:49.483Z","view":"local","event":"terminal-data","detail":{"id":"83d596ce-1f2f-4da3-ac95-9a01d071a27e","bytes":66}}
+{"ts":"2026-10-01T18:04:53.029Z","view":"local","event":"terminal-close","detail":{"id":"83d596ce-1f2f-4da3-ac95-9a01d071a27e"}}

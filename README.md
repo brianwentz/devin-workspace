@@ -1,2 +1,2 @@
-# Devin-console
-A simple local devin console
+# Devin Workspaces
+A simple local Devin workspaces client

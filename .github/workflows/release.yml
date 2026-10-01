@@ -1,0 +1,51 @@
+name: release
+
+# Tag `vX.Y.Z` (matching package.json "version") -> build the NSIS installer and
+# publish it, latest.yml and the blockmap to a GitHub Release draft. The
+# in-app updater (electron-updater, build.publish in package.json) picks up
+# the release once it is published.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check tag matches package.json version
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content package.json | ConvertFrom-Json).version
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          if ($pkg -ne $tag) { throw "package.json version $pkg != tag $tag" }
+
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+
+      - name: Build and publish installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --x64 --publish always
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devin-workspaces-${{ github.ref_name }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml

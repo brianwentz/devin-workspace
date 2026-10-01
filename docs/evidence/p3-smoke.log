@@ -1,0 +1,32 @@
+2026-10-01T16:17:16.274+02:00 Installer: C:\Users\brian\source\repos\Devin-console-p3\dist\DevinDesk-Setup-0.1.0.exe (117.38 MB, 123085330 bytes)
+2026-10-01T16:17:16.283+02:00 InstallDir: C:\Users\brian\AppData\Local\Programs\devin-desk-smoke
+2026-10-01T16:17:16.284+02:00 Profile: C:\Users\brian\AppData\Local\Temp\devin-desk-smoke-profile
+2026-10-01T16:17:16.294+02:00 Machine: BRIAN-FRACTAL, user: brian, elevated: False
+2026-10-01T16:17:16.314+02:00 Found previous install; uninstalling first
+2026-10-01T16:17:22.769+02:00 install: "C:\Users\brian\source\repos\Devin-console-p3\dist\DevinDesk-Setup-0.1.0.exe" /S /currentuser /D=C:\Users\brian\AppData\Local\Programs\devin-desk-smoke
+2026-10-01T16:17:31.897+02:00 install exit code: 0
+2026-10-01T16:17:31.937+02:00 Installed: 75 files, 391.06 MB
+2026-10-01T16:17:31.974+02:00 Uninstall registry: key='5b1c0f95-b495-50b2-b4c9-18c1d4c1ad8b' DisplayName='Devin Desk 0.1.0' DisplayVersion='0.1.0' UninstallString='"C:\Users\brian\AppData\Local\Programs\devin-desk-smoke\Uninstall Devin Desk.exe" /currentuser'
+2026-10-01T16:17:31.979+02:00 Running smoke spec (phase=fresh)
+
+Running 2 tests using 1 worker
+
+[1/2] tests\smoke\installed.spec.ts:147:5 GǦ installed exe has the expected fuse wire
+[2/2] tests\smoke\installed.spec.ts:167:5 GǦ installed app launches, creates views, and persists across relaunch
+  2 passed (6.2s)
+2026-10-01T16:17:40.255+02:00 upgrade-in-place: "C:\Users\brian\source\repos\Devin-console-p3\dist\DevinDesk-Setup-0.1.0.exe" /S /currentuser /D=C:\Users\brian\AppData\Local\Programs\devin-desk-smoke
+2026-10-01T16:17:59.496+02:00 upgrade-in-place exit code: 0
+2026-10-01T16:17:59.502+02:00 Profile survived upgrade-in-place (settings.json present)
+2026-10-01T16:17:59.508+02:00 Running smoke spec (phase=upgrade)
+
+Running 2 tests using 1 worker
+
+[1/2] tests\smoke\installed.spec.ts:147:5 GǦ installed exe has the expected fuse wire
+[2/2] tests\smoke\installed.spec.ts:167:5 GǦ installed app launches, creates views, and persists across relaunch
+  2 passed (4.9s)
+2026-10-01T16:18:07.004+02:00 uninstall: "C:\Users\brian\AppData\Local\Programs\devin-desk-smoke\Uninstall Devin Desk.exe" /S /currentuser _?=C:\Users\brian\AppData\Local\Programs\devin-desk-smoke
+2026-10-01T16:18:12.393+02:00 uninstall exit code: 0
+2026-10-01T16:18:13.422+02:00 Install dir removed: C:\Users\brian\AppData\Local\Programs\devin-desk-smoke
+2026-10-01T16:18:13.451+02:00 Uninstall registry key removed
+2026-10-01T16:18:13.456+02:00 Profile retained after uninstall (deleteAppDataOnUninstall=false; smoke profile is env-overridden): True
+2026-10-01T16:18:13.606+02:00 RESULT: PASS

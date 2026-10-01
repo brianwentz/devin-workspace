@@ -1,0 +1,143 @@
+import { clampPaneWidth } from '../core/layout';
+import { newSessionUrl } from '../core/sessions';
+import { log } from './log';
+import { state, type ViewName } from './state';
+import { applyLayout, cancelDrag } from './window';
+
+export function historyAction(
+  action: 'back' | 'forward' | 'reload',
+  contents: Electron.WebContents,
+): void {
+  if (contents.isDestroyed()) return;
+  if (action === 'reload') {
+    contents.reload();
+    return;
+  }
+  const history = contents.navigationHistory;
+  const activeIndex = history.getActiveIndex();
+  if (action === 'back' && activeIndex > 0) history.goToIndex(activeIndex - 1);
+  if (action === 'forward' && activeIndex + 1 < history.length())
+    history.goToIndex(activeIndex + 1);
+}
+
+export function navigationTarget(): Electron.WebContents | null {
+  return (
+    (state.paneOpen ? state.tabManager?.activeWebContents : null) ??
+    state.devinView?.webContents ??
+    null
+  );
+}
+
+function focusedContents(): Electron.WebContents | null {
+  const nativeFocused = webContentsForFocusedView();
+  return nativeFocused ?? state.lastFocused ?? state.devinView?.webContents ?? null;
+}
+
+function webContentsForFocusedView(): Electron.WebContents | null {
+  const all = [
+    state.shellView?.webContents,
+    state.devinView?.webContents,
+    ...(state.tabManager?.getViews().map((view) => view.webContents) ?? []),
+  ].filter((contents): contents is Electron.WebContents =>
+    Boolean(contents && !contents.isDestroyed()),
+  );
+  return all.find((contents) => contents.isFocused()) ?? null;
+}
+
+export function focusVisibleContents(contents: Electron.WebContents | null): void {
+  if (!contents || contents.isDestroyed()) return;
+  const visibleTab =
+    state.paneOpen && !state.paneCollapsed && contents === state.tabManager?.activeWebContents;
+  if (
+    contents === state.shellView?.webContents ||
+    (state.surface === 'cloud' && contents === state.devinView?.webContents) ||
+    visibleTab
+  ) {
+    contents.focus();
+  }
+}
+
+// P5: Ctrl+N — show the Cloud surface and navigate devinView to the tenant's
+// create-session surface (NEW_SESSION_PATH in core/sessions.ts).
+export function openNewSession(): void {
+  const url = newSessionUrl(state.tenantUrl);
+  state.surface = 'cloud';
+  applyLayout();
+  const contents = state.devinView?.webContents;
+  if (!contents || contents.isDestroyed()) return;
+  contents.loadURL(url).catch((error: unknown) => {
+    log('devin', 'load-error', { url, detail: { message: String(error) } });
+  });
+  log('devin', 'new-session', { url });
+  contents.focus();
+}
+
+export function handleShortcut(
+  contents: Electron.WebContents,
+  view: ViewName,
+  event: Electron.Event,
+  input: Electron.Input,
+): void {
+  if (input.type !== 'keyDown') return;
+  if (state.dragging && input.key.toLowerCase() === 'escape') {
+    event.preventDefault();
+    cancelDrag(true, 'escape');
+    return;
+  }
+  const ctrl = input.control || input.meta;
+  const key = input.key.toLowerCase();
+  const activeId = state.tabManager?.activeId;
+  let handled = false;
+
+  if (ctrl && input.shift && key === 'g') {
+    state.paneOpen = !state.paneOpen;
+    applyLayout();
+    focusVisibleContents(contents);
+    handled = true;
+  } else if (ctrl && key === 'tab' && state.tabManager) {
+    // Ctrl+Tab cycles the visible scope's tabs only.
+    const tabs = state.tabManager.publicState().tabs;
+    if (tabs.length > 0) {
+      const currentIndex = Math.max(
+        0,
+        tabs.findIndex((tab) => tab.id === activeId),
+      );
+      const delta = input.shift ? -1 : 1;
+      const next = tabs[(currentIndex + delta + tabs.length) % tabs.length];
+      if (next) state.tabManager.activate(next.id);
+      applyLayout();
+      focusVisibleContents(state.tabManager.activeWebContents);
+      handled = true;
+    }
+  } else if (ctrl && key === 'w' && state.paneOpen && activeId) {
+    void state.tabManager?.close(activeId).then(applyLayout);
+    handled = true;
+  } else if (input.alt && (key === 'arrowleft' || key === 'left')) {
+    historyAction('back', contents);
+    handled = true;
+  } else if (input.alt && (key === 'arrowright' || key === 'right')) {
+    historyAction('forward', contents);
+    handled = true;
+  } else if ((ctrl && key === 'r') || key === 'f5') {
+    historyAction('reload', contents);
+    handled = true;
+  } else if (ctrl && !input.shift && !input.alt && key === 'n') {
+    openNewSession();
+    handled = true;
+  } else if (ctrl && input.shift && (key === '[' || key === '{' || key === ']' || key === '}')) {
+    state.paneWidth = clampPaneWidth(
+      state.paneWidth + (key === '[' || key === '{' ? -80 : 80),
+      state.windowRef?.getContentBounds().width ?? 1400,
+    );
+    applyLayout();
+    focusVisibleContents(contents);
+    handled = true;
+  }
+
+  if (handled) {
+    event.preventDefault();
+    log(view, 'shortcut', {
+      detail: { key: input.key, control: ctrl, shift: input.shift, alt: input.alt },
+    });
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "phase": "fresh",
+  "executablePath": "C:\\Users\\brian\\AppData\\Local\\Programs\\devin-desk-smoke\\Devin Desk.exe",
+  "startedAt": "2026-10-01T14:17:34.928Z",
+  "fuses": {
+    "runAsNode": 48,
+    "cookieEncryption": 49,
+    "nodeOptions": 48,
+    "nodeCliInspect": 48,
+    "asarIntegrity": 49,
+    "onlyLoadAppFromAsar": 49
+  },
+  "profile": "C:\\Users\\brian\\AppData\\Local\\Temp\\devin-desk-smoke-profile",
+  "updaterEvent": {
+    "ts": "2026-10-01T14:17:35.753Z",
+    "view": "shell",
+    "event": "updater-disabled",
+    "detail": {
+      "isPackaged": true,
+      "testMode": true
+    }
+  },
+  "pid": 57528,
+  "initialViews": [
+    "app://shell/index.html",
+    "http://localhost:57072/"
+  ],
+  "afterOpen": {
+    "state": {
+      "paneOpen": true,
+      "paneWidth": 500,
+      "paneCollapsed": false,
+      "surface": "cloud",
+      "currentSessionId": null,
+      "settings": {
+        "tenantUrl": "https://cloudbeds.devinenterprise.com",
+        "apiBase": "https://api.devin.ai",
+        "workspaces": [],
+        "routing": {
+          "allowExternal": true
+        },
+        "pane": {
+          "open": true,
+          "width": 500
+        },
+        "surface": "cloud",
+        "tabs": {
+          "tabs": [
+            {
+              "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+              "url": "http://127.0.0.1:57073/page/persisted",
+              "title": "127.0.0.1"
+            }
+          ],
+          "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+        }
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+            "url": "http://127.0.0.1:57073/page/persisted",
+            "title": "GitHub fixture: persisted",
+            "loading": false,
+            "favicon": "data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E",
+            "canGoBack": false,
+            "canGoForward": false
+          }
+        ],
+        "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+      }
+    },
+    "views": [
+      "http://127.0.0.1:57073/page/persisted",
+      "app://shell/index.html",
+      "http://localhost:57072/"
+    ]
+  },
+  "settingsAfterFirstRun": {
+    "tenantUrl": "https://cloudbeds.devinenterprise.com",
+    "apiBase": "https://api.devin.ai",
+    "workspaces": [],
+    "routing": {
+      "allowExternal": true
+    },
+    "pane": {
+      "open": true,
+      "width": 500
+    },
+    "surface": "cloud",
+    "tabs": {
+      "tabs": [
+        {
+          "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+          "url": "http://127.0.0.1:57073/page/persisted",
+          "title": "127.0.0.1"
+        }
+      ],
+      "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+    }
+  },
+  "restoredAfterRelaunch": {
+    "paneOpen": true,
+    "paneWidth": 500,
+    "paneCollapsed": false,
+    "surface": "cloud",
+    "currentSessionId": null,
+    "settings": {
+      "tenantUrl": "https://cloudbeds.devinenterprise.com",
+      "apiBase": "https://api.devin.ai",
+      "workspaces": [],
+      "routing": {
+        "allowExternal": true
+      },
+      "pane": {
+        "open": true,
+        "width": 500
+      },
+      "surface": "cloud",
+      "tabs": {
+        "tabs": [
+          {
+            "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+            "url": "http://127.0.0.1:57073/page/persisted",
+            "title": "127.0.0.1"
+          }
+        ],
+        "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+      }
+    },
+    "tabs": {
+      "tabs": [
+        {
+          "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+          "url": "http://127.0.0.1:57073/page/persisted",
+          "title": "GitHub fixture: persisted",
+          "favicon": "data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E",
+          "loading": false,
+          "canGoBack": false,
+          "canGoForward": false
+        }
+      ],
+      "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+    }
+  },
+  "eventCount": 37,
+  "closeEvents": [
+    {
+      "ts": "2026-10-01T14:17:37.634Z",
+      "view": "shell",
+      "event": "window-close-complete",
+      "detail": {
+        "webContentsCountBefore": 3,
+        "webContentsCountAfter": 0
+      }
+    },
+    {
+      "ts": "2026-10-01T14:17:39.854Z",
+      "view": "shell",
+      "event": "window-close-complete",
+      "detail": {
+        "webContentsCountBefore": 3,
+        "webContentsCountAfter": 0
+      }
+    }
+  ],
+  "finishedAt": "2026-10-01T14:17:40.109Z"
+}

@@ -1,0 +1,91 @@
+{
+  "phase": "upgrade",
+  "executablePath": "C:\\Users\\brian\\AppData\\Local\\Programs\\devin-desk-smoke\\Devin Desk.exe",
+  "startedAt": "2026-10-01T14:18:02.639Z",
+  "fuses": {
+    "runAsNode": 48,
+    "cookieEncryption": 49,
+    "nodeOptions": 48,
+    "nodeCliInspect": 48,
+    "asarIntegrity": 49,
+    "onlyLoadAppFromAsar": 49
+  },
+  "profile": "C:\\Users\\brian\\AppData\\Local\\Temp\\devin-desk-smoke-profile",
+  "settingsBeforeUpgradeLaunch": {
+    "tenantUrl": "https://cloudbeds.devinenterprise.com",
+    "apiBase": "https://api.devin.ai",
+    "workspaces": [],
+    "routing": {
+      "allowExternal": true
+    },
+    "pane": {
+      "open": true,
+      "width": 500
+    },
+    "surface": "cloud",
+    "tabs": {
+      "tabs": [
+        {
+          "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+          "url": "http://127.0.0.1:57073/page/persisted",
+          "title": "127.0.0.1"
+        }
+      ],
+      "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+    }
+  },
+  "updaterEvent": {
+    "ts": "2026-10-01T14:18:03.402Z",
+    "view": "shell",
+    "event": "updater-disabled",
+    "detail": {
+      "isPackaged": true,
+      "testMode": true
+    }
+  },
+  "pid": 33716,
+  "restoredAfterUpgrade": {
+    "paneOpen": true,
+    "paneWidth": 500,
+    "paneCollapsed": false,
+    "surface": "cloud",
+    "currentSessionId": null,
+    "settings": {
+      "tenantUrl": "https://cloudbeds.devinenterprise.com",
+      "apiBase": "https://api.devin.ai",
+      "workspaces": [],
+      "routing": {
+        "allowExternal": true
+      },
+      "pane": {
+        "open": true,
+        "width": 500
+      },
+      "surface": "cloud",
+      "tabs": {
+        "tabs": [
+          {
+            "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+            "url": "http://127.0.0.1:57073/page/persisted",
+            "title": "127.0.0.1"
+          }
+        ],
+        "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+      }
+    },
+    "tabs": {
+      "tabs": [
+        {
+          "id": "b03caff5-c8e7-421a-909b-17bfe2fb6397",
+          "url": "http://127.0.0.1:57073/page/persisted",
+          "title": "127.0.0.1",
+          "loading": false,
+          "canGoBack": false,
+          "canGoForward": false
+        }
+      ],
+      "activeId": "b03caff5-c8e7-421a-909b-17bfe2fb6397"
+    }
+  },
+  "finishedAt": "2026-10-01T14:18:06.765Z"
+}
