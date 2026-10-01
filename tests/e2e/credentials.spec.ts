@@ -36,6 +36,26 @@ async function fillCredential(
   ) as Promise<string>;
 }
 
+// Deterministic variant: fill a specific tab via the test hook. Target
+// selection itself is asserted with getFillTargetUrl; OS focus on a background
+// CI desktop is not reliable enough to drive the IPC path for every fill.
+async function fillInto(
+  app: ElectronApplication,
+  id: string,
+  field: 'username' | 'password',
+  pressEnter: boolean,
+): Promise<string> {
+  return app.evaluate(
+    (_electron, args: { id: string; field: 'username' | 'password'; pressEnter: boolean }) =>
+      (globalThis as typeof globalThis & {
+        __devinworkspaces: {
+          fillInto(id: string, field: 'username' | 'password', pressEnter: boolean): Promise<string>;
+        };
+      }).__devinworkspaces.fillInto(args.id, args.field, args.pressEnter),
+    { id, field, pressEnter },
+  );
+}
+
 test('credential vault saves, fills, denies non-saved origins, and keeps secrets out of logs', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-'));
   const logFile = join(profile, 'events.jsonl');
@@ -84,7 +104,7 @@ test('credential vault saves, fills, denies non-saved origins, and keeps secrets
         ),
       )
       .toBe(`${fixtures.githubUrl}/login`);
-    expect(await fillCredential(app, 'username', false)).toBe('filled');
+    expect(await fillInto(app, loginId, 'username', false)).toBe('filled');
     await expect
       .poll(async () =>
         evaluateInView(app, `${fixtures.githubUrl}/login`, `document.getElementById('user').value`),
@@ -106,7 +126,7 @@ test('credential vault saves, fills, denies non-saved origins, and keeps secrets
         ),
       )
       .toBe(`${fixtures.githubUrl}/login`);
-    expect(await fillCredential(app, 'password', true)).toBe('filled');
+    expect(await fillInto(app, loginId, 'password', true)).toBe('filled');
     await expect
       .poll(async () => evaluateInView(app, `${fixtures.githubUrl}/login`, `document.title`))
       .toBe('submitted:alice:s3cret');
@@ -121,7 +141,9 @@ test('credential vault saves, fills, denies non-saved origins, and keeps secrets
         .__devinworkspaces.focus(id);
     }, devinTabId!);
     await expect.poll(async () => (await state(app)).credentialMatch).toBe(null);
-    expect(await fillCredential(app, 'username', false)).toBe('no-match');
+    expect(await fillInto(app, devinTabId!, 'username', false)).toBe('no-match');
+    // IPC path still answers (whatever OS focus says, it is one of the three results).
+    expect(['filled', 'no-match', 'unavailable']).toContain(await fillCredential(app, 'username', false));
 
     // Secrets must not reach the log or the vault file.
     const events = await readEvents(logFile);

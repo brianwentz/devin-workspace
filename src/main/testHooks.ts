@@ -30,7 +30,14 @@ export function registerTestHooks(): void {
       activate: (id: string) => state.tabManager?.activate(id),
       close: (id: string) => state.tabManager?.close(id),
       reorder: (id: string, index: number) => state.tabManager?.reorder(id, index),
-      focus: (id: string) => state.tabManager?.getView(id)?.webContents.focus(),
+      // Also pin lastFocused: on a background CI desktop the OS 'focus' event
+      // may never fire, which made the credential fill target non-deterministic.
+      focus: (id: string) => {
+        const contents = state.tabManager?.getView(id)?.webContents;
+        if (!contents) return;
+        state.lastFocused = contents;
+        contents.focus();
+      },
       setPaneOpen: (value: boolean) => {
         state.paneOpen = value;
         applyLayout();
@@ -68,6 +75,13 @@ export function registerTestHooks(): void {
       saveCredential: (credential: { origin: string; username: string; password: string }) =>
         state.credentials?.save(credential).then(() => true),
       getFillTargetUrl: () => currentFillTarget()?.getURL() ?? null,
+      // Deterministic fill into a specific tab (target selection is asserted
+      // separately via getFillTargetUrl; OS focus is unreliable on CI).
+      fillInto: (id: string, field: 'username' | 'password', pressEnter: boolean) => {
+        const contents = state.tabManager?.getView(id)?.webContents;
+        if (!contents || !state.credentials) return 'unavailable';
+        return state.credentials.fill(contents, field, pressEnter);
+      },
       // F4: would a foreign webContents (the devin view) pass the IPC guard?
       ipcProbe: () => ({
         foreign: fromShell({ sender: state.devinView?.webContents, senderFrame: null } as never),
