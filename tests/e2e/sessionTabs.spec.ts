@@ -171,7 +171,8 @@ test('keepAliveHours=0 discards hidden-scope tabs on switch and restores on retu
       (await readEvents(logFile)).filter((e) => e.event === 'tab-discard').length,
     ).toBeGreaterThanOrEqual(2);
 
-    // Returning restores the scope's active tab (tab-restore) and the other on click.
+    // Returning restores the scope's active tab (tab-restore) — and preloads
+    // the rest of the visible scope, so the other tab goes live on its own.
     await openSession(app, 'A');
     await waitForEvent(logFile, 'tab-restore');
     await waitForTabCount(app, 2);
@@ -179,9 +180,9 @@ test('keepAliveHours=0 discards hidden-scope tabs on switch and restores on retu
     const restoredId = s.tabs.activeId!;
     expect(s.tabs.tabs.find((t) => t.id === restoredId)?.discarded).toBeUndefined();
     const other = s.tabs.tabs.find((t) => t.id !== restoredId)!;
-    expect(other.discarded).toBe(true);
-    await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.activate(id), other.id);
     await expect.poll(async () => (await state(app)).tabs.tabs.find((t) => t.id === other.id)?.discarded).toBeUndefined();
+    await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.activate(id), other.id);
+    await expect.poll(async () => (await state(app)).tabs.activeId).toBe(other.id);
   } finally {
     await quit(app, profile);
   }
@@ -193,8 +194,8 @@ test('maxLiveTabs caps live webContents LRU and skips a beforeunload-protected t
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
   try {
     await expect.poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
-    await evaluateInShell(app, `window.devinworkspaces.setSettings({ tabs: { maxLiveTabs: 2 } })`);
-    await expect.poll(async () => (await state(app)).settings.tabs.maxLiveTabs).toBe(2);
+    await evaluateInShell(app, `window.devinworkspaces.setSettings({ tabs: { maxLiveTabs: 1 } })`);
+    await expect.poll(async () => (await state(app)).settings.tabs.maxLiveTabs).toBe(1);
 
     // Oldest tab is protected (unsaved-draft); it must survive the cap.
     await openSession(app, 'A');
@@ -208,15 +209,19 @@ test('maxLiveTabs caps live webContents LRU and skips a beforeunload-protected t
     await waitForTabTitle(app, 'session-b-1');
     await routeLink(app, `${fixtures.githubUrl}/page/session-b-2`);
     await waitForTabTitle(app, 'session-b-2');
+    await routeLink(app, `${fixtures.githubUrl}/page/session-b-3`);
+    await waitForTabTitle(app, 'session-b-3');
 
-    // Live = active (session-b-2) + cap(2): protected guarded tab + most-recent non-active.
+    // The cap applies to hidden scopes only: A keeps just the protected tab
+    // (session-a-1 discarded by the cap), while all 3 visible B tabs stay live
+    // — the visible scope is exempt from maxLiveTabs.
     await expect.poll(async () => {
       const list = await scopes(app);
-      return list.reduce((sum, s) => sum + s.liveCount, 0);
-    }).toBe(3);
+      return list.find((s) => s.scope === 'A')?.liveCount;
+    }).toBe(1);
     const list = await scopes(app);
-    const a = list.find((s) => s.scope === 'A')!;
-    expect(a.liveCount).toBe(1); // the protected tab; session-a-1 discarded
+    expect(list.find((s) => s.scope === 'B')?.liveCount).toBe(3);
+    expect(list.reduce((sum, s) => sum + s.liveCount, 0)).toBe(4);
     expect(
       (await readEvents(logFile)).some((e) => e.event === 'tab-discard-cancelled'),
     ).toBe(true);
@@ -261,22 +266,31 @@ test('closeScope keeps a beforeunload-protected tab live and visible', async () 
   }
 });
 
-test('restart persists scopes/active; a v1 snapshot + discardIdleMinutes migrates', async () => {
+test('restart persists scopes/active; visible scope preloads, hidden stays lazy', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-persist-'));
   const logFile = join(profile, 'events.jsonl');
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
   let ids: string[] = [];
+  let bIds: string[] = [];
+  const tabInfo = (app2: ElectronApplication, id: string) =>
+    app2.evaluate(
+      (_e, tid: string) => (globalThis as any).__devinworkspaces.tabInfo(tid),
+      id,
+    ) as Promise<{ discarded: boolean; hasView: boolean } | null>;
   try {
     await expect.poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
     await openSession(app, 'A');
     await routeLink(app, `${fixtures.githubUrl}/page/session-a-1`);
     await routeLink(app, `${fixtures.githubUrl}/page/session-a-2`);
-    await waitForTabCount(app, 2);
+    await routeLink(app, `${fixtures.githubUrl}/page/session-a-3`);
+    await waitForTabCount(app, 3);
     ids = (await state(app)).tabs.tabs.map((t) => t.id);
     await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.activate(id), ids[0]!);
     await openSession(app, 'B');
     await routeLink(app, `${fixtures.githubUrl}/page/session-b-1`);
-    await waitForTabCount(app, 1);
+    await routeLink(app, `${fixtures.githubUrl}/page/session-b-2`);
+    await waitForTabCount(app, 2);
+    bIds = (await state(app)).tabs.tabs.map((t) => t.id);
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
     await app.close().catch(() => undefined);
   } catch {
@@ -288,15 +302,36 @@ test('restart persists scopes/active; a v1 snapshot + discardIdleMinutes migrate
   expect(saved.tabSnapshot.version).toBe(2);
   expect(saved.tabSnapshot.activeByScope.A).toBe(ids[0]);
 
-  // Relaunch: both scopes restore; nothing live until its session is opened.
+  // Relaunch: both scopes restore as placeholders; nothing live until a scope
+  // becomes visible — then ALL of that scope's tabs load in the background.
   const app2 = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
   try {
     await expect.poll(async () => app2.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
-    expect((await state(app2)).tabs.hiddenTabCount).toBe(3);
+    expect((await state(app2)).tabs.hiddenTabCount).toBe(5);
     await openSession(app2, 'A');
     const s = await state(app2);
     expect(s.tabs.tabs.map((t) => t.id)).toEqual(ids);
     expect(s.tabs.activeId).toBe(ids[0]);
+    // Preload: every A tab gets a live view without clicking; B stays lazy.
+    for (const id of ids) {
+      await expect
+        .poll(async () => (await tabInfo(app2, id))?.hasView, { timeout: 15_000 })
+        .toBe(true);
+      expect((await tabInfo(app2, id))?.discarded).toBe(false);
+    }
+    for (const id of bIds) {
+      expect((await tabInfo(app2, id))?.hasView).toBe(false);
+    }
+    await waitForEvent(logFile, 'tabs-preload');
+
+    // Switching to B makes its tabs live in turn.
+    await openSession(app2, 'B');
+    for (const id of bIds) {
+      await expect
+        .poll(async () => (await tabInfo(app2, id))?.hasView, { timeout: 15_000 })
+        .toBe(true);
+    }
+    expect((await state(app2)).tabs.tabs.map((t) => t.id)).toEqual(bIds);
   } finally {
     await quit(app2, profile);
   }

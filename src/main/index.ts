@@ -271,6 +271,9 @@ async function createWindow(): Promise<void> {
 
   const activeId = state.tabManager.activeId;
   if (activeId) state.tabManager.activate(activeId);
+  // Restored GLOBAL-scope tabs load in the background; the devin view's
+  // navigation to a session triggers setScope → preload for that scope.
+  state.tabManager.preloadVisibleScope();
   applyLayout();
   await state.shellView.webContents.loadURL('app://shell/index.html');
   state.devinView.webContents.loadURL(state.tenantUrl).catch((error: unknown) => {

@@ -108,6 +108,8 @@ export class TabManager {
   private readonly entries = new Map<string, ManagedTab>();
   private activeViewId: string | null = null;
   private scope = GLOBAL;
+  // Generation counter: a new run abandons any in-flight preload queue.
+  private preloadGeneration = 0;
   // F8: while set, will-prevent-unload records a veto instead of prompting.
   private probeVetoes: Set<string> | null = null;
   private keepAliveMs: number;
@@ -209,11 +211,55 @@ export class TabManager {
         if (entry.view) void this.discard(entry.id);
       }
     }
+    this.preloadVisibleScope();
     this.onChange();
   }
 
-  // Live-tab LRU cap across all scopes; the visible active tab is exempt and
-  // beforeunload-protected tabs are skipped.
+  // Load every discarded/placeholder tab belonging to the visible scope, one
+  // per 150 ms so a big restore doesn't stampede the network. Views are created
+  // but not attached (background-load). A later setScope abandons the queue.
+  preloadVisibleScope(): void {
+    const generation = ++this.preloadGeneration;
+    const scope = this.scope;
+    const pending = [...this.entries.values()]
+      .filter(
+        (entry) =>
+          scopeOf(entry) === scope &&
+          (!entry.view || entry.view.webContents.isDestroyed()) &&
+          !entry.closing &&
+          !entry.discarding,
+      )
+      .map((entry) => entry.id);
+    this.log('tabs-preload', { scope, count: pending.length });
+    if (pending.length === 0) return;
+    const step = (index: number) => {
+      if (index >= pending.length) return;
+      const timer = setTimeout(
+        () => {
+          if (generation !== this.preloadGeneration || scope !== this.scope) return;
+          const entry = this.entries.get(pending[index]!);
+          if (
+            entry &&
+            scopeOf(entry) === this.scope &&
+            (!entry.view || entry.view.webContents.isDestroyed()) &&
+            !entry.closing &&
+            !entry.discarding
+          ) {
+            entry.lastActiveAt = Date.now();
+            this.ensureView(entry.id);
+          }
+          step(index + 1);
+        },
+        index === 0 ? 0 : 150,
+      );
+      timer.unref?.();
+    };
+    step(0);
+  }
+
+  // Live-tab LRU cap across all scopes; the visible scope is exempt — its
+  // tabs are preloaded and stay live by design. beforeunload-protected tabs
+  // are skipped.
   private enforceLiveCap(): void {
     const entries = [...this.entries.values()].map((entry) => {
       const contents = entry.view?.webContents;
@@ -222,7 +268,7 @@ export class TabManager {
         lastActiveAt: entry.lastActiveAt,
         live: Boolean(entry.view && contents && !contents.isDestroyed()),
         protected: entry.protected || entry.discarding || entry.closing,
-        isVisibleActive: entry.id === this.activeViewId,
+        inVisibleScope: scopeOf(entry) === this.scope,
       };
     });
     for (const id of pickDiscardCandidates(entries, this.maxLiveTabs)) {
@@ -236,7 +282,9 @@ export class TabManager {
     if (this.keepAliveMs <= 0) return [];
     const discarded: string[] = [];
     for (const entry of this.entries.values()) {
-      if (entry.id === this.activeViewId || !entry.view || entry.closing || entry.discarding)
+      // The visible scope's tabs are all kept loaded — they never idle out
+      // while you're looking at the session.
+      if (scopeOf(entry) === this.scope || !entry.view || entry.closing || entry.discarding)
         continue;
       if (entry.loading) continue;
       if (now - entry.lastActiveAt < this.keepAliveMs) continue;
@@ -659,6 +707,7 @@ export class TabManager {
         return entry !== undefined && scopeOf(entry) === scope;
       }) ?? activeIdFor(this.state, scope);
     if (target) this.activate(target);
+    this.preloadVisibleScope();
   }
 
   // Close every tab in a scope (hidden or visible). Respects beforeunload —

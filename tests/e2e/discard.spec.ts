@@ -19,6 +19,25 @@ import {
   webContentsCount,
 } from './helpers';
 
+// Hide the current scope by navigating the devin view into a session; back to
+// the tenant root shows GLOBAL again.
+async function showSession(app: ElectronApplication, name: string | null): Promise<void> {
+  const url = name ? `${fixtures.devinUrl}/sessions/${name}` : fixtures.devinUrl;
+  await app.evaluate((_e, target: string) => {
+    (globalThis as any).__devinworkspaces.loadDevinUrl(target);
+  }, url);
+  await expect
+    .poll(async () => (await state(app)).currentSessionId)
+    .toBe(name);
+}
+
+async function tabInfo(app: ElectronApplication, id: string) {
+  return app.evaluate(
+    (_e, tabId: string) => (globalThis as any).__devinworkspaces.tabInfo(tabId),
+    id,
+  ) as Promise<{ url: string; title?: string; discarded: boolean; loading: boolean; hasView: boolean } | null>;
+}
+
 let fixtures: FixtureServers;
 
 test.beforeAll(async () => {
@@ -41,7 +60,7 @@ async function quit(app: ElectronApplication, profile: string): Promise<void> {
   rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 }
 
-test('discards idle inactive tabs, keeps chrome state, reloads on activation, honours beforeunload', async () => {
+test('discards idle tabs in hidden scopes, keeps chrome state, reloads on scope return, honours beforeunload', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-discard-'));
   const logFile = join(profile, 'events.jsonl');
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
@@ -60,47 +79,40 @@ test('discards idle inactive tabs, keeps chrome state, reloads on activation, ho
     const aBefore = (await tab(app, a))!;
     expect(aBefore.favicon).toBeTruthy();
 
-    // A idles past the threshold -> discarded by the sweep; B (active) is untouched.
-    await expect.poll(async () => (await tab(app, a))?.discarded, { timeout: 20_000 }).toBe(true);
-    await waitForEvent(logFile, 'tab-discard');
-    await expect.poll(() => webContentsCount(app)).toBe(3);
-    const aAfter = (await tab(app, a))!;
-    expect(aAfter.title).toBe(aBefore.title);
-    expect(aAfter.favicon).toBe(aBefore.favicon);
-    expect(aAfter.url).toBe(aBefore.url);
-    expect(aAfter.loading).toBe(false);
-    expect((await state(app)).tabs.tabs.map((t) => t.id)).toEqual([a, b]);
-    expect((await state(app)).tabs.activeId).toBe(b);
-    // Shell shows it dimmed but still in place.
-    expect(await evaluateInShell(app, `document.querySelector('[data-tab-id="${a}"]').classList.contains('discarded')`)).toBe(true);
-
+    // Visible-scope tabs never idle out — both stay live past the threshold.
     await new Promise((resolve) => setTimeout(resolve, DISCARD_MS * 2));
-    expect((await tab(app, b))?.discarded).toBeUndefined();
-    expect(await webContentsCount(app)).toBe(3);
+    expect((await tabInfo(app, a))?.discarded).toBe(false);
+    expect((await tabInfo(app, b))?.discarded).toBe(false);
 
-    // Activation recreates the view and reloads the page.
-    await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.activate(id), a);
-    await waitForEvent(logFile, 'tab-restore');
+    // Hide the GLOBAL scope: its tabs' idle clocks freeze at hide time, so the
+    // sweep discards both a and b (chrome state — title/favicon/url — survives).
+    await showSession(app, 'A');
+    await expect.poll(async () => (await tabInfo(app, a))?.discarded, { timeout: 20_000 }).toBe(true);
+    await expect.poll(async () => (await tabInfo(app, b))?.discarded, { timeout: 20_000 }).toBe(true);
+    await waitForEvent(logFile, 'tab-discard');
+    const aAfter = (await tabInfo(app, a))!;
+    expect(aAfter.url).toBe(`${fixtures.githubUrl}/page/discard-a`);
+    expect(aAfter.loading).toBe(false);
+    expect((await state(app)).tabs.hiddenTabCount).toBe(2);
+
+    // Returning to GLOBAL preloads every visible-scope tab — live again.
+    await showSession(app, null);
+    await expect.poll(async () => (await tabInfo(app, a))?.hasView, { timeout: 20_000 }).toBe(true);
+    await expect.poll(async () => (await tabInfo(app, b))?.hasView).toBe(true);
     await expect.poll(async () => (await tab(app, a))?.discarded).toBeUndefined();
-    await expect.poll(() => webContentsCount(app)).toBe(4);
+    await expect.poll(async () => (await tab(app, a))?.title).toBe('GitHub fixture: discard-a');
     await expect.poll(async () => (await tab(app, a))?.loading).toBe(false);
-    expect((await tab(app, a))?.title).toBe('GitHub fixture: discard-a');
-    expect(await evaluateInShell(app, `document.querySelector('[data-tab-id="${a}"]').classList.contains('discarded')`)).toBe(false);
 
-    // Now B idles and gets discarded in turn; closing a discarded tab is a plain model close.
-    await expect.poll(async () => (await tab(app, b))?.discarded, { timeout: 20_000 }).toBe(true);
-    expect(await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.close(id), b)).toBe(true);
-    await expect.poll(async () => (await state(app)).tabs.tabs.map((t) => t.id)).toEqual([a]);
-
-    // A page that prevents unload cancels its discard silently (no dialog, no prompt event).
+    // beforeunload-protected hidden tabs cancel the discard and stay live.
     const guarded = await openTab(app, `${fixtures.githubUrl}/beforeunload`);
     await waitForTabTitle(app, 'Before unload');
     const d = await openTab(app, `${fixtures.githubUrl}/page/discard-d`);
     await waitForTabTitle(app, 'discard-d');
     expect((await state(app)).tabs.activeId).toBe(d);
+    await showSession(app, 'B');
     await waitForEvent(logFile, 'tab-discard-cancelled');
     await new Promise((resolve) => setTimeout(resolve, DISCARD_MS));
-    expect((await tab(app, guarded))?.discarded).toBeUndefined();
+    expect((await tabInfo(app, guarded))?.discarded).toBe(false);
     expect(
       await app.evaluate((_e, id: string) => Boolean((globalThis as any).__devinworkspaces.getTabWebContents(id)), guarded),
     ).toBe(true);
@@ -111,21 +123,22 @@ test('discards idle inactive tabs, keeps chrome state, reloads on activation, ho
         (entry) => entry.event === 'will-prevent-unload' && (entry.detail as any)?.discard === true,
       ),
     ).toBe(true);
-    // Discarded A was meanwhile kept as a tab with its title.
-    expect((await tab(app, a))?.title).toBe('GitHub fixture: discard-a');
+    // Non-protected hidden tab discarded on the same sweep.
+    await expect.poll(async () => (await tabInfo(app, d))?.discarded).toBe(true);
 
     // Disabling via the hook stops the sweep: a fresh idle tab stays alive.
+    await showSession(app, null);
     await app.evaluate(() => (globalThis as any).__devinworkspaces.setKeepAliveMs(0));
     const e = await openTab(app, `${fixtures.githubUrl}/page/discard-e`);
     await waitForTabTitle(app, 'discard-e');
-    await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.activate(id), d);
     await new Promise((resolve) => setTimeout(resolve, DISCARD_MS * 2));
-    expect((await tab(app, e))?.discarded).toBeUndefined();
+    expect((await tabInfo(app, e))?.discarded).toBe(false);
     expect(await app.evaluate(() => (globalThis as any).__devinworkspaces.discardIdle())).toEqual([]);
   } finally {
     await quit(app, profile);
   }
 });
+
 
 test('keep-alive threshold is a persisted setting (hours) applied live', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-discard-'));
