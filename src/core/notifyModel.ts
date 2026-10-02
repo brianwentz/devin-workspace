@@ -122,6 +122,36 @@ export function prsForSession(sessions: DevinSession[], sessionId: string | null
   }));
 }
 
+export interface NewPullRequest {
+  sessionId: string;
+  url: string;
+}
+
+// F1: PR URLs that appeared on a session between two polls. Only sessions
+// already present in `previous` count — sessions first seen in `next` are a
+// baseline, so the first poll (and the first after a restart, which clears the
+// cached list) opens nothing. A PR URL the user already saw (and maybe closed)
+// is in `previous`, so it never comes back. URLs are deduped within the result.
+export function newPullRequests(
+  previous: readonly DevinSession[],
+  next: readonly DevinSession[],
+): NewPullRequest[] {
+  const out: NewPullRequest[] = [];
+  const seen = new Set<string>();
+  for (const before of previous) {
+    const after = next.find((item) => item.session_id === before.session_id);
+    // An archived session's scope is being closed by the same poll — never open into it.
+    if (!after || after.status === 'archived') continue;
+    const known = new Set(before.pull_requests.map((pr) => pr.pr_url));
+    for (const pr of after.pull_requests) {
+      if (known.has(pr.pr_url) || seen.has(pr.pr_url)) continue;
+      seen.add(pr.pr_url);
+      out.push({ sessionId: after.session_id, url: pr.pr_url });
+    }
+  }
+  return out;
+}
+
 export function sessionTitle(session: Pick<DevinSession, 'title' | 'session_id'>): string {
   return session.title?.trim() || session.session_id;
 }

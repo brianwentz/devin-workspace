@@ -7,6 +7,7 @@ import {
   archivedScopes,
   backoffMs,
   diffStatuses,
+  newPullRequests,
   pollInterval,
   prsForSession,
   sessionTitle,
@@ -17,7 +18,8 @@ import {
 import { sessionUrl } from '../core/sessions';
 import type { SessionPr, Settings } from '../shared/ipc';
 import { log } from './log';
-import { handleLink } from './routing';
+import { route } from '../core/linkRouter';
+import { handleLink, routeContext } from './routing';
 import { state, testMode } from './state';
 import { applyLayout, notifyShell } from './window';
 
@@ -39,6 +41,11 @@ export function apiBase(): string {
 
 function notificationsEnabled(): boolean {
   return state.settings?.current.notifications.enabled ?? true;
+}
+
+// F1: PR auto-open also needs the poller, independently of toasts.
+function autoOpenEnabled(): boolean {
+  return state.settings?.current.prs.autoOpenTabs ?? true;
 }
 
 // OS toasts are suppressed under DEVIN_WORKSPACES_TEST unless explicitly re-enabled,
@@ -63,7 +70,11 @@ class Notifier {
     this.running = true;
     this.generation += 1;
     log('shell', 'notifier-start', {
-      detail: { enabled: notificationsEnabled(), hasToken: state.secrets?.hasPat() ?? false },
+      detail: {
+        enabled: notificationsEnabled(),
+        autoOpenTabs: autoOpenEnabled(),
+        hasToken: state.secrets?.hasPat() ?? false,
+      },
     });
     this.schedule(0);
   }
@@ -95,7 +106,8 @@ class Notifier {
     if (
       previous.apiBase !== next.apiBase ||
       previous.notifications.enabled !== next.notifications.enabled ||
-      previous.notifications.orgId !== next.notifications.orgId
+      previous.notifications.orgId !== next.notifications.orgId ||
+      previous.prs.autoOpenTabs !== next.prs.autoOpenTabs
     ) {
       this.restart('settings-changed');
     }
@@ -119,7 +131,7 @@ class Notifier {
   private async poll(): Promise<void> {
     if (this.inFlight || !this.running || state.shuttingDown) return;
     const pat = state.secrets?.getPat() ?? null;
-    if (!pat || !notificationsEnabled()) {
+    if (!pat || (!notificationsEnabled() && !autoOpenEnabled())) {
       // Nothing to do; re-check occasionally in case a token arrives via restart().
       this.schedule(pollBase().idle);
       return;
@@ -162,6 +174,23 @@ class Notifier {
           log('shell', 'tabs-scope-archived', { detail: { scope } });
         });
       }
+      // F1: a session gained a PR since the last poll -> lazy background tab
+      // in that session's scope. Only GitHub-class URLs become tabs.
+      if (autoOpenEnabled() && state.tabManager) {
+        let opened = 0;
+        for (const pr of newPullRequests(previousSessions, sessions)) {
+          const decision = route(pr.url, 'shell', 'new-window', routeContext());
+          if (decision.kind !== 'gh-tab') continue;
+          state.tabManager.open(pr.url, {
+            background: true,
+            originSessionId: pr.sessionId,
+            lazy: true,
+          });
+          log('shell', 'pr-auto-open', { url: pr.url, detail: { sessionId: pr.sessionId } });
+          opened += 1;
+        }
+        if (opened > 0) applyLayout();
+      }
       state.notifications = {
         waitingCount: diff.waitingCount,
         lastPollAt: new Date().toISOString(),
@@ -179,11 +208,15 @@ class Notifier {
           durationMs: Date.now() - started,
         },
       });
-      for (const id of diff.newlyWaiting) {
-        const session = sessions.find((item) => item.session_id === id);
-        if (session) this.notify(session, next[id] ?? 'waiting_for_user');
+      // Toasts and the badge stay gated on the notifications toggle; the poll
+      // itself may be running only for PR auto-open.
+      if (notificationsEnabled()) {
+        for (const id of diff.newlyWaiting) {
+          const session = sessions.find((item) => item.session_id === id);
+          if (session) this.notify(session, next[id] ?? 'waiting_for_user');
+        }
+        this.updateBadge(diff.waitingCount);
       }
-      this.updateBadge(diff.waitingCount);
     } catch (error) {
       this.failures += 1;
       const apiError = error instanceof DevinApiError ? error : null;

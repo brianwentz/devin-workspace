@@ -4,7 +4,16 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { evaluateInShell, launchApp, readEvents, state, waitForEvent } from './helpers';
+import {
+  evaluateInShell,
+  launchApp,
+  openTab,
+  readEvents,
+  state,
+  waitForEvent,
+  waitForTabCount,
+  webContentsCount,
+} from './helpers';
 
 const PAT = 'test-token-123';
 const POLL_MS = 500;
@@ -36,6 +45,29 @@ function hooks(app: ElectronApplication) {
     testNotification: () => app.evaluate(() => (globalThis as any).__devinworkspaces.testNotification()),
     loadDevinUrl: (url: string) =>
       app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.loadDevinUrl(value), url),
+    closeTab: (id: string) =>
+      app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.close(value) as Promise<boolean>, id),
+    listScopes: () =>
+      app.evaluate(
+        () =>
+          (globalThis as any).__devinworkspaces.listScopes() as Array<{
+            scope: string;
+            count: number;
+            liveCount: number;
+          }>,
+      ),
+    tabInfo: (id: string) =>
+      app.evaluate(
+        (_e, value: string) =>
+          (globalThis as any).__devinworkspaces.tabInfo(value) as {
+            url: string;
+            originSessionId: string | null;
+            discarded: boolean;
+            loading: boolean;
+            hasView: boolean;
+          } | null,
+        id,
+      ),
     devinUrl: () =>
       app.evaluate(({ webContents }, prefix: string) =>
         webContents.getAllWebContents().find((c) => c.getURL().startsWith(prefix))?.getURL(), fixtures.devinUrl),
@@ -259,6 +291,151 @@ test('lists the current session PRs for quick-open and Ctrl+N goes to the new-se
     );
     expect(shown).toHaveLength(1);
     expect((shown[0]?.detail as any).toast).toBe(false);
+  } finally {
+    await quit(app, profile);
+  }
+});
+
+test('auto-opens a lazy background tab in the session scope when a session gains a PR (F1)', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  const events = async (name: string) => (await readEvents(logFile)).filter((e) => e.event === name);
+  // pollNow() is a no-op while a scheduled poll is in flight, so wait until one
+  // more successful `poll` event has been logged (whichever poll produced it).
+  const pollOnce = async () => {
+    const before = (await events('poll')).length;
+    await h.pollNow();
+    await expect.poll(async () => (await events('poll')).length).toBeGreaterThan(before);
+  };
+  const existingPr = `${fixtures.githubUrl}/acme/widgets/pull/1`;
+  const newPr = `${fixtures.githubUrl}/acme/widgets/pull/2`;
+  const laterPr = `${fixtures.githubUrl}/acme/widgets/pull/3`;
+  const session = (prs: string[]) => ({
+    session_id: 'sess-pr',
+    title: 'PR session',
+    status: 'running',
+    status_detail: 'working',
+    updated_at: 3,
+    pull_requests: prs.map((pr_url) => ({ pr_url, pr_state: 'open' })),
+  });
+  try {
+    // A GLOBAL-scope tab the user already has: the visible strip must not change.
+    const globalTab = await openTab(app, `${fixtures.githubUrl}/page/global`);
+    await waitForTabCount(app, 1);
+    expect((await state(app)).tabs.activeId).toBe(globalTab);
+    const webContentsBefore = await webContentsCount(app);
+
+    // (1) First poll with a session that already has a PR: baseline, nothing opens.
+    fixtures.api.setSessions([session([existingPr])]);
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
+    await pollOnce();
+    expect(await events('pr-auto-open')).toHaveLength(0);
+    expect((await events('tab-open')).filter((e) => (e.detail as any).lazy)).toHaveLength(0);
+    let current = await state(app);
+    expect(current.tabs.tabs.map((tab) => tab.id)).toEqual([globalTab]);
+    expect(current.tabs.hiddenTabCount).toBe(0);
+
+    // (2) The session gains a PR -> one lazy tab in its scope; visible strip untouched.
+    fixtures.api.setSessions([session([existingPr, newPr])]);
+    await pollOnce();
+    await waitForEvent(logFile, 'pr-auto-open');
+    const autoOpened = await events('pr-auto-open');
+    expect(autoOpened).toHaveLength(1);
+    expect(autoOpened[0]?.url).toBe(newPr);
+    expect((autoOpened[0]?.detail as any).sessionId).toBe('sess-pr');
+    const lazyOpens = (await events('tab-open')).filter((e) => (e.detail as any).lazy === true);
+    expect(lazyOpens).toHaveLength(1);
+    expect(lazyOpens[0]?.url).toBe(newPr);
+    expect((lazyOpens[0]?.detail as any).originSessionId).toBe('sess-pr');
+    expect((lazyOpens[0]?.detail as any).background).toBe(true);
+    const prTabId = (lazyOpens[0]?.detail as any).id as string;
+    current = await state(app);
+    expect(current.tabs.activeId).toBe(globalTab);
+    expect(current.tabs.tabs.map((tab) => tab.id)).toEqual([globalTab]);
+    expect(current.tabs.hiddenTabCount).toBe(1);
+    // Lazy placeholder: discarded, scoped to the session, and no webContents was created.
+    expect(await h.tabInfo(prTabId)).toEqual({
+      url: newPr,
+      originSessionId: 'sess-pr',
+      discarded: true,
+      loading: false,
+      hasView: false,
+    });
+    expect(await webContentsCount(app)).toBe(webContentsBefore);
+    expect(await h.listScopes()).toContainEqual(
+      expect.objectContaining({ scope: 'sess-pr', count: 1, liveCount: 0 }),
+    );
+
+    // Viewing the session shows the tab in its strip (activation loads it).
+    await h.loadDevinUrl(`${fixtures.devinUrl}/sessions/sess-pr`);
+    await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-pr');
+    await expect.poll(async () => (await state(app)).tabs.scope).toBe('sess-pr');
+    await expect.poll(async () => (await state(app)).tabs.tabs.map((tab) => tab.id)).toEqual([prTabId]);
+    current = await state(app);
+    expect(current.tabs.tabs[0]?.url).toBe(newPr);
+    expect(current.tabs.tabs[0]?.originSessionId).toBe('sess-pr');
+    expect(current.tabs.activeId).toBe(prTabId);
+    await expect.poll(async () => (await h.tabInfo(prTabId))?.hasView).toBe(true);
+
+    // Same PR list on the next poll -> no duplicate, no re-open.
+    await pollOnce();
+    expect(await events('pr-auto-open')).toHaveLength(1);
+    expect((await state(app)).tabs.tabs).toHaveLength(1);
+
+    // (3) User closes it; later polls (same PR still listed) do not reopen it.
+    expect(await h.closeTab(prTabId)).toBe(true);
+    await waitForTabCount(app, 0);
+    await pollOnce();
+    await pollOnce();
+    expect(await events('pr-auto-open')).toHaveLength(1);
+    expect((await state(app)).tabs.tabs).toHaveLength(0);
+    expect(await h.tabInfo(prTabId)).toBeNull();
+
+    // (4) Toggle off via the settings IPC (restarts the poller -> fresh baseline),
+    // then a new PR appears: nothing opens.
+    const restartsBefore = (await events('notifier-start')).length;
+    await evaluateInShell(app, `window.devinworkspaces.setSettings({ prs: { autoOpenTabs: false } })`);
+    await expect.poll(async () => (await state(app)).settings.prs).toEqual({ autoOpenTabs: false });
+    await expect.poll(async () => (await events('notifier-start')).length).toBeGreaterThan(restartsBefore);
+    await pollOnce();
+    fixtures.api.setSessions([session([existingPr, newPr, laterPr])]);
+    await pollOnce();
+    await pollOnce();
+    expect(await events('pr-auto-open')).toHaveLength(1);
+    expect((await state(app)).tabs.tabs).toHaveLength(0);
+    expect((await state(app)).tabs.hiddenTabCount).toBe(1); // only the GLOBAL tab
+    expect(await h.listScopes()).not.toContainEqual(expect.objectContaining({ scope: 'sess-pr' }));
+
+    // Toggle back on: the restart baseline includes laterPr, so still nothing opens
+    // until a genuinely new PR arrives.
+    await evaluateInShell(app, `window.devinworkspaces.setSettings({ prs: { autoOpenTabs: true } })`);
+    await expect.poll(async () => (await state(app)).settings.prs).toEqual({ autoOpenTabs: true });
+    await pollOnce();
+    await pollOnce();
+    expect(await events('pr-auto-open')).toHaveLength(1);
+    const fourthPr = `${fixtures.githubUrl}/acme/widgets/pull/4`;
+    fixtures.api.setSessions([session([existingPr, newPr, laterPr, fourthPr])]);
+    await pollOnce();
+    await expect.poll(async () => (await events('pr-auto-open')).length).toBe(2);
+    expect((await events('pr-auto-open'))[1]?.url).toBe(fourthPr);
+    // The visible scope is sess-pr and had no tabs, so this one is the scope's
+    // active tab: it must render (view created, not discarded) rather than show
+    // an active-but-empty pane.
+    const fourthOpen = (await events('tab-open')).find((e) => e.url === fourthPr);
+    expect((fourthOpen?.detail as any).lazy).toBe(true);
+    const fourthId = (fourthOpen?.detail as any).id as string;
+    await expect.poll(async () => (await state(app)).tabs.tabs.map((tab) => tab.url)).toEqual([fourthPr]);
+    current = await state(app);
+    expect(current.tabs.activeId).toBe(fourthId);
+    expect(current.tabs.tabs[0]?.discarded ?? false).toBe(false);
+    expect(current.tabs.hiddenTabCount).toBe(1); // the GLOBAL tab
+    await expect.poll(async () => (await h.tabInfo(fourthId))?.hasView).toBe(true);
+    expect((await h.tabInfo(fourthId))?.discarded).toBe(false);
+    expect(await webContentsCount(app)).toBe(webContentsBefore + 1);
+    expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
   } finally {
     await quit(app, profile);
   }

@@ -197,3 +197,20 @@ describe('notifications settings (P5)', () => {
     expect(SettingsPatchSchema.safeParse({ notifications: { enabled: 'yes' } }).success).toBe(false);
   });
 });
+
+describe('prs settings (F1)', () => {
+  it('defaults autoOpenTabs to true and toggles via a patch', () => {
+    const base = SettingsSchema.parse({});
+    expect(base.prs).toEqual({ autoOpenTabs: true });
+    expect(SettingsPatchSchema.parse({})).not.toHaveProperty('prs');
+    const off = mergeSettings(base, { prs: { autoOpenTabs: false } });
+    expect(off.prs).toEqual({ autoOpenTabs: false });
+    expect(off.notifications).toEqual(base.notifications);
+    const on = mergeSettings(off, { prs: { autoOpenTabs: true } });
+    expect(on.prs).toEqual({ autoOpenTabs: true });
+    expect(mergeSettings(off, { notifications: { enabled: false } }).prs).toEqual({ autoOpenTabs: false });
+    expect(SettingsPatchSchema.safeParse({ prs: { autoOpenTabs: 'yes' } }).success).toBe(false);
+    // A pre-F1 settings file without `prs` parses to the default.
+    expect(parseSettingsFile({ tenantUrl: 'https://x.example' }).settings.prs).toEqual({ autoOpenTabs: true });
+  });
+});
