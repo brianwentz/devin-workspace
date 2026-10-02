@@ -19,7 +19,7 @@ export interface LoginForm {
 }
 
 export const USERNAME_HINT = /user|email|login|account|identifier|e-mail|phone/;
-const SEARCH_HINT = /search|query|q$/;
+const SEARCH_HINT = /search|query|^q$/;
 const TEXT_LIKE = new Set(['text', 'email', 'tel', '']);
 
 function isSearchish(field: FieldDescriptor): boolean {

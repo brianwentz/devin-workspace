@@ -26,6 +26,12 @@ export type PublicState = {
       accounts: Array<{ id: string; username: string }>;
       anchor: { x: number; y: number; width: number; height: number };
     } | null;
+    prompt: {
+      kind: 'save' | 'update';
+      origin: string;
+      username: string;
+      anchor: { x: number; y: number; width: number; height: number };
+    } | null;
   };
   settings: Record<string, unknown> & {
     tabs: { keepAliveHours: number; maxLiveTabs: number };

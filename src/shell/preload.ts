@@ -205,6 +205,11 @@ const api = {
     if (isString(id)) ipcRenderer.send(IpcChannels.autofillPick, { id });
   },
   autofillPickerClose: () => ipcRenderer.send(IpcChannels.autofillPickerClose),
+  autofillPromptResolve: (action: 'save' | 'dismiss') => {
+    if (action === 'save' || action === 'dismiss') {
+      ipcRenderer.send(IpcChannels.autofillPromptResolve, { action });
+    }
+  },
   onDragGuide: (callback: (guide: { axis: 'x' | 'y'; pos: number }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
       if (

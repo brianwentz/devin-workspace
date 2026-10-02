@@ -2,13 +2,25 @@ import { normalizeOrigin } from '../core/credentials';
 import {
   AutofillPickerSchema,
   AutofillPickSchema,
+  AutofillPromptResolveSchema,
   AutofillQuerySchema,
+  AutofillSubmittedSchema,
   IpcChannels,
 } from '../shared/ipc';
 import { guardedOn, hostedHandle, hostedOn } from './ipcGuard';
 import { log } from './log';
-import { fixtureOrigins, state } from './state';
-import { applyLayout, lowerShell, notifyShell, raiseShell } from './window';
+import { fixtureOrigins, state, testMode } from './state';
+import { applyLayout, lowerShell, notifyShell, overlayOpen, raiseShell } from './window';
+
+// DEVIN_WORKSPACES_TEST_AUTOFILL_PROMPT_MS (test mode only) shortens both the
+// show-delay fallback and the auto-dismiss window.
+const promptMs = (fallback: number): number => {
+  const override = testMode ? Number(process.env.DEVIN_WORKSPACES_TEST_AUTOFILL_PROMPT_MS) : NaN;
+  return Number.isFinite(override) && override > 0 ? override : fallback;
+};
+const SHOW_FALLBACK_MS = () => promptMs(1500);
+const PROMPT_DISMISS_MS = () => promptMs(10_000);
+const PENDING_TTL_MS = 60_000;
 
 // Navigation/teardown of the picker's sender must dismiss it; the listeners
 // are armed once per sender and only fire while that sender owns the picker.
@@ -26,8 +38,91 @@ function armPickerClose(sender: Electron.WebContents): void {
 export function closeAutofillPicker(): void {
   if (!state.autofillPicker) return;
   state.autofillPicker = null;
-  lowerShell();
+  if (!overlayOpen()) lowerShell();
   applyLayout();
+}
+
+// Pending captures outlive overlay churn: they're dropped only on resolve,
+// replacement by a new submit from the same sender, sender destroy, or TTL —
+// never by tab/scope/surface switches (the devin view's own navigation can
+// trigger a scope switch while a pending capture is still arming).
+function dropPending(): void {
+  const pending = state.autofillPending;
+  if (!pending) return;
+  state.autofillPending = null;
+  for (const timer of pending.timers) clearTimeout(timer);
+  pending.unlisten();
+}
+
+// Closes a *shown* prompt only — a pending capture is untouched.
+export function closeAutofillPrompt(): void {
+  const prompt = state.autofillPrompt;
+  if (!prompt) return;
+  clearTimeout(prompt.dismissTimer);
+  state.autofillPrompt = null;
+  if (!overlayOpen()) lowerShell();
+  applyLayout();
+}
+
+// Dismisses every shown autofill overlay (surface switch).
+export function closeAutofillOverlays(): void {
+  closeAutofillPicker();
+  closeAutofillPrompt();
+}
+
+// Tab activate/close/scope switch: dismiss only overlays anchored to a tab
+// view that is no longer the active tab. A devin-view-anchored overlay (e.g.
+// a capture pending through an SSO redirect that flips the scope) survives.
+export function closeAutofillOverlaysForInactiveTabs(): void {
+  const devin = state.devinView?.webContents ?? null;
+  const active = state.tabManager?.activeWebContents ?? null;
+  const stale = (sender: Electron.WebContents) => sender !== devin && sender !== active;
+  if (state.autofillPicker && stale(state.autofillPicker.sender)) closeAutofillPicker();
+  if (state.autofillPrompt && stale(state.autofillPrompt.sender)) closeAutofillPrompt();
+}
+
+function senderView(sender: Electron.WebContents): Electron.WebContentsView | null {
+  if (state.devinView?.webContents === sender) return state.devinView;
+  return state.tabManager?.getViews().find((v) => v.webContents === sender) ?? null;
+}
+
+function showPrompt(pending: NonNullable<typeof state.autofillPending>): void {
+  if (state.autofillPending !== pending || senderView(pending.sender) === null) {
+    return;
+  }
+  if (Date.now() - pending.createdAt > PENDING_TTL_MS) {
+    dropPending();
+    return;
+  }
+  pending.unlisten();
+  for (const timer of pending.timers) clearTimeout(timer);
+  pending.timers = [];
+  pending.sender.once('destroyed', () => {
+    if (state.autofillPrompt?.sender === pending.sender) closeAutofillPrompt();
+  });
+  const view = senderView(pending.sender)!;
+  // The prompt replaces any open picker.
+  if (state.autofillPicker) {
+    state.autofillPicker = null;
+  }
+  state.autofillPrompt = {
+    sender: pending.sender,
+    kind: pending.kind,
+    origin: pending.origin,
+    username: pending.username ?? '',
+    anchor: view.getBounds(),
+    dismissTimer: setTimeout(() => {
+      log('shell', 'autofill-dismiss', {
+        detail: { origin: pending.origin, kind: pending.kind, reason: 'timeout' },
+      });
+      closeAutofillPrompt();
+    }, PROMPT_DISMISS_MS()),
+  };
+  raiseShell();
+  notifyShell();
+  log('shell', 'autofill-prompt', {
+    detail: { origin: pending.origin, kind: pending.kind },
+  });
 }
 
 export function setupAutofillIpc(): void {
@@ -73,10 +168,7 @@ export function setupAutofillIpc(): void {
     if (!origin) return;
     const accounts = state.credentials.forOrigin(origin);
     if (accounts.length < 2) return;
-    const view =
-      state.devinView?.webContents === sender
-        ? state.devinView
-        : (state.tabManager?.getViews().find((v) => v.webContents === sender) ?? null);
+    const view = senderView(sender);
     if (!view) return;
     const bounds = view.getBounds();
     const zoom = sender.getZoomFactor();
@@ -95,6 +187,65 @@ export function setupAutofillIpc(): void {
     raiseShell();
     notifyShell();
     log('shell', 'autofill-picker', { detail: { origin, accounts: accounts.length } });
+  });
+
+  hostedOn(IpcChannels.autofillSubmitted, (event, payload: unknown) => {
+    const parsed = AutofillSubmittedSchema.safeParse(payload);
+    if (!parsed.success || !state.credentials) return;
+    const sender = event.sender;
+    const origin = normalizeOrigin(event.senderFrame?.url ?? '', fixtureOrigins);
+    if (!origin) return;
+    const { username, password } = parsed.data;
+    void (async () => {
+      const credentials = state.credentials!;
+      const accounts = credentials.forOrigin(origin);
+      const existing = username
+        ? accounts.find((entry) => entry.username === username)
+        : accounts.length === 1
+          ? accounts[0]
+          : undefined;
+      if (existing) {
+        const current = await credentials.reveal(existing.id);
+        if (sender.isDestroyed()) return;
+        if (current === password) {
+          log('shell', 'autofill-capture', {
+            detail: { origin, result: 'unchanged' },
+          });
+          return;
+        }
+      }
+      if (state.autofillPending?.sender === sender) dropPending();
+      const pending = {
+        sender,
+        origin,
+        username,
+        password,
+        kind: (existing ? 'update' : 'save') as 'save' | 'update',
+        createdAt: Date.now(),
+        timers: [] as NodeJS.Timeout[],
+        unlisten: () => {
+          sender.off('did-navigate', show);
+          sender.off('did-navigate-in-page', show);
+          sender.off('did-finish-load', show);
+          sender.off('destroyed', drop);
+        },
+      };
+      const show = () => showPrompt(pending);
+      const drop = () => {
+        if (state.autofillPending === pending) {
+          state.autofillPending = null;
+          pending.unlisten();
+          for (const timer of pending.timers) clearTimeout(timer);
+        }
+      };
+      sender.on('did-navigate', show);
+      sender.on('did-navigate-in-page', show);
+      sender.on('did-finish-load', show);
+      sender.once('destroyed', drop);
+      pending.timers.push(setTimeout(show, SHOW_FALLBACK_MS()));
+      state.autofillPending = pending;
+      log('shell', 'autofill-capture', { detail: { origin, result: pending.kind } });
+    })();
   });
 
   guardedOn(IpcChannels.autofillPick, (_event, payload: unknown) => {
@@ -119,4 +270,29 @@ export function setupAutofillIpc(): void {
   });
 
   guardedOn(IpcChannels.autofillPickerClose, () => closeAutofillPicker());
+
+  guardedOn(IpcChannels.autofillPromptResolve, (_event, payload: unknown) => {
+    const parsed = AutofillPromptResolveSchema.safeParse(payload);
+    const pending = state.autofillPending;
+    const prompt = state.autofillPrompt;
+    if (!parsed.success || !pending || !prompt || !state.credentials) return;
+    if (parsed.data.action === 'save') {
+      const { origin, username, password, kind } = pending;
+      void state.credentials
+        .add({ origin, username: username ?? '', password })
+        .then(() => notifyShell())
+        .catch((error: unknown) => {
+          log('shell', 'autofill-save-failed', {
+            detail: { origin, message: error instanceof Error ? error.message : String(error) },
+          });
+        });
+      log('shell', 'autofill-save', { detail: { origin, kind } });
+    } else {
+      log('shell', 'autofill-dismiss', {
+        detail: { origin: pending.origin, kind: pending.kind },
+      });
+    }
+    closeAutofillPrompt();
+    dropPending();
+  });
 }

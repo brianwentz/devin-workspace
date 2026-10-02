@@ -317,6 +317,19 @@ export async function startFixtureServers(): Promise<FixtureServers> {
         );
         return;
       }
+      // Same fields as /login but a real GET form that navigates to '/'.
+      if (url.pathname === '/login-redirect') {
+        html(
+          response,
+          `<title>Fixture login redirect</title>
+           <form id="loginForm" method="get" action="/">
+             <input id="user" name="username">
+             <input id="pass" type="password" name="pass">
+             <button id="submit" type="submit">Sign in</button>
+           </form>`,
+        );
+        return;
+      }
       // Two-step (identifier-first) login, à la Okta.
       if (url.pathname === '/login-steps') {
         html(

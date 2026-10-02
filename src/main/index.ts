@@ -4,7 +4,7 @@ import { app, BaseWindow, dialog, Menu, screen, session, webContents, WebContent
 import { clampFraction01 } from '../core/layout';
 import { auditCookies, startCookieAudit } from './cookieAudit';
 import { CredentialStore } from './credentials';
-import { closeAutofillPicker, setupAutofillIpc } from './autofill';
+import { closeAutofillOverlaysForInactiveTabs, setupAutofillIpc } from './autofill';
 import { setupDownloads } from './downloads';
 import { setupIpc } from './ipc';
 import { setupLocal, localHost } from './local/ipc';
@@ -256,7 +256,7 @@ async function createWindow(): Promise<void> {
     onChange: notifyShell,
     onBeforeUnload,
     preload: resolve(app.getAppPath(), 'out', 'autofill-preload.cjs'),
-    onActiveChanged: closeAutofillPicker,
+    onActiveChanged: closeAutofillOverlaysForInactiveTabs,
     initialTabs: saved.tabSnapshot,
     testMode,
     keepAliveMs: keepAliveMs(saved.tabs.keepAliveHours),

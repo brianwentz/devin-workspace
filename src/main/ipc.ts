@@ -2,7 +2,7 @@ import { Menu } from 'electron';
 import { guardedHandle, guardedOn } from './ipcGuard';
 import { clampFraction01 } from '../core/layout';
 import { currentFillTarget } from './credentials';
-import { closeAutofillPicker } from './autofill';
+import { closeAutofillOverlays } from './autofill';
 import {
   CredentialDeleteSchema,
   CredentialFillSchema,
@@ -152,7 +152,7 @@ export function setupIpc(): void {
     if (!parsed.success) return;
     state.surface = parsed.data;
     setNotificationsPanel(false);
-    closeAutofillPicker();
+    closeAutofillOverlays();
     log('shell', 'surface-set', { detail: { surface: state.surface } });
     applyLayout();
   });

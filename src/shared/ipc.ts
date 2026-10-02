@@ -36,6 +36,8 @@ export const IpcChannels = {
   autofillFill: 'autofill:fill',
   autofillPick: 'autofill:pick',
   autofillPickerClose: 'autofill:pickerClose',
+  autofillSubmitted: 'autofill:submitted',
+  autofillPromptResolve: 'autofill:promptResolve',
   // P5 extras
   secretsHasPat: 'secrets:hasPat',
   secretsSetPat: 'secrets:setPat',
@@ -302,6 +304,13 @@ export const AutofillFillSchema = z.object({
   username: z.string(),
   password: z.string(),
 });
+export const AutofillSubmittedSchema = z.object({
+  username: z.string().max(256).nullable(),
+  password: z.string().min(1).max(1024),
+});
+export const AutofillPromptResolveSchema = z.object({
+  action: z.enum(['save', 'dismiss']),
+});
 
 export const ShellStateSchema = z.object({
   paneOpen: z.boolean(),
@@ -327,6 +336,14 @@ export const ShellStateSchema = z.object({
     picker: z
       .object({
         accounts: z.array(z.object({ id: z.string(), username: z.string() })),
+        anchor: RectSchema,
+      })
+      .nullable(),
+    prompt: z
+      .object({
+        kind: z.enum(['save', 'update']),
+        origin: z.string(),
+        username: z.string(),
         anchor: RectSchema,
       })
       .nullable(),

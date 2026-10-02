@@ -66,6 +66,14 @@ export function publicState(): ShellState {
             anchor: state.autofillPicker.anchor,
           }
         : null,
+      prompt: state.autofillPrompt
+        ? {
+            kind: state.autofillPrompt.kind,
+            origin: state.autofillPrompt.origin,
+            username: state.autofillPrompt.username,
+            anchor: state.autofillPrompt.anchor,
+          }
+        : null,
     },
     notifications: {
       ...state.notifications,
@@ -131,6 +139,14 @@ export function raiseShell(): void {
   windowRef.contentView.addChildView(shellView);
 }
 
+// Any shell-DOM overlay raised above hosted views (notifications panel,
+// autofill picker, autofill save/update prompt).
+export function overlayOpen(): boolean {
+  return (
+    state.notificationsPanelOpen || !!state.autofillPicker || !!state.autofillPrompt
+  );
+}
+
 // Restore the normal stacking order (shell bottom, hosted views above).
 export function lowerShell(): void {
   const { windowRef, shellView, devinView, tabManager } = state;
@@ -172,9 +188,9 @@ export function applyLayout(): void {
     const activeTabView = paneVisible ? tabManager.activeView : null;
     if (activeTabView) ensureAttached(activeTabView);
     else if (tabManager.activeView) detachView(tabManager.activeView);
-    // The notifications panel and the autofill picker are shell-DOM modals
+    // The notifications panel and the autofill overlays are shell-DOM modals
     // over hosted views — the raise must survive relayout.
-    if (state.notificationsPanelOpen || state.autofillPicker) raiseShell();
+    if (overlayOpen()) raiseShell();
   }
   notifyShell();
 }
@@ -257,7 +273,7 @@ export function setNotificationsPanel(open: boolean): void {
   if (state.notificationsPanelOpen === open) return;
   state.notificationsPanelOpen = open;
   if (open) raiseShell();
-  else lowerShell();
+  else if (!overlayOpen()) lowerShell();
   applyLayout();
   log('shell', 'notifications-panel', { detail: { open } });
 }

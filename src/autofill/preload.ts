@@ -36,6 +36,9 @@ function init(): void {
   const autofilled = new WeakMap<HTMLInputElement, string>();
   // Forms with >1 saved account: focus/click on a field asks main for a picker.
   const pickerForms = new Set<FormHit>();
+  // Every detected hit (for submit capture); the elements are WeakSet-tracked
+  // for queries but kept here for the lifetime of the document.
+  const knownHits: FormHit[] = [];
   let lastPicker: FormHit | null = null;
   let lastUsername = '';
   let queryCount = 0;
@@ -158,7 +161,9 @@ function init(): void {
       if (!key || handled.has(key)) continue;
       handled.add(key);
       if (username) usernameFields.add(username);
-      enqueueQuery({ username, password });
+      const hit = { username, password };
+      knownHits.push(hit);
+      enqueueQuery(hit);
     }
   }
 
@@ -191,7 +196,8 @@ function init(): void {
     (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) return;
-      scan();
+      // Debounced — a full DOM walk on every keystroke-focus is too heavy.
+      scheduleScan();
       for (const hit of pickerForms) {
         if (target === hit.username || target === hit.password) {
           lastPicker = hit;
@@ -230,7 +236,148 @@ function init(): void {
     true,
   );
 
-  const observer = new MutationObserver(() => scheduleScan());
+  // --- Capture on submit ---------------------------------------------------
+  // Snapshot credentials when a login form submits. Two paths: a real `submit`
+  // event, and an SPA fallback armed by button clicks / Enter that only sends
+  // once the password field disappears or the page unloads (meaning the submit
+  // actually went through).
+  interface Armed {
+    hit: FormHit;
+    username: string;
+    password: string;
+    timer: ReturnType<typeof setTimeout>;
+  }
+  let armed: Armed | null = null;
+
+  function sendSubmitted(username: string, password: string): void {
+    if (!password || password.length > 1024) return;
+    ipcRenderer.send('autofill:submitted', {
+      username: username ? username.slice(0, 256) : null,
+      password,
+    });
+  }
+
+  function snapshot(hit: FormHit): { username: string; password: string } {
+    return {
+      username: hit.username?.value || lastUsername,
+      password: hit.password?.value ?? '',
+    };
+  }
+
+  function disarm(): void {
+    if (!armed) return;
+    clearTimeout(armed.timer);
+    armed = null;
+  }
+
+  function arm(hit: FormHit): void {
+    const { username, password } = snapshot(hit);
+    if (!password) return;
+    disarm();
+    armed = {
+      hit,
+      username,
+      password,
+      timer: setTimeout(() => {
+        const pending = armed;
+        armed = null;
+        // Field may have gone away with no observable mutation recorded —
+        // check once more at the deadline.
+        if (pending && fieldGone(pending.hit.password)) {
+          sendSubmitted(pending.username, pending.password);
+        }
+      }, 3000),
+    };
+  }
+
+  function fieldGone(el: HTMLInputElement | null): boolean {
+    if (!el || !document.contains(el)) return true;
+    const rect = el.getBoundingClientRect();
+    return rect.width === 0 || rect.height === 0;
+  }
+
+  function hitForElement(el: Element): FormHit | null {
+    const form = el.closest('form');
+    for (const hit of knownHits) {
+      if (!hit.password) continue;
+      if (form && ((hit.username && form.contains(hit.username)) || form.contains(hit.password))) {
+        return hit;
+      }
+      if (!form && hit.username === el) return hit;
+      if (!form && hit.password === el) return hit;
+    }
+    // Fallback: any known hit whose password field currently has a value.
+    for (const hit of knownHits) {
+      if (hit.password && hit.password.value) return hit;
+    }
+    return null;
+  }
+
+  // A click/submit may race the debounced mutation rescan — force one before
+  // giving up on hit lookup, but only when a password field exists at all.
+  function hitForElementOrScan(el: Element): FormHit | null {
+    const hit = hitForElement(el);
+    if (hit) return hit;
+    if (document.querySelector('input[type="password"]') === null) return null;
+    scan();
+    return hitForElement(el);
+  }
+
+  document.addEventListener(
+    'submit',
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const hit = hitForElementOrScan(target);
+      if (!hit) return;
+      disarm();
+      const { username, password } = snapshot(hit);
+      sendSubmitted(username, password);
+    },
+    true,
+  );
+
+  document.addEventListener(
+    'click',
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest('button, input[type="submit"], [role="button"]');
+      if (!button) return;
+      const hit = hitForElementOrScan(button);
+      if (hit) arm(hit);
+    },
+    true,
+  );
+
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key !== 'Enter') return;
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      const hit = hitForElementOrScan(target);
+      if (hit) arm(hit);
+    },
+    true,
+  );
+
+  window.addEventListener('pagehide', () => {
+    if (!armed) return;
+    const { username, password } = armed;
+    disarm();
+    sendSubmitted(username, password);
+  });
+
+  const observer = new MutationObserver(() => {
+    scheduleScan();
+    // SPA fallback completion: the password field vanished after a click/Enter.
+    if (armed && fieldGone(armed.hit.password)) {
+      const { username, password } = armed;
+      disarm();
+      sendSubmitted(username, password);
+    }
+  });
   const observe = () => observer.observe(document, {
     childList: true,
     subtree: true,
