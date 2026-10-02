@@ -277,9 +277,32 @@ test('gh tab: popups, ctrl-click, in-place navigation, cross-origin, redirects, 
     const frameClick = (id: string) =>
       app.evaluate(
         async ({ webContents }, args: { url: string; id: string }) => {
-          const contents = webContents.getAllWebContents().find((c) => c.getURL().startsWith(args.url));
-          const frame = contents?.mainFrame.frames[0];
+          const findFrame = () =>
+            webContents
+              .getAllWebContents()
+              .find((c) => c.getURL().startsWith(args.url))
+              ?.mainFrame.frames[0];
+          // The frame URL commits before its DOM is parsed: poll until the
+          // element exists (the frame object can also change across
+          // navigations, so re-resolve it each iteration).
+          let frame = findFrame();
+          for (let i = 0; i < 50; i++) {
+            frame = findFrame();
+            if (
+              frame &&
+              (await frame.executeJavaScript(
+                `Boolean(document.getElementById(${JSON.stringify(args.id)}))`,
+              ))
+            ) {
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 100));
+          }
           if (!frame) throw new Error('gh iframe missing');
+          const clickable = await frame.executeJavaScript(
+            `Boolean(document.getElementById(${JSON.stringify(args.id)}))`,
+          );
+          if (!clickable) throw new Error(`gh iframe element missing: ${args.id}`);
           await frame.executeJavaScript(`document.getElementById(${JSON.stringify(args.id)}).click()`);
         },
         { url: aUrl, id },
