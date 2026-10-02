@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { app, BaseWindow, dialog, Menu, screen, session, webContents, WebContentsView } from 'electron';
-import { clampPaneWidth } from '../core/layout';
+import { clampFraction01 } from '../core/layout';
 import { auditCookies, startCookieAudit } from './cookieAudit';
 import { CredentialStore } from './credentials';
 import { setupDownloads } from './downloads';
@@ -17,6 +17,11 @@ import { fixtureOrigins, state, testMode } from './state';
 import { registerTestHooks } from './testHooks';
 import { keepAliveMs, TabManager } from './tabs';
 import { applyLayout, cancelDrag, detachView, notifyShell } from './window';
+import {
+  attachPlacementTracking,
+  initialWindowOptions,
+  savePlacementNow,
+} from './windowPlacement';
 import { attachRouting } from './routing';
 import { setupUpdater } from './updater';
 import { notifier } from './notifier';
@@ -98,6 +103,7 @@ export async function shutdown(): Promise<void> {
       // best effort at shutdown
     }
     localHost()?.dispose();
+    savePlacementNow();
     state.settings?.syncFromState();
     await terminalHost.dispose();
     const contents = [
@@ -146,7 +152,8 @@ async function createWindow(): Promise<void> {
   setupLocal();
   const saved = state.settings.current;
   state.paneOpen = saved.pane.open;
-  state.paneWidth = clampPaneWidth(saved.pane.width, 1400);
+  // Stored as-is (0..1); px guards are derived in computeBounds, not persisted.
+  state.paneFraction = clampFraction01(saved.pane.fraction);
   state.surface = saved.surface;
   // Env override wins over the persisted tenant URL (tests rely on it).
   state.tenantUrl = process.env.DEVIN_WORKSPACES_TENANT_URL ?? saved.tenantUrl;
@@ -163,9 +170,11 @@ async function createWindow(): Promise<void> {
   setPermissions(githubSession, 'gh:session');
   setupDownloads(githubSession);
 
+  // F2: restore bounds for this display configuration; otherwise 1400x900 and
+  // the OS picks the position (no center()).
+  const { restored, ...placementOptions } = initialWindowOptions();
   state.windowRef = new BaseWindow({
-    width: 1400,
-    height: 900,
+    ...placementOptions,
     minWidth: 1000,
     minHeight: 640,
     title: 'Devin Workspaces',
@@ -173,6 +182,8 @@ async function createWindow(): Promise<void> {
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#101722', symbolColor: '#e8edf5', height: 36 },
   });
+  if (restored?.maximized) state.windowRef.maximize();
+  attachPlacementTracking(state.windowRef);
 
   // Test mode: Chromium clamps creation bounds to the work area, which on
   // small CI displays (1024x768) auto-collapses the pane and silently breaks

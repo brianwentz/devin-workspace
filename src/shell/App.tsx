@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { computeBounds, RAIL_WIDTH } from '../core/layout';
+import { computeBounds, DEFAULT_TERMINAL_HEIGHT, RAIL_WIDTH } from '../core/layout';
 import { useShellState } from './store';
 import { Rail } from './components/Rail';
 import { TitleBar } from './components/TitleBar';
@@ -40,7 +40,12 @@ export function App() {
   }, []);
 
   if (!state) return null;
-  const bounds = computeBounds(size, { paneOpen: state.paneOpen, paneWidth: state.paneWidth });
+  const bounds = computeBounds(size, {
+    paneOpen: state.paneOpen,
+    paneFraction: state.paneFraction,
+    terminalOpen: false,
+    terminalHeight: DEFAULT_TERMINAL_HEIGHT,
+  });
   const paneVisible = state.paneOpen && !bounds.paneCollapsed;
   const mainRect = bounds.devin;
 

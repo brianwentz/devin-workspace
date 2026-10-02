@@ -177,6 +177,10 @@ test('installed app launches, creates views, and persists across relaunch', asyn
     // The profile written by the 'fresh' pass must have survived re-running the installer.
     expect(existsSync(join(profile, 'settings.json'))).toBe(true);
     const before = JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8'));
+    // Simulate a pre-fraction profile (a build that still persisted pane.width)
+    // so the upgrade launch exercises the width→fraction migration.
+    before.pane = { open: before.pane?.open ?? true, width: 500 };
+    writeFileSync(join(profile, 'settings.json'), JSON.stringify(before));
     evidence.settingsBeforeUpgradeLaunch = before;
     expect(before.pane?.width).toBe(500);
     // Fixture ports differ between runs; the persisted URL keeps the old port.
@@ -198,10 +202,10 @@ test('installed app launches, creates views, and persists across relaunch', asyn
     evidence.pid = instance.child.pid;
 
     if (upgrade) {
-      // Tab + pane width restored from the pre-upgrade profile.
+      // Tab + pane fraction restored from the pre-upgrade profile.
       await expect.poll(async () => (await shellState(shell)).tabs.tabs.length).toBe(1);
       const restored = await shellState(shell);
-      expect(restored.paneWidth).toBe(500);
+      expect(restored.paneFraction).toBeCloseTo(0.374, 2);
       expect(pathOf(restored.tabs.tabs[0]?.url)).toBe('/page/persisted');
       await expect.poll(async () => (await pageTargets(instance.browser)).length).toBe(3);
       evidence.restoredAfterUpgrade = restored;
@@ -217,8 +221,9 @@ test('installed app launches, creates views, and persists across relaunch', asyn
     expect(urls.some((url) => url.startsWith('app://shell/'))).toBe(true);
     expect(urls.some((url) => url.startsWith(fixtures.devinUrl))).toBe(true);
 
-    await shell.evaluate(() => (window as any).devinworkspaces.setPaneWidth(500));
-    await expect.poll(async () => (await shellState(shell)).paneWidth).toBe(500);
+    // 0.374 ≈ 500 px of the 1338 px available at the 1400 px default window.
+    await shell.evaluate(() => (window as any).devinworkspaces.setSettings({ pane: { fraction: 0.374 } }));
+    await expect.poll(async () => (await shellState(shell)).paneFraction).toBeCloseTo(0.374, 2);
     await shell.evaluate((url: string) => (window as any).devinworkspaces.openLink(url), persistedUrl);
     await expect
       .poll(async () => (await shellState(shell)).tabs.tabs.some((tab) => tab.title.includes('persisted')))
@@ -234,7 +239,8 @@ test('installed app launches, creates views, and persists across relaunch', asyn
     expect(existsSync(join(profile, 'settings.json'))).toBe(true);
     const settings = JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8'));
     evidence.settingsAfterFirstRun = settings;
-    expect(settings.pane?.width).toBe(500);
+    expect(settings.pane?.fraction).toBeCloseTo(0.374, 2);
+    expect(settings.pane?.width).toBeUndefined();
     expect(settings.tabSnapshot?.tabs?.[0]?.url).toBe(persistedUrl);
     // Separate partitions exist on disk.
     expect(existsSync(join(profile, 'Partitions', 'devin'))).toBe(true);
@@ -246,7 +252,7 @@ test('installed app launches, creates views, and persists across relaunch', asyn
     await hooksReady(shell);
     await expect.poll(async () => (await shellState(shell)).tabs.tabs.length).toBe(1);
     const restored = await shellState(shell);
-    expect(restored.paneWidth).toBe(500);
+    expect(restored.paneFraction).toBeCloseTo(0.374, 2);
     expect(restored.tabs.activeId).toBe(tabId);
     expect(restored.tabs.tabs[0]?.url).toBe(persistedUrl);
     await expect.poll(async () => (await pageTargets(instance.browser)).length).toBe(3);

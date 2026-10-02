@@ -6,6 +6,8 @@ interface SplitterProps {
   paneOpen: boolean;
 }
 
+// Pointer → splitter x in px space (the px guards apply here; main converts the
+// resulting pane width into the persisted fraction).
 function currentX(clientX: number): number {
   const width = document.documentElement.clientWidth;
   const pane = clampPaneWidth(width - clientX - SPLITTER_WIDTH, width);

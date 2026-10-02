@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -134,22 +134,35 @@ test('persists settings across relaunch', async () => {
     await expect
       .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
       .toBe(true);
+    // 0.9 of the 1338 px available at 1400 px would be 1204 px — more than the
+    // MIN_DEVIN_WIDTH guard allows (698 px). The layout clamps what it renders, but
+    // the stored preference must stay exactly what was set, across a restart.
     await evaluateInShell(
       app,
-      `window.devinworkspaces.setSettings({ pane: { width: 500 } })`,
+      `window.devinworkspaces.setSettings({ pane: { fraction: 0.9 } })`,
     );
-    await expect.poll(async () => (await state(app)).paneWidth).toBe(500);
+    await expect.poll(async () => (await state(app)).paneFraction).toBe(0.9);
+    expect((await state(app)).paneCollapsed).toBe(false);
     expect(existsSync(join(profile, 'settings.json'))).toBe(true);
 
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
     await waitForEventCount(logFile, 'window-close-complete', 1);
     await app.close();
+    const persisted = JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8'));
+    expect(persisted.pane.fraction).toBe(0.9);
+    expect(persisted.pane.width).toBeUndefined();
 
     app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
     await expect
       .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
       .toBe(true);
-    expect((await state(app)).paneWidth).toBe(500);
+    expect((await state(app)).paneFraction).toBe(0.9);
+    // Still unclamped after the first syncFromState of the new run.
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await waitForEventCount(logFile, 'window-close-complete', 2);
+    await app.close();
+    const afterRestart = JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8'));
+    expect(afterRestart.pane.fraction).toBe(0.9);
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await app.close().catch(() => undefined);
@@ -170,7 +183,8 @@ test('migrates legacy spike-state.json into settings.json', async () => {
       .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
       .toBe(true);
     const current = await state(app);
-    expect(current.paneWidth).toBe(500);
+    // Legacy paneWidth 500 px → fraction 500 / (1400 - 56 - 6).
+    expect(current.paneFraction).toBeCloseTo(0.374, 2);
     expect(existsSync(join(profile, 'settings.json'))).toBe(true);
     expect(existsSync(join(profile, 'spike-state.json'))).toBe(false);
   } finally {

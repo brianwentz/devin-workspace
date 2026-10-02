@@ -1,3 +1,4 @@
+import { fractionFromPx } from './layout';
 import {
   SettingsObject,
   SettingsPatchSchema,
@@ -5,13 +6,30 @@ import {
   type Settings,
 } from '../shared/ipc';
 
+// F2: `pane.width` (px) was persisted against the 1400 px default window.
+const LEGACY_PANE_WINDOW_WIDTH = 1400;
+
 // Migrate pre-P8 payloads: `tabs` used to hold the tab snapshot (now
 // `tabSnapshot`), and `discardIdleMinutes` became `tabs.keepAliveHours`
 // (non-default values convert: ceil(minutes/60), clamped ≥1; the old default
-// of 30 maps to the new default 24).
+// of 30 maps to the new default 24). F2: `pane.width` px → `pane.fraction`.
 export function migrateSettingsRaw(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw;
   const out = { ...(raw as Record<string, unknown>) };
+  if (out.pane && typeof out.pane === 'object') {
+    const pane = { ...(out.pane as Record<string, unknown>) };
+    if (pane.width !== undefined) {
+      if (
+        pane.fraction === undefined &&
+        typeof pane.width === 'number' &&
+        Number.isFinite(pane.width)
+      ) {
+        pane.fraction = fractionFromPx(pane.width, LEGACY_PANE_WINDOW_WIDTH);
+      }
+      delete pane.width;
+    }
+    out.pane = pane;
+  }
   const tabs = out.tabs;
   if (tabs && typeof tabs === 'object') {
     const snapshotCandidate = tabs as Record<string, unknown>;

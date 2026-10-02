@@ -5,7 +5,7 @@ import type { FixtureServers } from '../fixtures/http';
 
 export type PublicState = {
   paneOpen: boolean;
-  paneWidth: number;
+  paneFraction: number;
   paneCollapsed: boolean;
   surface: 'cloud' | 'local' | 'settings';
   currentSessionId: string | null;

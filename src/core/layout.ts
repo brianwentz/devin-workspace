@@ -8,11 +8,6 @@ export interface Rect extends Size {
   y: number;
 }
 
-export interface PaneState {
-  paneOpen: boolean;
-  paneWidth: number;
-}
-
 export interface LayoutState {
   paneOpen: boolean;
   paneFraction: number; // pane share of (windowWidth - RAIL_WIDTH - SPLITTER_WIDTH); 0..1
@@ -35,23 +30,53 @@ export const RAIL_WIDTH = 56;
 export const SPLITTER_WIDTH = 6;
 export const TITLE_BAR_HEIGHT = 36;
 export const MIN_PANE_WIDTH = 320;
-export const MIN_DEVIN_WIDTH = 768;
-export const DEFAULT_PANE_WIDTH = 560;
+// 640 keeps the default 50/50 split real at the 1400 px default window
+// (available 1338 → 669 / 669). Auto-collapse threshold: 56 + 6 + 640 + 320 = 1022.
+export const MIN_DEVIN_WIDTH = 640;
 export const DEFAULT_PANE_FRACTION = 0.5;
 export const DEFAULT_TERMINAL_HEIGHT = 280;
 
+// Persisted fraction sanitiser: 0..1, default for non-finite input. The px
+// guards are NOT applied here — they are derived in computeBounds so the stored
+// preference survives a temporarily small window.
+export function clampFraction01(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : DEFAULT_PANE_FRACTION;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+// Width the pane and the devin view share (window minus rail minus splitter).
+export function paneAvailable(windowWidth: number): number {
+  return Math.max(0, Math.floor(windowWidth) - RAIL_WIDTH - SPLITTER_WIDTH);
+}
+
+// Pane width in px for a fraction (not clamped to the px guards).
+export function paneWidthPx(fraction: number, windowWidth: number): number {
+  const safe = Number.isFinite(fraction) ? clamp01(fraction) : DEFAULT_PANE_FRACTION;
+  return Math.round(safe * paneAvailable(windowWidth));
+}
+
+// Fraction for a pane width in px (clamped to 0..1).
+export function fractionFromPx(px: number, windowWidth: number): number {
+  const available = paneAvailable(windowWidth);
+  if (available <= 0 || !Number.isFinite(px)) return DEFAULT_PANE_FRACTION;
+  return clamp01(px / available);
+}
+
+// px guards: the pane never drops below MIN_PANE_WIDTH and the devin view keeps
+// MIN_DEVIN_WIDTH (when the window is too narrow for both, the smaller wins and
+// computeBounds auto-collapses the pane).
 export function clampPaneWidth(width: number, windowWidth: number): number {
-  const max = Math.max(
-    0,
-    Math.min(1200, windowWidth - RAIL_WIDTH - SPLITTER_WIDTH - MIN_DEVIN_WIDTH),
-  );
+  const max = Math.max(0, windowWidth - RAIL_WIDTH - SPLITTER_WIDTH - MIN_DEVIN_WIDTH);
   const min = Math.min(MIN_PANE_WIDTH, max);
   return Math.min(max, Math.max(min, Math.round(width)));
 }
 
 export function computeBounds(
   windowSize: Size,
-  paneState: PaneState,
+  layout: LayoutState,
 ): WindowBounds {
   const width = Math.max(0, Math.floor(windowSize.width));
   const height = Math.max(0, Math.floor(windowSize.height));
@@ -63,7 +88,7 @@ export function computeBounds(
     height: Math.min(TITLE_BAR_HEIGHT, height),
   };
 
-  if (!paneState.paneOpen) {
+  if (!layout.paneOpen) {
     return {
       rail,
       titleBar,
@@ -87,14 +112,14 @@ export function computeBounds(
   // preference is not mutated — collapse is purely derived.
   const allowedMax = width - rail.width - SPLITTER_WIDTH - MIN_DEVIN_WIDTH;
   if (allowedMax < MIN_PANE_WIDTH) {
-    const closed = computeBounds(windowSize, {
-      paneOpen: false,
-      paneWidth: paneState.paneWidth,
-    });
+    const closed = computeBounds(windowSize, { ...layout, paneOpen: false });
     return { ...closed, paneCollapsed: true };
   }
   const paneCollapsed = false;
-  const paneWidth = clampPaneWidth(Math.min(paneState.paneWidth, allowedMax), width);
+  const paneWidth = clampPaneWidth(
+    Math.min(paneWidthPx(layout.paneFraction, width), allowedMax),
+    width,
+  );
   const splitterX = Math.max(rail.width, width - paneWidth - SPLITTER_WIDTH);
   const paneX = Math.min(width, splitterX + SPLITTER_WIDTH);
   const paneActualWidth = Math.max(0, width - paneX);

@@ -1,5 +1,5 @@
 import { webContents } from 'electron';
-import { clampPaneWidth } from '../core/layout';
+import { clampFraction01 } from '../core/layout';
 import { auditCookies } from './cookieAudit';
 import { currentFillTarget } from './credentials';
 import { fromShell } from './ipcGuard';
@@ -42,11 +42,9 @@ export function registerTestHooks(): void {
         state.paneOpen = value;
         applyLayout();
       },
-      setPaneWidth: (value: number) => {
-        state.paneWidth = clampPaneWidth(
-          value,
-          state.windowRef?.getContentBounds().width ?? 1400,
-        );
+      // Mirrors settings:set — stores the raw preference, layout applies the px guards.
+      setPaneFraction: (value: number) => {
+        state.paneFraction = clampFraction01(value);
         applyLayout();
       },
       setSurface: (value: Surface) => {

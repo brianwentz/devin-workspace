@@ -1,6 +1,6 @@
 import { Menu } from 'electron';
 import { guardedHandle, guardedOn } from './ipcGuard';
-import { clampPaneWidth } from '../core/layout';
+import { clampFraction01 } from '../core/layout';
 import { currentFillTarget } from './credentials';
 import {
   CredentialDeleteSchema,
@@ -11,7 +11,6 @@ import {
   IpcChannels,
   LinkOpenArg,
   NavActionArg,
-  PaneWidthArg,
   SettingsPatchSchema,
   SettingsSchema,
   SetPatArg,
@@ -52,10 +51,8 @@ export function setupIpc(): void {
     const next: Settings = state.settings.merge(parsed.data);
     notifier.onSettingsChanged(previousSettings, next);
     state.paneOpen = next.pane.open;
-    state.paneWidth = clampPaneWidth(
-      next.pane.width,
-      state.windowRef?.getContentBounds().width ?? 1400,
-    );
+    // Raw 0..1 preference; the px guards are applied when laying out.
+    state.paneFraction = clampFraction01(next.pane.fraction);
     state.surface = next.surface;
     state.tabManager?.setKeepAliveMs(keepAliveMs(next.tabs.keepAliveHours));
     state.tabManager?.setMaxLiveTabs(next.tabs.maxLiveTabs);
@@ -72,16 +69,6 @@ export function setupIpc(): void {
   guardedOn(IpcChannels.paneToggle, () => {
     state.paneOpen = !state.paneOpen;
     log('shell', 'pane-toggle', { detail: { paneOpen: state.paneOpen } });
-    applyLayout();
-  });
-  guardedOn(IpcChannels.paneWidth, (_event, width: unknown) => {
-    const parsed = PaneWidthArg.safeParse(width);
-    if (!parsed.success) return;
-    state.paneWidth = clampPaneWidth(
-      parsed.data,
-      state.windowRef?.getContentBounds().width ?? 1400,
-    );
-    log('shell', 'pane-width', { detail: { paneWidth: state.paneWidth } });
     applyLayout();
   });
   guardedOn(IpcChannels.tabActivate, (_event, id: unknown) => {

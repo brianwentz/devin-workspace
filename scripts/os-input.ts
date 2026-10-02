@@ -9,7 +9,7 @@ import { startFixtureServers } from '../tests/fixtures/http';
 
 type ShellStateLike = {
   paneOpen: boolean;
-  paneWidth: number;
+  paneFraction: number;
   tabs: { activeId: string | null; tabs: Array<{ id: string; title: string; url: string }> };
 };
 
@@ -143,7 +143,9 @@ async function runScale(scale: number, devinUrl: string, githubUrl: string): Pro
     };
     const key = (chord: string) => xdotool(['key', '--clearmodifiers', chord]);
 
-    const startingWidth = (await getState(launched)).paneWidth;
+    // F2: the pane is stored as a fraction of (1400 - rail - splitter); convert for pointer math.
+    const panePx = (fraction: number) => Math.round(fraction * (1400 - 56 - 6));
+    const startingWidth = panePx((await getState(launched)).paneFraction);
     const firstStartX = 1400 - startingWidth - 3;
     moveTo(firstStartX, 300);
     xdotool(['mousedown', '1']);
@@ -157,9 +159,9 @@ async function runScale(scale: number, devinUrl: string, githubUrl: string): Pro
       eventFile,
       (event) => event.event === 'drag-end' && event.detail?.x === 600,
     );
-    const widthAfterDevinRelease = (await getState(launched)).paneWidth;
+    const widthAfterDevinRelease = panePx((await getState(launched)).paneFraction);
     expect(widthAfterDevinRelease).not.toBe(startingWidth);
-    expect(firstEnd.at(-1)?.detail?.paneWidth).not.toBe(startingWidth);
+    expect(panePx(firstEnd.at(-1)?.detail?.paneFraction)).not.toBe(startingWidth);
 
     const secondStartX = 1400 - widthAfterDevinRelease - 3;
     moveTo(secondStartX, 300);
@@ -169,11 +171,12 @@ async function runScale(scale: number, devinUrl: string, githubUrl: string): Pro
     xdotool(['mouseup', '1']);
     const secondEnd = await waitForEvent(
       eventFile,
-      (event) => event.event === 'drag-end' && event.detail?.paneWidth !== widthAfterDevinRelease,
+      (event) =>
+        event.event === 'drag-end' && panePx(event.detail?.paneFraction) !== widthAfterDevinRelease,
     );
-    const widthAfterGithubRelease = (await getState(launched)).paneWidth;
+    const widthAfterGithubRelease = panePx((await getState(launched)).paneFraction);
     expect(widthAfterGithubRelease).not.toBe(widthAfterDevinRelease);
-    expect(secondEnd.at(-1)?.detail?.paneWidth).not.toBe(widthAfterDevinRelease);
+    expect(panePx(secondEnd.at(-1)?.detail?.paneFraction)).not.toBe(widthAfterDevinRelease);
 
     const escapeStartX = 1400 - widthAfterGithubRelease - 3;
     moveTo(escapeStartX, 300);
@@ -186,7 +189,7 @@ async function runScale(scale: number, devinUrl: string, githubUrl: string): Pro
       eventFile,
       (event) => event.event === 'drag-cancel' && event.detail?.reason === 'escape',
     );
-    expect((await getState(launched)).paneWidth).toBe(widthAfterGithubRelease);
+    expect(panePx((await getState(launched)).paneFraction)).toBe(widthAfterGithubRelease);
 
     clickAt(24, 30);
     key('ctrl+shift+g');
@@ -218,7 +221,7 @@ async function runScale(scale: number, devinUrl: string, githubUrl: string): Pro
     key('alt+Right');
     key('ctrl+r');
     key('F5');
-    const widthBeforeKeyboardResize = (await getState(launched)).paneWidth;
+    const widthBeforeKeyboardResize = panePx((await getState(launched)).paneFraction);
     const resizeEvents = await readEvents(eventFile);
     const resizeEventCount = resizeEvents.filter(
       (event) =>
@@ -237,9 +240,13 @@ async function runScale(scale: number, devinUrl: string, githubUrl: string): Pro
         event.detail?.shift === true,
       resizeEventCount + 1,
     );
-    await expect.poll(async () => (await getState(launched)).paneWidth).not.toBe(widthBeforeKeyboardResize);
+    await expect
+      .poll(async () => panePx((await getState(launched)).paneFraction))
+      .not.toBe(widthBeforeKeyboardResize);
     key('ctrl+shift+bracketleft');
-    await expect.poll(async () => (await getState(launched)).paneWidth).toBe(widthBeforeKeyboardResize);
+    await expect
+      .poll(async () => panePx((await getState(launched)).paneFraction))
+      .toBe(widthBeforeKeyboardResize);
 
     const currentTabs = (await getState(launched)).tabs.tabs;
     const activeAfterShortcuts = (await getState(launched)).tabs.activeId;

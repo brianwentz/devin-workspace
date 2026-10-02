@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEFAULT_PANE_WIDTH } from '../core/layout';
+import { DEFAULT_PANE_FRACTION } from '../core/layout';
 import { isAllowedAppUrl } from '../core/sessions';
 
 export const IpcChannels = {
@@ -8,7 +8,6 @@ export const IpcChannels = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   paneToggle: 'pane:toggle',
-  paneWidth: 'pane:width',
   tabActivate: 'tab:activate',
   tabClose: 'tab:close',
   tabReorder: 'tab:reorder',
@@ -61,7 +60,21 @@ export const SurfaceSchema = z.enum(['cloud', 'local', 'settings']);
 export type Surface = z.infer<typeof SurfaceSchema>;
 
 const RoutingFields = { allowExternal: z.boolean() };
-const PaneFields = { open: z.boolean(), width: z.number() };
+// F2: the pane split is a fraction of (windowWidth - rail - splitter), 0..1.
+const PaneFields = { open: z.boolean(), fraction: z.number().min(0).max(1) };
+// F2: window bounds remembered per display configuration (key = display geometry).
+const RectSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().finite(),
+  height: z.number().finite(),
+});
+export const PlacementSchema = z.object({
+  bounds: RectSchema,
+  maximized: z.boolean(),
+  savedAt: z.number().finite(),
+});
+const WindowPlacementsSchema = z.record(z.string(), PlacementSchema);
 // P5: orgId overrides the org resolved from GET /v3/self (empty = auto).
 const NotificationsFields = { enabled: z.boolean(), orgId: z.string().max(128) };
 const LocalFields = { devinPath: z.string().nullable() };
@@ -79,6 +92,7 @@ const SettingsFields = {
   workspaces: z.array(z.string()),
   surface: SurfaceSchema,
   tabSnapshot: z.unknown(),
+  windowPlacements: WindowPlacementsSchema,
 };
 
 export const SettingsObject = z.object({
@@ -91,15 +105,16 @@ export const SettingsObject = z.object({
   pane: z
     .object({
       open: PaneFields.open.default(true),
-      width: PaneFields.width.default(DEFAULT_PANE_WIDTH),
+      fraction: PaneFields.fraction.default(DEFAULT_PANE_FRACTION),
     })
-    .default({ open: true, width: DEFAULT_PANE_WIDTH }),
+    .default({ open: true, fraction: DEFAULT_PANE_FRACTION }),
   local: z
     .object({ devinPath: LocalFields.devinPath.default(null) })
     .default({ devinPath: null }),
   surface: SettingsFields.surface.default('cloud'),
   // Tab strip snapshot (v2 shape from core/tabModel.serializeTabs).
   tabSnapshot: SettingsFields.tabSnapshot.optional(),
+  windowPlacements: SettingsFields.windowPlacements.default({}),
   tabs: z
     .object({
       keepAliveHours: TabsFields.keepAliveHours.default(24),
@@ -154,7 +169,7 @@ export type NotificationsState = z.infer<typeof NotificationsStateSchema>;
 
 export const ShellStateSchema = z.object({
   paneOpen: z.boolean(),
-  paneWidth: z.number(),
+  paneFraction: z.number(),
   paneCollapsed: z.boolean(),
   surface: SurfaceSchema,
   currentSessionId: z.string().nullable(),
@@ -211,7 +226,6 @@ export const SessionPrSchema = z.object({
 export type SessionPr = z.infer<typeof SessionPrSchema>;
 
 // Arg schemas for ipcMain.on channels (safeParse; invalid payloads ignored).
-export const PaneWidthArg = z.number().finite();
 export const TabIdArg = z.string();
 export const TabReorderArgs = z.tuple([z.string(), z.number().int()]);
 export const NavActionArg = z.enum(['back', 'forward', 'reload']);

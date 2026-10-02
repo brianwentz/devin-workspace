@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { fractionFromPx } from '../core/layout';
 import { mergeSettings, parseSettingsFile } from '../core/settings';
 import { SettingsSchema, type Settings } from '../shared/ipc';
 import { log } from './log';
@@ -55,7 +56,9 @@ export class SettingsStore {
       const merged = SettingsSchema.parse({
         pane: {
           open: legacy.paneOpen ?? true,
-          width: legacy.paneWidth ?? undefined,
+          // Legacy px width was recorded against the 1400 px default window.
+          fraction:
+            legacy.paneWidth !== undefined ? fractionFromPx(legacy.paneWidth, 1400) : undefined,
         },
         surface: legacy.surface ?? 'cloud',
         tabSnapshot: legacy.tabs,
@@ -95,7 +98,7 @@ export class SettingsStore {
   syncFromState(): void {
     this.value = {
       ...this.value,
-      pane: { open: state.paneOpen, width: state.paneWidth },
+      pane: { open: state.paneOpen, fraction: state.paneFraction },
       surface: state.surface,
       tabSnapshot: state.tabManager?.persistableState() ?? { version: 2, tabs: [] },
     };
