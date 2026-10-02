@@ -35,6 +35,17 @@ export const MIN_PANE_WIDTH = 320;
 export const MIN_DEVIN_WIDTH = 640;
 export const DEFAULT_PANE_FRACTION = 0.5;
 export const DEFAULT_TERMINAL_HEIGHT = 280;
+export const MIN_TERMINAL_HEIGHT = 120;
+// Minimum px the main column keeps above an open terminal dock (below the title bar).
+export const TERMINAL_RESERVED_MAIN = 200;
+
+export function clampTerminalHeight(height: number, windowHeight: number): number {
+  const max = Math.max(
+    MIN_TERMINAL_HEIGHT,
+    windowHeight - TITLE_BAR_HEIGHT - TERMINAL_RESERVED_MAIN,
+  );
+  return Math.min(max, Math.max(MIN_TERMINAL_HEIGHT, Math.round(height)));
+}
 
 // Persisted fraction sanitiser: 0..1, default for non-finite input. The px
 // guards are NOT applied here — they are derived in computeBounds so the stored
@@ -88,7 +99,38 @@ export function computeBounds(
     height: Math.min(TITLE_BAR_HEIGHT, height),
   };
 
+  const terminalHeight = layout.terminalOpen
+    ? clampTerminalHeight(layout.terminalHeight, height)
+    : 0;
+  // Dock rects sit at the bottom of the devin column only — pane rects are
+  // unaffected. devinHeight is the main column height below the title bar.
+  const dock = (devinColumnWidth: number) => {
+    if (terminalHeight === 0) {
+      return {
+        terminal: null,
+        terminalSplitter: null,
+        devinHeight: Math.max(0, height - TITLE_BAR_HEIGHT),
+      };
+    }
+    return {
+      terminal: {
+        x: rail.width,
+        y: height - terminalHeight,
+        width: devinColumnWidth,
+        height: terminalHeight,
+      } as Rect,
+      terminalSplitter: {
+        x: rail.width,
+        y: height - terminalHeight - SPLITTER_WIDTH,
+        width: devinColumnWidth,
+        height: SPLITTER_WIDTH,
+      } as Rect,
+      devinHeight: Math.max(0, height - TITLE_BAR_HEIGHT - terminalHeight - SPLITTER_WIDTH),
+    };
+  };
+
   if (!layout.paneOpen) {
+    const docked = dock(Math.max(0, width - rail.width));
     return {
       rail,
       titleBar,
@@ -96,12 +138,12 @@ export function computeBounds(
         x: rail.width,
         y: TITLE_BAR_HEIGHT,
         width: Math.max(0, width - rail.width),
-        height: Math.max(0, height - TITLE_BAR_HEIGHT),
+        height: docked.devinHeight,
       },
       ghTab: null,
       splitter: null,
-      terminal: null,
-      terminalSplitter: null,
+      terminal: docked.terminal,
+      terminalSplitter: docked.terminalSplitter,
       paneCollapsed: false,
     };
   }
@@ -123,6 +165,7 @@ export function computeBounds(
   const splitterX = Math.max(rail.width, width - paneWidth - SPLITTER_WIDTH);
   const paneX = Math.min(width, splitterX + SPLITTER_WIDTH);
   const paneActualWidth = Math.max(0, width - paneX);
+  const docked = dock(Math.max(0, splitterX - rail.width));
 
   return {
     rail,
@@ -131,7 +174,7 @@ export function computeBounds(
       x: rail.width,
       y: TITLE_BAR_HEIGHT,
       width: Math.max(0, splitterX - rail.width),
-      height: Math.max(0, height - TITLE_BAR_HEIGHT),
+      height: docked.devinHeight,
     },
     splitter: {
       x: splitterX,
@@ -145,8 +188,8 @@ export function computeBounds(
       width: paneActualWidth,
       height: Math.max(0, height - TITLE_BAR_HEIGHT),
     },
-    terminal: null,
-    terminalSplitter: null,
+    terminal: docked.terminal,
+    terminalSplitter: docked.terminalSplitter,
     paneCollapsed,
   };
 }

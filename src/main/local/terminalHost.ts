@@ -1,18 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, isAbsolute, resolve } from 'node:path';
 import type * as pty from 'node-pty';
 import { app } from 'electron';
 import { INSTALL_GUIDANCE } from '../../core/localModel';
-import { IpcChannels } from '../../shared/ipc';
+import { IpcChannels, type TerminalSummary } from '../../shared/ipc';
 import { log } from '../log';
 import { state } from '../state';
 import { resolveDevinPath } from './acpHost';
 
+export type TerminalKind = 'devin' | 'shell';
+export type TerminalOpenOptions =
+  | { kind: 'devin'; workspace: string }
+  | { kind: 'shell'; cwd?: string | undefined };
+
+export type { TerminalSummary };
+
 interface TerminalEntry {
   id: string;
-  workspace: string;
+  kind: TerminalKind;
+  cwd: string;
+  title: string;
   proc: pty.IPty;
   exitCode: number | null;
   pending: string;
@@ -54,7 +64,7 @@ export class TerminalHost {
 
   constructor(private readonly testMode: boolean) {}
 
-  private resolveCommand(): { file: string; args: string[] } | { error: string } {
+  private resolveCommand(kind: TerminalKind): { file: string; args: string[] } | { error: string } {
     if (this.testMode) {
       const testCommand = process.env.DEVIN_WORKSPACES_TEST_TERMINAL_CMD;
       if (testCommand) {
@@ -72,29 +82,42 @@ export class TerminalHost {
         return { file: resolvedFile, args: resolvedArgs };
       }
     }
-    const devinPath = resolveDevinPath(state.settings?.current.local.devinPath);
-    if (!devinPath) return { error: INSTALL_GUIDANCE };
-    return { file: devinPath, args: [] };
+    if (kind === 'devin') {
+      const devinPath = resolveDevinPath(state.settings?.current.local.devinPath);
+      if (!devinPath) return { error: INSTALL_GUIDANCE };
+      return { file: devinPath, args: [] };
+    }
+    const shell = resolveShell();
+    if (!shell) return { error: 'no shell found on PATH' };
+    return { file: shell, args: [] };
   }
 
-  open(workspace: string, cols = 120, rows = 30): OpenResult {
-    const normalized = resolve(workspace);
-    // Match acpHost: only configured workspaces may spawn a pty.
-    const allowed = (state.settings?.current.workspaces ?? []).map((w) => resolve(w));
+  open(options: TerminalOpenOptions, cols = 120, rows = 30): OpenResult {
+    const workspaces = (state.settings?.current.workspaces ?? []).map((w) => resolve(w));
+    const normalized =
+      options.kind === 'devin'
+        ? resolve(options.workspace)
+        : resolve(options.cwd ?? workspaces[0] ?? homedir());
+    // Ptys only run inside configured workspaces (plus the home dir for the
+    // generic shell kind) — same rule as acpHost's workspace allow-list.
+    const allowed =
+      options.kind === 'devin' ? workspaces : [...workspaces, resolve(homedir())];
     if (!allowed.includes(normalized)) {
       log('local', 'terminal-open', {
-        detail: { workspace: normalized, ok: false, error: 'unknown workspace' },
+        detail: { cwd: normalized, kind: options.kind, ok: false, error: 'cwd not allowed' },
       });
-      return { ok: false, error: 'unknown workspace' };
+      return { ok: false, error: 'cwd not allowed' };
     }
-    const existingId = this.byWorkspace.get(normalized);
-    if (existingId) {
-      const existing = this.terminals.get(existingId);
-      if (existing && existing.exitCode === null) return { ok: true, id: existingId };
+    if (options.kind === 'devin') {
+      const existingId = this.byWorkspace.get(normalized);
+      if (existingId) {
+        const existing = this.terminals.get(existingId);
+        if (existing && existing.exitCode === null) return { ok: true, id: existingId };
+      }
     }
-    const command = this.resolveCommand();
+    const command = this.resolveCommand(options.kind);
     if ('error' in command) {
-      log('local', 'terminal-open', { detail: { workspace: normalized, ok: false } });
+      log('local', 'terminal-open', { detail: { cwd: normalized, ok: false } });
       return { ok: false, error: command.error };
     }
     let proc: pty.IPty;
@@ -111,13 +134,15 @@ export class TerminalHost {
       });
     } catch (error) {
       log('local', 'terminal-open', {
-        detail: { workspace: normalized, ok: false, error: String(error) },
+        detail: { cwd: normalized, ok: false, error: String(error) },
       });
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
     const entry: TerminalEntry = {
       id: randomUUID(),
-      workspace: normalized,
+      kind: options.kind,
+      cwd: normalized,
+      title: basename(normalized) || normalized,
       proc,
       exitCode: null,
       pending: '',
@@ -127,7 +152,7 @@ export class TerminalHost {
       readBuffer: '',
     };
     this.terminals.set(entry.id, entry);
-    this.byWorkspace.set(normalized, entry.id);
+    if (options.kind === 'devin') this.byWorkspace.set(normalized, entry.id);
     proc.onData((data) => this.pushData(entry, data));
     proc.onExit(({ exitCode }) => {
       entry.exitCode = exitCode;
@@ -136,18 +161,42 @@ export class TerminalHost {
         log('local', 'terminal-data', { detail: { id: entry.id, bytes: entry.bytesOut } });
         entry.bytesOut = 0;
       }
-      this.terminals.delete(entry.id);
       if (this.byWorkspace.get(normalized) === entry.id) this.byWorkspace.delete(normalized);
       state.shellView?.webContents.send(IpcChannels.terminalExit, {
         id: entry.id,
         exitCode,
       });
       log('local', 'terminal-exit', { detail: { id: entry.id, exitCode } });
+      this.onChange?.();
     });
     log('local', 'terminal-open', {
-      detail: { id: entry.id, workspace: normalized, ok: true, pid: proc.pid },
+      detail: { id: entry.id, cwd: normalized, kind: options.kind, ok: true, pid: proc.pid },
     });
+    this.onChange?.();
     return { ok: true, id: entry.id };
+  }
+
+  // Wired by the main process to refresh ShellState.terminals.
+  onChange: (() => void) | null = null;
+
+  list(): TerminalSummary[] {
+    return [...this.terminals.values()].map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      cwd: entry.cwd,
+      title: entry.title,
+      exitCode: entry.exitCode,
+    }));
+  }
+
+  setTitle(id: string, title: string): boolean {
+    const entry = this.terminals.get(id);
+    if (!entry) return false;
+    const next = title.slice(0, 256);
+    if (next === entry.title) return true;
+    entry.title = next;
+    this.onChange?.();
+    return true;
   }
 
   // Coalesce pty output within ~8 ms to reduce IPC chatter.
@@ -205,8 +254,9 @@ export class TerminalHost {
     }
     if (entry.timer) clearTimeout(entry.timer);
     this.terminals.delete(id);
-    if (this.byWorkspace.get(entry.workspace) === id) this.byWorkspace.delete(entry.workspace);
+    if (this.byWorkspace.get(entry.cwd) === id) this.byWorkspace.delete(entry.cwd);
     log('local', 'terminal-close', { detail: { id } });
+    this.onChange?.();
     return true;
   }
 
@@ -241,6 +291,20 @@ export class TerminalHost {
     }
     await Promise.all(waits);
   }
+}
+
+// OS default shell for the generic 'shell' terminal kind.
+function resolveShell(): string | null {
+  if (process.platform === 'win32') {
+    const found = resolveOnPath('pwsh.exe') ?? resolveOnPath('powershell.exe');
+    if (found) return found;
+    const comspec = process.env.COMSPEC;
+    return comspec && existsSync(comspec) ? comspec : null;
+  }
+  for (const candidate of [process.env.SHELL, '/bin/zsh', '/bin/bash']) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 export const terminalHost = new TerminalHost(process.env.DEVIN_WORKSPACES_TEST === '1');

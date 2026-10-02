@@ -9,6 +9,7 @@ import {
   type Settings,
   type ShellState,
   type Surface,
+  type TerminalSummary,
 } from '../shared/ipc';
 
 const isString = (value: unknown): value is string => typeof value === 'string';
@@ -52,12 +53,26 @@ const localApi = {
   },
 };
 
-// P4b embedded terminal.
+// P4b embedded terminal + F5 dock.
 const terminalApi = {
-  terminalOpen: (workspace: string) =>
-    ipcRenderer.invoke(IpcChannels.terminalOpen, { workspace }) as Promise<
+  terminalOpen: (
+    options: { kind: 'devin'; workspace: string } | { kind: 'shell'; cwd?: string },
+  ) =>
+    ipcRenderer.invoke(IpcChannels.terminalOpen, options) as Promise<
       { ok: true; id: string } | { ok: false; error: string }
     >,
+  terminalList: () => ipcRenderer.invoke(IpcChannels.terminalList) as Promise<TerminalSummary[]>,
+  terminalCwdOptions: () =>
+    ipcRenderer.invoke(IpcChannels.terminalCwdOptions) as Promise<string[]>,
+  terminalToggle: () => ipcRenderer.send(IpcChannels.terminalToggle),
+  terminalActivate: (id: string) => {
+    if (isString(id)) ipcRenderer.send(IpcChannels.terminalActivate, { id });
+  },
+  terminalTitle: (id: string, title: string) => {
+    if (isString(id) && isString(title)) {
+      ipcRenderer.send(IpcChannels.terminalTitle, { id, title: title.slice(0, 256) });
+    }
+  },
   terminalInput: (id: string, data: string) => {
     if (isString(id) && isString(data) && data.length <= 65536) {
       ipcRenderer.send(IpcChannels.terminalInput, { id, data });
@@ -138,14 +153,16 @@ const api = {
   openLink: (url: string) => {
     if (typeof url === 'string' && url.length < 8192) ipcRenderer.send(IpcChannels.linkOpen, url);
   },
-  dragStart: (x: number) => {
-    if (Number.isFinite(x)) ipcRenderer.send(IpcChannels.layoutDragStart, x);
+  dragStart: (axis: 'x' | 'y', pos: number) => {
+    if ((axis === 'x' || axis === 'y') && Number.isFinite(pos)) {
+      ipcRenderer.send(IpcChannels.layoutDragStart, { axis, pos });
+    }
   },
-  dragMove: (x: number) => {
-    if (Number.isFinite(x)) ipcRenderer.send(IpcChannels.layoutDragMove, x);
+  dragMove: (pos: number) => {
+    if (Number.isFinite(pos)) ipcRenderer.send(IpcChannels.layoutDragMove, pos);
   },
-  dragEnd: (x: number) => {
-    if (Number.isFinite(x)) ipcRenderer.send(IpcChannels.layoutDragEnd, x);
+  dragEnd: (pos: number) => {
+    if (Number.isFinite(pos)) ipcRenderer.send(IpcChannels.layoutDragEnd, pos);
   },
   dragCancel: (reason: 'escape' | 'pointer-cancel' = 'pointer-cancel') => {
     if (reason === 'escape' || reason === 'pointer-cancel')
@@ -161,9 +178,17 @@ const api = {
   fillCredential: (options: { field: 'username' | 'password'; pressEnter: boolean }) =>
     ipcRenderer.invoke(IpcChannels.credentialsFill, options) as Promise<string>,
   openCredentialsMenu: () => ipcRenderer.send(IpcChannels.credentialsMenu),
-  onDragGuide: (callback: (x: number) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, x: unknown) => {
-      if (typeof x === 'number') callback(x);
+  onDragGuide: (callback: (guide: { axis: 'x' | 'y'; pos: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (
+        payload &&
+        typeof payload === 'object' &&
+        typeof (payload as { pos?: unknown }).pos === 'number' &&
+        ((payload as { axis?: unknown }).axis === 'x' ||
+          (payload as { axis?: unknown }).axis === 'y')
+      ) {
+        callback(payload as { axis: 'x' | 'y'; pos: number });
+      }
     };
     ipcRenderer.on(IpcChannels.layoutDragGuide, listener);
     return () => ipcRenderer.removeListener(IpcChannels.layoutDragGuide, listener);

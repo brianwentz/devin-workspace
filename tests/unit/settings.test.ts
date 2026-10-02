@@ -214,3 +214,27 @@ describe('prs settings (F1)', () => {
     expect(parseSettingsFile({ tenantUrl: 'https://x.example' }).settings.prs).toEqual({ autoOpenTabs: true });
   });
 });
+
+describe('terminal dock settings (F5)', () => {
+  it('defaults layout/terminal and merges shallowly', () => {
+    const base = SettingsSchema.parse({});
+    expect(base.layout).toEqual({ terminalOpen: false, terminalHeight: 280 });
+    expect(base.terminal).toEqual({ allSurfaces: false });
+
+    const merged = mergeSettings(base, {
+      layout: { terminalOpen: true },
+      terminal: { allSurfaces: true },
+    });
+    expect(merged.layout).toEqual({ terminalOpen: true, terminalHeight: 280 });
+    expect(merged.terminal).toEqual({ allSurfaces: true });
+    const resized = mergeSettings(merged, { layout: { terminalHeight: 400 } });
+    expect(resized.layout).toEqual({ terminalOpen: true, terminalHeight: 400 });
+  });
+
+  it('rejects a terminal height below the minimum', () => {
+    expect(SettingsPatchSchema.safeParse({ layout: { terminalHeight: 60 } }).success).toBe(false);
+    const { settings, dropped } = parseSettingsFile({ layout: { terminalHeight: 60 } });
+    expect(dropped).toEqual(['layout']);
+    expect(settings.layout.terminalHeight).toBe(280);
+  });
+});

@@ -100,7 +100,7 @@ function mergeDefined<T extends object>(base: T, patch: { [K in keyof T]?: T[K] 
 export function mergeSettings(current: Settings, patch: unknown): Settings {
   const parsed = SettingsPatchSchema.safeParse(patch);
   if (!parsed.success) return current;
-  const { routing, pane, notifications, prs, local, tabs, ...rest } = parsed.data;
+  const { routing, pane, notifications, prs, local, tabs, layout, terminal, ...rest } = parsed.data;
   const topLevel = Object.fromEntries(
     Object.entries(rest).filter(([, value]) => value !== undefined),
   );
@@ -113,5 +113,7 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
     notifications: mergeDefined(current.notifications, notifications),
     prs: mergeDefined(current.prs, prs),
     local: mergeDefined(current.local, local),
+    layout: mergeDefined(current.layout, layout),
+    terminal: mergeDefined(current.terminal, terminal),
   };
 }

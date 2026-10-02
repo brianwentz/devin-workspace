@@ -1,5 +1,5 @@
 import { webContents } from 'electron';
-import { clampFraction01 } from '../core/layout';
+import { clampFraction01, clampTerminalHeight } from '../core/layout';
 import { auditCookies } from './cookieAudit';
 import { currentFillTarget } from './credentials';
 import { fromShell } from './ipcGuard';
@@ -139,7 +139,20 @@ export function registerTestHooks(): void {
         localHost()?.loadSession(workspace, sessionId),
       localAgentPid: (workspace: string) => localHost()?.agentPid(workspace) ?? null,
       // P4b terminal
-      terminalOpen: (workspace: string) => terminalHost.open(workspace),
+      terminalOpen: (options: { kind: 'devin'; workspace: string } | { kind: 'shell'; cwd?: string }) =>
+        terminalHost.open(options),
+      terminalList: () => terminalHost.list(),
+      setTerminalOpen: (value: boolean) => {
+        state.terminalOpen = value;
+        applyLayout();
+      },
+      setTerminalHeight: (value: number) => {
+        state.terminalHeight = clampTerminalHeight(
+          value,
+          state.windowRef?.getContentBounds().height ?? 900,
+        );
+        applyLayout();
+      },
       terminalInput: (id: string, data: string) => terminalHost.write(id, data),
       terminalResize: (id: string, cols: number, rows: number) =>
         terminalHost.resize(id, cols, rows),

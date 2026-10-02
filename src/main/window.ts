@@ -1,8 +1,8 @@
 import { View, type WebContentsView } from 'electron';
 import {
   clampPaneWidth,
+  clampTerminalHeight,
   computeBounds,
-  DEFAULT_TERMINAL_HEIGHT,
   fractionFromPx,
   SPLITTER_WIDTH,
   type LayoutState,
@@ -11,8 +11,17 @@ import {
 import { prsForSession } from '../core/notifyModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 import { currentFillTarget } from './credentials';
+import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { state } from './state';
+
+// The dock is a Cloud-surface feature unless the user opts in for all surfaces.
+export function terminalVisible(): boolean {
+  return (
+    state.terminalOpen &&
+    (state.surface === 'cloud' || (state.settings?.current.terminal.allSurfaces ?? false))
+  );
+}
 
 function nativeBounds(rect: Rect | null): Electron.Rectangle {
   return rect
@@ -20,13 +29,12 @@ function nativeBounds(rect: Rect | null): Electron.Rectangle {
     : { x: 0, y: 0, width: 0, height: 0 };
 }
 
-// Stream C fills in the terminal fields; until then they are constant.
 export function layoutState(): LayoutState {
   return {
     paneOpen: state.paneOpen,
     paneFraction: state.paneFraction,
-    terminalOpen: false,
-    terminalHeight: DEFAULT_TERMINAL_HEIGHT,
+    terminalOpen: terminalVisible(),
+    terminalHeight: state.terminalHeight,
   };
 }
 
@@ -50,6 +58,15 @@ export function publicState(): ShellState {
       hasToken: state.secrets?.hasPat() ?? false,
       currentSessionPrCount: prsForSession(state.apiSessions, state.currentSessionId).length,
     },
+    terminalOpen: state.terminalOpen,
+    terminalHeight: state.terminalHeight,
+    terminals: terminalHost.list(),
+    activeTerminalId: (() => {
+      const terminals = terminalHost.list();
+      return terminals.some((entry) => entry.id === state.activeTerminalId)
+        ? state.activeTerminalId
+        : (terminals.at(-1)?.id ?? null);
+    })(),
   };
 }
 
@@ -112,12 +129,15 @@ export function applyLayout(): void {
   notifyShell();
 }
 
-export function cancelDrag(restoreWidth: boolean, reason: string): void {
+export function cancelDrag(restore: boolean, reason: string): void {
   if (!state.dragging) return;
   state.dragging = false;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   state.dragTimer = null;
-  if (restoreWidth) state.paneFraction = state.dragStartFraction;
+  if (restore) {
+    if (state.dragAxis === 'x') state.paneFraction = state.dragStartFraction;
+    else state.terminalHeight = state.dragStartHeight;
+  }
   if (state.shellView) state.shellView.setBackgroundColor('#111827');
   const { windowRef, shellView, devinView, tabManager } = state;
   if (windowRef && shellView) {
@@ -139,50 +159,78 @@ export function cancelDrag(restoreWidth: boolean, reason: string): void {
     }
   }
   log('shell', 'drag-cancel', {
-    detail: { reason, restoreWidth, paneFraction: state.paneFraction, x: state.dragLastX },
+    detail: {
+      reason,
+      restore,
+      axis: state.dragAxis,
+      paneFraction: state.paneFraction,
+      terminalHeight: state.terminalHeight,
+      x: state.dragLastX,
+    },
   });
   applyLayout();
   state.shellView?.webContents.send(IpcChannels.layoutDragReset);
 }
 
-export function beginDrag(x: number): void {
+export function beginDrag(axis: 'x' | 'y', pos: number): void {
   const { windowRef, shellView } = state;
-  if (!windowRef || !shellView || !state.paneOpen || state.paneCollapsed || state.dragging) return;
+  if (!windowRef || !shellView || state.dragging) return;
+  if (axis === 'x' && (!state.paneOpen || state.paneCollapsed)) return;
+  if (axis === 'y' && !terminalVisible()) return;
   state.dragging = true;
+  state.dragAxis = axis;
   state.dragStartFraction = state.paneFraction;
-  state.dragLastX = x;
+  state.dragStartHeight = state.terminalHeight;
+  state.dragLastX = pos;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   shellView.setBackgroundColor('#00000000');
   windowRef.contentView.addChildView(shellView);
   state.dragTimer = setTimeout(() => cancelDrag(true, 'safety-timeout'), 10_000);
-  log('shell', 'drag-start', { detail: { x, paneFraction: state.paneFraction } });
+  log('shell', 'drag-start', {
+    detail: { axis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
+  });
 }
 
-export function moveDrag(x: number): void {
+export function moveDrag(pos: number): void {
   const { windowRef, shellView } = state;
   if (!state.dragging || !windowRef) return;
-  state.dragLastX = x;
-  // Pointer → pane px (guarded) → stored as a fraction of the available width.
-  const windowWidth = windowRef.getContentBounds().width;
-  const panePx = clampPaneWidth(windowWidth - x - SPLITTER_WIDTH, windowWidth);
-  state.paneFraction = fractionFromPx(panePx, windowWidth);
-  const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
-  if (bounds.splitter) {
-    const { width, height } = windowRef.getContentBounds();
-    shellView?.setBounds({ x: 0, y: 0, width, height });
-    shellView?.webContents.send(IpcChannels.layoutDragGuide, bounds.splitter.x);
+  state.dragLastX = pos;
+  const content = windowRef.getContentBounds();
+  if (state.dragAxis === 'x') {
+    // Pointer → pane px (guarded) → stored as a fraction of the available width.
+    const panePx = clampPaneWidth(content.width - pos - SPLITTER_WIDTH, content.width);
+    state.paneFraction = fractionFromPx(panePx, content.width);
+  } else {
+    state.terminalHeight = clampTerminalHeight(
+      content.height - pos - SPLITTER_WIDTH / 2,
+      content.height,
+    );
   }
-  log('shell', 'drag-move', { detail: { x, paneFraction: state.paneFraction } });
+  const bounds = computeBounds(content, layoutState());
+  const guideRect = state.dragAxis === 'x' ? bounds.splitter : bounds.terminalSplitter;
+  if (guideRect) {
+    const { width, height } = content;
+    shellView?.setBounds({ x: 0, y: 0, width, height });
+    shellView?.webContents.send(IpcChannels.layoutDragGuide, {
+      axis: state.dragAxis,
+      pos: state.dragAxis === 'x' ? guideRect.x : guideRect.y,
+    });
+  }
+  log('shell', 'drag-move', {
+    detail: { axis: state.dragAxis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
+  });
 }
 
-export function endDrag(x: number): void {
+export function endDrag(pos: number): void {
   if (!state.dragging) return;
-  moveDrag(x);
-  state.dragLastX = x;
+  moveDrag(pos);
+  state.dragLastX = pos;
   state.dragging = false;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   state.dragTimer = null;
   if (state.shellView) state.shellView.setBackgroundColor('#111827');
-  log('shell', 'drag-end', { detail: { x, paneFraction: state.paneFraction } });
+  log('shell', 'drag-end', {
+    detail: { axis: state.dragAxis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
+  });
   applyLayout();
 }

@@ -154,6 +154,9 @@ async function createWindow(): Promise<void> {
   state.paneOpen = saved.pane.open;
   // Stored as-is (0..1); px guards are derived in computeBounds, not persisted.
   state.paneFraction = clampFraction01(saved.pane.fraction);
+  state.terminalOpen = saved.layout.terminalOpen;
+  state.terminalHeight = saved.layout.terminalHeight;
+  terminalHost.onChange = notifyShell;
   state.surface = saved.surface;
   // Env override wins over the persisted tenant URL (tests rely on it).
   state.tenantUrl = process.env.DEVIN_WORKSPACES_TENANT_URL ?? saved.tenantUrl;

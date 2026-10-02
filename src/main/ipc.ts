@@ -7,7 +7,8 @@ import {
   CredentialFillSchema,
   CredentialSaveSchema,
   DragCancelReasonArg,
-  DragXArg,
+  DragPosArg,
+  DragStartArg,
   IpcChannels,
   LinkOpenArg,
   NavActionArg,
@@ -151,16 +152,16 @@ export function setupIpc(): void {
     const parsed = LinkOpenArg.safeParse(url);
     if (parsed.success) handleLink(parsed.data);
   });
-  guardedOn(IpcChannels.layoutDragStart, (_event, x: unknown) => {
-    const parsed = DragXArg.safeParse(x);
-    if (parsed.success) beginDrag(parsed.data);
+  guardedOn(IpcChannels.layoutDragStart, (_event, payload: unknown) => {
+    const parsed = DragStartArg.safeParse(payload);
+    if (parsed.success) beginDrag(parsed.data.axis, parsed.data.pos);
   });
-  guardedOn(IpcChannels.layoutDragMove, (_event, x: unknown) => {
-    const parsed = DragXArg.safeParse(x);
+  guardedOn(IpcChannels.layoutDragMove, (_event, pos: unknown) => {
+    const parsed = DragPosArg.safeParse(pos);
     if (parsed.success) moveDrag(parsed.data);
   });
-  guardedOn(IpcChannels.layoutDragEnd, (_event, x: unknown) => {
-    const parsed = DragXArg.safeParse(x);
+  guardedOn(IpcChannels.layoutDragEnd, (_event, pos: unknown) => {
+    const parsed = DragPosArg.safeParse(pos);
     if (parsed.success) endDrag(parsed.data);
   });
   guardedOn(IpcChannels.layoutDragCancel, (_event, reason: unknown) => {

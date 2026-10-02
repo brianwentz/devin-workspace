@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   clampFraction01,
   clampPaneWidth,
+  clampTerminalHeight,
   computeBounds,
   DEFAULT_PANE_FRACTION,
   DEFAULT_TERMINAL_HEIGHT,
   fractionFromPx,
+  MIN_TERMINAL_HEIGHT,
   paneAvailable,
   paneWidthPx,
   type LayoutState,
@@ -117,6 +119,39 @@ describe('computeBounds', () => {
     expect(bounds.devin.width).toBe(965);
     const closed = computeBounds({ width: 1021, height: 900 }, layout({ paneOpen: false }));
     expect(closed.paneCollapsed).toBe(false);
+  });
+
+  it('docks the terminal under the devin column and shrinks devin', () => {
+    const bounds = computeBounds({ width: 1400, height: 900 },
+      layout({ paneFraction: F560, terminalOpen: true, terminalHeight: 280 }));
+    // devin column ends at the splitter (x=834); the dock spans rail..splitterX.
+    expect(bounds.devin).toEqual({ x: 56, y: 36, width: 778, height: 578 });
+    expect(bounds.terminalSplitter).toEqual({ x: 56, y: 614, width: 778, height: 6 });
+    expect(bounds.terminal).toEqual({ x: 56, y: 620, width: 778, height: 280 });
+    // Pane rects are unaffected.
+    expect(bounds.ghTab).toEqual({ x: 840, y: 36, width: 560, height: 864 });
+  });
+
+  it('docks the terminal across the full width when the pane is closed', () => {
+    const bounds = computeBounds({ width: 1400, height: 900 },
+      layout({ paneOpen: false, terminalOpen: true, terminalHeight: DEFAULT_TERMINAL_HEIGHT }));
+    expect(bounds.devin.height).toBe(578);
+    expect(bounds.terminal).toEqual({ x: 56, y: 620, width: 1344, height: 280 });
+    expect(bounds.terminalSplitter).toEqual({ x: 56, y: 614, width: 1344, height: 6 });
+  });
+
+  it('clamps the terminal height and survives tiny windows', () => {
+    expect(clampTerminalHeight(50, 900)).toBe(MIN_TERMINAL_HEIGHT);
+    // max = 900 - TITLE_BAR_HEIGHT - 200 = 664
+    expect(clampTerminalHeight(9999, 900)).toBe(664);
+    expect(clampTerminalHeight(280, 200)).toBe(MIN_TERMINAL_HEIGHT); // tiny window keeps the min
+
+    const bounds = computeBounds({ width: 1400, height: 300 },
+      layout({ paneFraction: F560, terminalOpen: true, terminalHeight: 500 }));
+    // clamped to 300 - 36 - 200 = 64 → min 120
+    expect(bounds.terminal?.height).toBe(MIN_TERMINAL_HEIGHT);
+    expect(bounds.devin.height).toBe(138);
+    expect(bounds.terminalSplitter?.y).toBe(174);
   });
 });
 

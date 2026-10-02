@@ -32,9 +32,12 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
-  // Lazily mount the terminal only once it has been opened; keep it mounted
-  // (display:none) afterwards so the pty and scrollback survive toggles.
+  // Lazily open the workspace's devin pty only once the Terminal tab is opened;
+  // keep the view mounted (display:none) afterwards so scrollback survives.
   const [terminalActive, setTerminalActive] = useState(false);
+  const [terminalId, setTerminalId] = useState<string | null>(null);
+  const [terminalWorkspace, setTerminalWorkspace] = useState<string | null>(null);
+  const [terminalError, setTerminalError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const listedFor = useRef<Set<string>>(new Set());
 
@@ -48,6 +51,27 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
       setSessionId(null);
     }
   }, [local, workspace, workspaces]);
+
+  // Open (or reuse) the workspace devin pty when the Terminal tab is shown.
+  useEffect(() => {
+    if (!terminalActive || !workspace || (terminalWorkspace === workspace && terminalId)) return;
+    let cancelled = false;
+    void window.devinworkspaces
+      .terminalOpen({ kind: 'devin', workspace })
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setTerminalId(result.id);
+          setTerminalWorkspace(workspace);
+          setTerminalError(null);
+        } else {
+          setTerminalError(result.error);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [terminalActive, workspace, terminalWorkspace, terminalId]);
 
   useEffect(() => {
     if (!workspace || listedFor.current.has(workspace)) return;
@@ -266,7 +290,25 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
           className="flex min-h-0 flex-1 flex-col"
           style={{ display: view === 'terminal' ? 'flex' : 'none' }}
         >
-          {terminalActive && workspace && <TerminalView workspace={workspace} />}
+          {terminalActive && workspace && (
+            <>
+              {terminalWorkspace !== workspace || !terminalId ? null : (
+                <TerminalView
+                  key={terminalId}
+                  id={terminalId}
+                  onRestart={() => {
+                    window.devinworkspaces.terminalClose(terminalId);
+                    setTerminalId(null);
+                  }}
+                />
+              )}
+              {terminalError && (
+                <div className="border-b border-[#39475a] px-3 py-1.5 text-xs text-[#ff8a8a]">
+                  {terminalError}
+                </div>
+              )}
+            </>
+          )}
         </div>
         <div
           id="chatPane"
