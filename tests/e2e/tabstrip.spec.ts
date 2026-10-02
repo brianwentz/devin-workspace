@@ -58,6 +58,12 @@ test('pointer and keyboard reorder, keyboard activate/close, titles', async () =
     await expect(shell.locator('#tabStrip .tab')).toHaveCount(3);
     await expect(shell.locator(`[data-tab-id="${a}"] .tabTitle`)).toHaveText('GitHub fixture: strip-a');
     expect(await domOrder(shell)).toEqual([a, b, c]);
+    // dragTab is strict: it refuses clipped tabs — the strip must not overflow.
+    const stripMetrics = await shell
+      .locator('#tabStrip')
+      .evaluate((el) => ({ clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }));
+    console.log('stripMetrics', JSON.stringify(stripMetrics));
+    expect(stripMetrics.scrollWidth).toBeLessThanOrEqual(stripMetrics.clientWidth + 1);
 
     // Pointer: first -> last.
     await dragTab(shell, a, c);
@@ -71,7 +77,9 @@ test('pointer and keyboard reorder, keyboard activate/close, titles', async () =
     await expect.poll(() => order(app)).toEqual([a, b, c]);
 
     // Pointer: a tiny move (< activation distance) is a click, not a drag: activates.
-    const bBox = (await shell.locator(`[data-tab-id="${b}"]`).boundingBox())!;
+    const bTab = shell.locator(`[data-tab-id="${b}"]`);
+    await bTab.scrollIntoViewIfNeeded();
+    const bBox = (await bTab.boundingBox())!;
     await shell.mouse.move(bBox.x + 20, bBox.y + bBox.height / 2);
     await shell.mouse.down();
     await shell.mouse.move(bBox.x + 22, bBox.y + bBox.height / 2);

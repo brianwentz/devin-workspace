@@ -24,8 +24,6 @@ export interface WindowBounds {
   devin: Rect;
   ghTab: Rect | null;
   splitter: Rect | null;
-  tabStrip: Rect | null;
-  navBar: Rect | null;
   titleBar: Rect | null;
   terminal: Rect | null;
   terminalSplitter: Rect | null;
@@ -35,8 +33,7 @@ export interface WindowBounds {
 
 export const RAIL_WIDTH = 56;
 export const SPLITTER_WIDTH = 6;
-export const TAB_STRIP_HEIGHT = 36;
-export const NAV_BAR_HEIGHT = 32;
+export const TITLE_BAR_HEIGHT = 36;
 export const MIN_PANE_WIDTH = 320;
 export const MIN_DEVIN_WIDTH = 768;
 export const DEFAULT_PANE_WIDTH = 560;
@@ -59,21 +56,25 @@ export function computeBounds(
   const width = Math.max(0, Math.floor(windowSize.width));
   const height = Math.max(0, Math.floor(windowSize.height));
   const rail: Rect = { x: 0, y: 0, width: Math.min(RAIL_WIDTH, width), height };
+  const titleBar: Rect = {
+    x: 0,
+    y: 0,
+    width,
+    height: Math.min(TITLE_BAR_HEIGHT, height),
+  };
 
   if (!paneState.paneOpen) {
     return {
       rail,
+      titleBar,
       devin: {
         x: rail.width,
-        y: 0,
+        y: TITLE_BAR_HEIGHT,
         width: Math.max(0, width - rail.width),
-        height,
+        height: Math.max(0, height - TITLE_BAR_HEIGHT),
       },
       ghTab: null,
       splitter: null,
-      tabStrip: null,
-      navBar: null,
-      titleBar: null,
       terminal: null,
       terminalSplitter: null,
       paneCollapsed: false,
@@ -97,15 +98,15 @@ export function computeBounds(
   const splitterX = Math.max(rail.width, width - paneWidth - SPLITTER_WIDTH);
   const paneX = Math.min(width, splitterX + SPLITTER_WIDTH);
   const paneActualWidth = Math.max(0, width - paneX);
-  const chromeHeight = TAB_STRIP_HEIGHT + NAV_BAR_HEIGHT;
 
   return {
     rail,
+    titleBar,
     devin: {
       x: rail.width,
-      y: 0,
+      y: TITLE_BAR_HEIGHT,
       width: Math.max(0, splitterX - rail.width),
-      height,
+      height: Math.max(0, height - TITLE_BAR_HEIGHT),
     },
     splitter: {
       x: splitterX,
@@ -113,25 +114,12 @@ export function computeBounds(
       width: Math.min(SPLITTER_WIDTH, Math.max(0, width - splitterX)),
       height,
     },
-    tabStrip: {
-      x: paneX,
-      y: 0,
-      width: paneActualWidth,
-      height: Math.min(TAB_STRIP_HEIGHT, height),
-    },
-    navBar: {
-      x: paneX,
-      y: TAB_STRIP_HEIGHT,
-      width: paneActualWidth,
-      height: Math.min(NAV_BAR_HEIGHT, Math.max(0, height - TAB_STRIP_HEIGHT)),
-    },
     ghTab: {
       x: paneX,
-      y: chromeHeight,
+      y: TITLE_BAR_HEIGHT,
       width: paneActualWidth,
-      height: Math.max(0, height - chromeHeight),
+      height: Math.max(0, height - TITLE_BAR_HEIGHT),
     },
-    titleBar: null,
     terminal: null,
     terminalSplitter: null,
     paneCollapsed,

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { evaluateInShell, launchApp, state, waitForEventCount } from './helpers';
+import { evaluateInShell, launchApp, shellPage, state, waitForEventCount } from './helpers';
 
 let fixtures: FixtureServers;
 
@@ -79,6 +79,46 @@ test('auto-collapses the pane below the minimum devin width', async () => {
       }).__devinworkspaces.setWindowSize(1400, 900);
     });
     await expect.poll(async () => (await state(app)).paneCollapsed).toBe(false);
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('renders a custom title bar with the tab strip inside', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
+  try {
+    const shell = await shellPage(app);
+    await expect(shell.locator('#titleBar')).toBeVisible();
+    await expect(shell.locator('#navBar')).toHaveCount(0);
+    const devinBounds = await app.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __devinworkspaces: { getDevinBounds(): { y: number; height: number } | null };
+      }).__devinworkspaces.getDevinBounds(),
+    );
+    expect(devinBounds?.y).toBe(36);
+
+    const tabId = await app.evaluate((_electron, url: string) => {
+      return (
+        globalThis as typeof globalThis & { __devinworkspaces: { open(url: string): string } }
+      ).__devinworkspaces.open(url);
+    }, `${fixtures.githubUrl}/page/titlebar`);
+    await expect.poll(async () => (await state(app)).tabs.activeId).toBe(tabId);
+    const tabBounds = await app.evaluate((_electron, id: string) => {
+      return (
+        globalThis as typeof globalThis & {
+          __devinworkspaces: {
+            getTabBounds(id: string): { y: number; height: number } | null;
+            getDevinBounds(): { y: number; height: number } | null;
+          };
+        }
+      ).__devinworkspaces.getTabBounds(id);
+    }, tabId);
+    expect(tabBounds?.y).toBe(36);
+    expect(tabBounds?.height).toBe(devinBounds?.height);
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await app.close().catch(() => undefined);

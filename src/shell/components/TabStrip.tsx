@@ -32,13 +32,12 @@ interface TabStripProps {
   activeId: string | null;
   scope: string;
   hiddenTabCount: number;
-  style: CSSProperties;
 }
 
 // Tabs only ever move along the strip.
 const horizontalOnly: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
-export function TabStrip({ tabs, activeId, scope, hiddenTabCount, style }: TabStripProps) {
+export function TabStrip({ tabs, activeId, scope, hiddenTabCount }: TabStripProps) {
   const stripRef = useRef<HTMLElement>(null);
   const sensors = useSensors(
     // Distance constraint keeps plain clicks (activate / close) working.
@@ -75,8 +74,8 @@ export function TabStrip({ tabs, activeId, scope, hiddenTabCount, style }: TabSt
       ref={stripRef}
       role="tablist"
       aria-label="GitHub tabs"
-      className="shell-chrome flex overflow-x-auto overflow-y-hidden items-stretch bg-[#101722]"
-      style={{ ...style, scrollbarWidth: 'none' }}
+      className="shell-chrome app-no-drag flex flex-1 min-w-0 overflow-x-auto overflow-y-hidden items-stretch"
+      style={{ scrollbarWidth: 'none' }}
       onWheel={onWheel}
     >
       <DndContext

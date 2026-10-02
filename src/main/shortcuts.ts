@@ -1,7 +1,8 @@
+import { app } from 'electron';
 import { clampPaneWidth } from '../core/layout';
 import { newSessionUrl } from '../core/sessions';
 import { log } from './log';
-import { state, type ViewName } from './state';
+import { state, testMode, type ViewName } from './state';
 import { applyLayout, cancelDrag } from './window';
 
 export function historyAction(
@@ -131,6 +132,26 @@ export function handleShortcut(
     );
     applyLayout();
     focusVisibleContents(contents);
+    handled = true;
+  } else if (
+    view !== 'shell' &&
+    ctrl &&
+    !input.alt &&
+    (key === '=' || key === '+' || key === '-' || key === '0')
+  ) {
+    // The default menu used to provide zoom shortcuts; re-add them for hosted
+    // views (the shell keeps a fixed zoom).
+    const zoom =
+      key === '0'
+        ? 0
+        : contents.getZoomLevel() + (key === '-' ? -0.5 : 0.5);
+    contents.setZoomLevel(zoom);
+    handled = true;
+  } else if (
+    (key === 'f12' || (ctrl && input.shift && key === 'i')) &&
+    (!app.isPackaged || testMode)
+  ) {
+    contents.openDevTools({ mode: 'detach' });
     handled = true;
   }
 

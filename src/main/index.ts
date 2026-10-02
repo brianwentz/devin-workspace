@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { app, BaseWindow, dialog, screen, session, webContents, WebContentsView } from 'electron';
+import { app, BaseWindow, dialog, Menu, screen, session, webContents, WebContentsView } from 'electron';
 import { clampPaneWidth } from '../core/layout';
 import { auditCookies, startCookieAudit } from './cookieAudit';
 import { CredentialStore } from './credentials';
@@ -170,12 +170,15 @@ async function createWindow(): Promise<void> {
     minHeight: 640,
     title: 'Devin Workspaces',
     show: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#101722', symbolColor: '#e8edf5', height: 36 },
   });
 
   // Test mode: Chromium clamps creation bounds to the work area, which on
   // small CI displays (1024x768) auto-collapses the pane and silently breaks
   // pane-dependent specs. A post-creation setContentSize is not clamped on
   // Windows — force it and log what we actually got for the fail-fast check.
+  // With the hidden title bar the content size is (≈) the window size.
   if (testMode) {
     const match = /^(\d+)x(\d+)$/.exec(
       process.env.DEVIN_WORKSPACES_TEST_WINDOW_SIZE ?? '1400x900',
@@ -271,6 +274,7 @@ async function createWindow(): Promise<void> {
 app
   .whenReady()
   .then(() => {
+    Menu.setApplicationMenu(null);
     installProtocol();
     setupIpc();
     return createWindow();

@@ -1,4 +1,4 @@
-import { RAIL_WIDTH } from '../../core/layout';
+import { RAIL_WIDTH, TITLE_BAR_HEIGHT } from '../../core/layout';
 import type { Surface } from '../../shared/ipc';
 import { PrQuickOpen } from './PrQuickOpen';
 
@@ -16,8 +16,8 @@ export function Rail({ surface, paneOpen, paneCollapsed, credentialMatch }: Rail
   return (
     <aside
       id="rail"
-      className="shell-chrome absolute top-0 bottom-0 left-0 flex flex-col items-center gap-2.5 pt-3 bg-[#101722]"
-      style={{ width: RAIL_WIDTH }}
+      className="shell-chrome absolute top-0 bottom-0 left-0 flex flex-col items-center gap-2.5 bg-[#101722]"
+      style={{ width: RAIL_WIDTH, paddingTop: TITLE_BAR_HEIGHT + 8 }}
     >
       <button
         id="cloudButton"

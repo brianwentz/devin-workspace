@@ -1,0 +1,142 @@
+import { useEffect, useState } from 'react';
+import { RAIL_WIDTH, TITLE_BAR_HEIGHT } from '../../core/layout';
+import type { ShellState } from '../../shared/ipc';
+import { TabStrip } from './TabStrip';
+
+type Tab = ShellState['tabs']['tabs'][number];
+
+interface TitleBarProps {
+  windowWidth: number;
+  paneVisible: boolean;
+  paneX: number; // ghTab.x when the pane is visible
+  paneWidth: number; // ghTab.width when the pane is visible
+  tabs: Tab[];
+  activeId: string | null;
+  scope: string;
+  hiddenTabCount: number;
+}
+
+interface WindowControlsOverlayLike {
+  visible: boolean;
+  getTitlebarAreaRect(): DOMRect;
+  addEventListener(type: 'geometrychange', listener: () => void): void;
+  removeEventListener(type: 'geometrychange', listener: () => void): void;
+}
+
+function windowControlsOverlay(): WindowControlsOverlayLike | null {
+  const candidate = (navigator as { windowControlsOverlay?: WindowControlsOverlayLike })
+    .windowControlsOverlay;
+  return candidate ?? null;
+}
+
+// Width of the strip the OS caption buttons cover on the right. Measured from the
+// overlay's titlebar rect when available; 138px is the standard win32 caption width.
+const OVERLAY_FALLBACK = 138;
+
+function measureOverlayReserve(): number {
+  const overlay = windowControlsOverlay();
+  if (!overlay) return OVERLAY_FALLBACK;
+  const rect = overlay.getTitlebarAreaRect();
+  return Math.max(0, Math.round(window.innerWidth - (rect.x + rect.width)));
+}
+
+function useOverlayReserve(): number {
+  const [reserve, setReserve] = useState(measureOverlayReserve);
+  useEffect(() => {
+    const update = () => setReserve(measureOverlayReserve());
+    window.addEventListener('resize', update);
+    windowControlsOverlay()?.addEventListener('geometrychange', update);
+    const overlay = windowControlsOverlay();
+    return () => {
+      window.removeEventListener('resize', update);
+      overlay?.removeEventListener('geometrychange', update);
+    };
+  }, []);
+  return reserve;
+}
+
+const navButton =
+  'min-w-[29px] min-h-[26px] rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] leading-none disabled:hover:bg-[#1a2330]';
+
+export function TitleBar({
+  windowWidth,
+  paneVisible,
+  paneX,
+  paneWidth,
+  tabs,
+  activeId,
+  scope,
+  hiddenTabCount,
+}: TitleBarProps) {
+  const overlayReserve = useOverlayReserve();
+  const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const dragRight = paneVisible ? paneX : windowWidth - overlayReserve;
+  const paneSegmentWidth = paneVisible ? Math.max(0, paneWidth - overlayReserve) : 0;
+
+  return (
+    <header
+      id="titleBar"
+      className="shell-chrome app-drag absolute top-0 left-0 bg-[#101722]"
+      style={{
+        width: windowWidth,
+        height: TITLE_BAR_HEIGHT,
+      }}
+    >
+      <div
+        className="absolute left-0 top-0 flex items-center justify-center text-[#7d8a99] text-[11px] font-semibold tracking-wide select-none"
+        style={{ width: RAIL_WIDTH, height: '100%' }}
+        title="Devin Workspaces"
+      >
+        DW
+      </div>
+      {/* drag space over the main column (extends to the overlay gap when the pane is hidden) */}
+      <div
+        className="absolute top-0 h-full"
+        style={{ left: RAIL_WIDTH, width: Math.max(0, dragRight - RAIL_WIDTH) }}
+      />
+      {paneVisible && (
+        <div
+          className="app-no-drag absolute top-0 h-full flex items-stretch gap-1.5 pr-1.5"
+          style={{ left: paneX, width: paneSegmentWidth }}
+        >
+          <button
+            id="backButton"
+            type="button"
+            aria-label="Back"
+            className={navButton}
+            disabled={!active?.canGoBack}
+            onClick={() => window.devinworkspaces.navigate('back')}
+          >
+            ←
+          </button>
+          <button
+            id="forwardButton"
+            type="button"
+            aria-label="Forward"
+            className={navButton}
+            disabled={!active?.canGoForward}
+            onClick={() => window.devinworkspaces.navigate('forward')}
+          >
+            →
+          </button>
+          <button
+            id="reloadButton"
+            type="button"
+            aria-label="Reload"
+            className={navButton}
+            disabled={!active}
+            onClick={() => window.devinworkspaces.navigate('reload')}
+          >
+            ↻
+          </button>
+          <TabStrip
+            tabs={tabs}
+            activeId={activeId}
+            scope={scope}
+            hiddenTabCount={hiddenTabCount}
+          />
+        </div>
+      )}
+    </header>
+  );
+}
