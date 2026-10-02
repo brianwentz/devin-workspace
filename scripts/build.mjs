@@ -28,6 +28,15 @@ await Promise.all([
     outfile: 'out/preload.cjs',
   }),
   build({
+    entryPoints: ['src/autofill/preload.ts'],
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'cjs',
+    external: ['electron'],
+    outfile: 'out/autofill-preload.cjs',
+  }),
+  build({
     entryPoints: ['scripts/os-input.ts'],
     bundle: true,
     platform: 'node',

@@ -4,6 +4,7 @@ import { app, BaseWindow, dialog, Menu, screen, session, webContents, WebContent
 import { clampFraction01 } from '../core/layout';
 import { auditCookies, startCookieAudit } from './cookieAudit';
 import { CredentialStore } from './credentials';
+import { closeAutofillOverlaysForInactiveTabs, disposeAutofill, setupAutofillIpc } from './autofill';
 import { setupDownloads } from './downloads';
 import { setupIpc } from './ipc';
 import { setupLocal, localHost } from './local/ipc';
@@ -69,6 +70,7 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
   if (state.shutdownPromise) return state.shutdownPromise;
   state.shuttingDown = true;
   state.shutdownPromise = (async () => {
+    disposeAutofill();
     // F8 stage 1 — probe: close live GitHub tabs honouring beforeunload; a veto
     // is recorded (no per-tab prompt) and resolved by one consolidated dialog.
     const probe = (await state.tabManager?.probe().catch(() => undefined)) ?? {
@@ -232,6 +234,7 @@ async function createWindow(): Promise<void> {
   state.devinView = new WebContentsView({
     webPreferences: {
       partition: 'persist:devin',
+      preload: resolve(app.getAppPath(), 'out', 'autofill-preload.cjs'),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -253,6 +256,8 @@ async function createWindow(): Promise<void> {
     onCreated: (tabId, view) => attachRouting(view.webContents, `gh:${tabId}`),
     onChange: notifyShell,
     onBeforeUnload,
+    preload: resolve(app.getAppPath(), 'out', 'autofill-preload.cjs'),
+    onActiveChanged: closeAutofillOverlaysForInactiveTabs,
     initialTabs: saved.tabSnapshot,
     testMode,
     keepAliveMs: keepAliveMs(saved.tabs.keepAliveHours),
@@ -304,6 +309,7 @@ app
     Menu.setApplicationMenu(null);
     installProtocol();
     setupIpc();
+    setupAutofillIpc();
     return createWindow();
   })
   .catch((error: unknown) => {

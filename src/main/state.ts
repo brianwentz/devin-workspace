@@ -61,4 +61,31 @@ export const state = {
   },
   // P6: notification panel z-order raise flag (set via notifications:panel IPC).
   notificationsPanelOpen: false,
+  // Autofill account picker anchored to a hosted view's field. While set the
+  // shell is raised (same mechanism as the notifications panel).
+  autofillPicker: null as {
+    sender: Electron.WebContents;
+    accounts: { id: string; username: string }[];
+    anchor: { x: number; y: number; width: number; height: number };
+  } | null,
+  // Submitted-login capture: holds the plaintext password until the user
+  // resolves the prompt. In-memory only — never serialized or logged.
+  autofillPending: null as {
+    sender: Electron.WebContents;
+    origin: string;
+    username: string | null;
+    password: string;
+    kind: 'save' | 'update';
+    createdAt: number;
+    timers: NodeJS.Timeout[];
+    unlisten: () => void;
+  } | null,
+  autofillPrompt: null as {
+    sender: Electron.WebContents;
+    kind: 'save' | 'update';
+    origin: string;
+    username: string;
+    anchor: { x: number; y: number; width: number; height: number };
+    dismissTimer: NodeJS.Timeout;
+  } | null,
 };

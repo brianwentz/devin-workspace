@@ -10,7 +10,7 @@ import {
 } from '../core/layout';
 import { openPullRequests } from '../core/notifyModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
-import { currentFillTarget } from './credentials';
+
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
@@ -48,11 +48,23 @@ export function publicState(): ShellState {
     currentSessionId: state.currentSessionId,
     settings: state.settings?.current ?? SettingsSchema.parse({}),
     tabs: state.tabManager?.publicState() ?? { tabs: [], activeId: null, scope: '', hiddenTabCount: 0 },
-    credentialMatch: (() => {
-      const target = currentFillTarget();
-      return target && state.credentials ? state.credentials.matchForUrl(target.getURL()) : null;
-    })(),
     credentials: state.credentials?.list() ?? [],
+    autofill: {
+      picker: state.autofillPicker
+        ? {
+            accounts: state.autofillPicker.accounts,
+            anchor: state.autofillPicker.anchor,
+          }
+        : null,
+      prompt: state.autofillPrompt
+        ? {
+            kind: state.autofillPrompt.kind,
+            origin: state.autofillPrompt.origin,
+            username: state.autofillPrompt.username,
+            anchor: state.autofillPrompt.anchor,
+          }
+        : null,
+    },
     notifications: {
       ...state.notifications,
       collect: state.settings?.current.notifications.collect ?? true,
@@ -111,14 +123,28 @@ export function ensureAttached(view: View | null): void {
 // Raise the shell DOM over every hosted view (transparent bg so they still
 // paint beneath) — used by the splitter drag and the notifications panel.
 export function raiseShell(): void {
+  // Overlay restacking during teardown re-adds views whose webContents are
+  // being destroyed — a synchronous native call that isn't bounded by any
+  // shutdown await.
+  if (state.shuttingDown) return;
   const { windowRef, shellView } = state;
   if (!windowRef || !shellView) return;
   shellView.setBackgroundColor('#00000000');
   windowRef.contentView.addChildView(shellView);
 }
 
+// Any shell-DOM overlay raised above hosted views (notifications panel,
+// autofill picker, autofill save/update prompt).
+export function overlayOpen(): boolean {
+  return (
+    state.notificationsPanelOpen || !!state.autofillPicker || !!state.autofillPrompt
+  );
+}
+
 // Restore the normal stacking order (shell bottom, hosted views above).
 export function lowerShell(): void {
+  // See raiseShell — never restack during shutdown.
+  if (state.shuttingDown) return;
   const { windowRef, shellView, devinView, tabManager } = state;
   if (!windowRef || !shellView) return;
   shellView.setBackgroundColor('#111827');
@@ -158,9 +184,9 @@ export function applyLayout(): void {
     const activeTabView = paneVisible ? tabManager.activeView : null;
     if (activeTabView) ensureAttached(activeTabView);
     else if (tabManager.activeView) detachView(tabManager.activeView);
-    // The notifications panel is a shell-DOM modal over hosted views — the
-    // raise must survive relayout.
-    if (state.notificationsPanelOpen) raiseShell();
+    // The notifications panel and the autofill overlays are shell-DOM modals
+    // over hosted views — the raise must survive relayout.
+    if (overlayOpen()) raiseShell();
   }
   notifyShell();
 }
@@ -243,7 +269,7 @@ export function setNotificationsPanel(open: boolean): void {
   if (state.notificationsPanelOpen === open) return;
   state.notificationsPanelOpen = open;
   if (open) raiseShell();
-  else lowerShell();
+  else if (!overlayOpen()) lowerShell();
   applyLayout();
   log('shell', 'notifications-panel', { detail: { open } });
 }

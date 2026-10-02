@@ -1,7 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { safeStorage } from 'electron';
-import { matchOrigin, normalizeOrigin, type CredentialEntry } from '../core/credentials';
-import { state } from './state';
+import {
+  migrateCredentialsFile,
+  normalizeOrigin,
+  type CredentialEntry,
+  type StoredEntry,
+} from '../core/credentials';
 
 export type CredentialLog = (event: string, detail?: Record<string, unknown>) => void;
 const noopLog: CredentialLog = () => undefined;
@@ -25,12 +30,6 @@ export const safeStorageEncryptor: CredentialEncryptor = {
   decrypt: async (value) => (await safeStorage.decryptStringAsync(value)).result,
 };
 
-interface StoredEntry {
-  origin: string;
-  username: string;
-  passwordEnc: string;
-}
-
 export class CredentialStore {
   private readonly entries = new Map<string, StoredEntry>();
 
@@ -46,103 +45,129 @@ export class CredentialStore {
   private load(): void {
     if (!existsSync(this.file)) return;
     try {
-      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as { entries?: StoredEntry[] };
-      for (const entry of raw.entries ?? []) {
-        if (
-          typeof entry?.origin === 'string' &&
-          typeof entry.username === 'string' &&
-          typeof entry.passwordEnc === 'string'
-        ) {
-          this.entries.set(entry.origin, entry);
-        }
-      }
+      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as { version?: number };
+      const migrated = migrateCredentialsFile(raw, Date.now(), () => randomUUID());
+      for (const entry of migrated) this.entries.set(entry.id, entry);
+      if (raw?.version !== 2) this.persist();
     } catch (error) {
       this.log('credentials-load-failed', { error: String(error) });
     }
   }
 
+  private static publicEntry(entry: StoredEntry): CredentialEntry {
+    const { passwordEnc: _passwordEnc, ...rest } = entry;
+    return rest;
+  }
+
+  private sorted(): StoredEntry[] {
+    return [...this.entries.values()].sort(
+      (a, b) => a.origin.localeCompare(b.origin) || a.username.localeCompare(b.username),
+    );
+  }
+
   list(): CredentialEntry[] {
-    return [...this.entries.values()].map(({ origin, username }) => ({ origin, username }));
+    return this.sorted().map(CredentialStore.publicEntry);
   }
 
   get origins(): string[] {
-    return [...this.entries.keys()];
+    return [...new Set([...this.entries.values()].map((entry) => entry.origin))];
   }
 
-  matchForUrl(url: string): CredentialEntry | null {
-    const origin = matchOrigin(url, this.origins, this.allowInsecure);
-    if (!origin) return null;
-    const entry = this.entries.get(origin);
-    return entry ? { origin: entry.origin, username: entry.username } : null;
+  forOrigin(origin: string): CredentialEntry[] {
+    const normalized = normalizeOrigin(origin, this.allowInsecure) ?? origin;
+    return this.sorted()
+      .filter((entry) => entry.origin === normalized)
+      .map(CredentialStore.publicEntry);
   }
 
-  async save(input: { origin: string; username: string; password: string }): Promise<void> {
+  async add(input: { origin: string; username: string; password: string }): Promise<CredentialEntry> {
     const origin = normalizeOrigin(input.origin, this.allowInsecure);
     if (!origin) throw new Error(`Not a valid https origin: ${input.origin}`);
     if (!(await this.encryptor.isAvailable())) throw new CredentialsUnavailableError();
     const passwordEnc = (await this.encryptor.encrypt(input.password)).toString('base64');
-    this.entries.set(origin, { origin, username: input.username, passwordEnc });
-    this.persist();
-    // F6: never log the username — identifiers are semi-sensitive too.
-    this.log('credential-save', { origin });
-  }
-
-  delete(origin: string): boolean {
-    const removed = this.entries.delete(origin);
-    if (removed) {
+    const now = Date.now();
+    const existing = [...this.entries.values()].find(
+      (entry) => entry.origin === origin && entry.username === input.username,
+    );
+    if (existing) {
+      existing.passwordEnc = passwordEnc;
+      existing.updatedAt = now;
       this.persist();
-      this.log('credential-delete', { origin });
+      this.log('credential-update', { origin });
+      return CredentialStore.publicEntry(existing);
     }
-    return removed;
+    const entry: StoredEntry = {
+      id: randomUUID(),
+      origin,
+      username: input.username,
+      passwordEnc,
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: null,
+    };
+    this.entries.set(entry.id, entry);
+    this.persist();
+    // Never log the username — identifiers are semi-sensitive too.
+    this.log('credential-add', { origin });
+    return CredentialStore.publicEntry(entry);
   }
 
-  async fill(
-    contents: Electron.WebContents,
-    field: 'username' | 'password',
-    pressEnter: boolean,
-  ): Promise<'filled' | 'no-match' | 'unavailable'> {
-    const url = contents.getURL();
-    const origin = matchOrigin(url, this.origins, this.allowInsecure);
-    if (!origin) {
-      this.log('credential-fill-denied', { origin: normalizeOrigin(url, this.allowInsecure) });
-      return 'no-match';
+  async update(
+    id: string,
+    patch: { username?: string | undefined; password?: string | undefined },
+  ): Promise<CredentialEntry | null> {
+    const entry = this.entries.get(id);
+    if (!entry) return null;
+    if (patch.username !== undefined && patch.username !== entry.username) {
+      const collision = [...this.entries.values()].some(
+        (other) =>
+          other.id !== id && other.origin === entry.origin && other.username === patch.username,
+      );
+      if (collision) throw new Error('An entry for that username already exists');
+      entry.username = patch.username;
     }
-    const frameUrl = contents.focusedFrame?.url;
-    if (frameUrl && matchOrigin(frameUrl, [origin], this.allowInsecure) !== origin) {
-      this.log('credential-fill-denied', {
-        origin,
-        frameOrigin: normalizeOrigin(frameUrl, this.allowInsecure),
-        reason: 'focused-frame-origin',
-      });
-      return 'no-match';
+    if (patch.password !== undefined) {
+      if (!(await this.encryptor.isAvailable())) throw new CredentialsUnavailableError();
+      entry.passwordEnc = (await this.encryptor.encrypt(patch.password)).toString('base64');
     }
-    const entry = this.entries.get(origin);
-    if (!entry) return 'no-match';
-    let value: string;
-    if (field === 'password') {
-      if (!(await this.encryptor.isAvailable())) return 'unavailable';
-      try {
-        value = await this.encryptor.decrypt(Buffer.from(entry.passwordEnc, 'base64'));
-      } catch {
-        return 'unavailable';
-      }
-    } else {
-      value = entry.username;
+    entry.updatedAt = Date.now();
+    this.persist();
+    this.log('credential-update', { origin: entry.origin });
+    return CredentialStore.publicEntry(entry);
+  }
+
+  delete(id: string): boolean {
+    const entry = this.entries.get(id);
+    if (!entry) return false;
+    this.entries.delete(id);
+    this.persist();
+    this.log('credential-delete', { origin: entry.origin });
+    return true;
+  }
+
+  async reveal(id: string): Promise<string | null> {
+    const entry = this.entries.get(id);
+    if (!entry) return null;
+    if (!(await this.encryptor.isAvailable())) return null;
+    try {
+      const value = await this.encryptor.decrypt(Buffer.from(entry.passwordEnc, 'base64'));
+      this.log('credential-reveal', { origin: entry.origin });
+      return value;
+    } catch {
+      return null;
     }
-    contents.insertText(value);
-    value = '';
-    if (pressEnter) {
-      contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
-      contents.sendInputEvent({ type: 'char', keyCode: 'Enter' });
-      contents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
-    }
-    this.log('credential-fill', { origin, field, pressEnter });
-    return 'filled';
+  }
+
+  touch(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    entry.lastUsedAt = Date.now();
+    this.persist();
   }
 
   private persist(): void {
     const serialized = JSON.stringify({
-      version: 1,
+      version: 2,
       entries: [...this.entries.values()],
     });
     const temporary = `${this.file}.tmp`;
@@ -153,27 +178,4 @@ export class CredentialStore {
       this.log('credentials-persist-failed', { error: String(error) });
     }
   }
-}
-
-// The view a fill applies to: the focused hosted view if it is the devin view
-// or the active GitHub tab (never the shell); falls back to devinView on the
-// cloud surface when nothing else is focused.
-export function currentFillTarget(): Electron.WebContents | null {
-  const candidates = [
-    state.devinView?.webContents,
-    state.tabManager?.activeWebContents,
-  ].filter((item): item is Electron.WebContents => Boolean(item && !item.isDestroyed()));
-  if (
-    state.lastFocused &&
-    !state.lastFocused.isDestroyed() &&
-    candidates.includes(state.lastFocused)
-  ) {
-    return state.lastFocused;
-  }
-  const focused = candidates.find((contents) => contents.isFocused());
-  if (focused) return focused;
-  if (state.surface === 'cloud' && state.devinView && !state.devinView.webContents.isDestroyed()) {
-    return state.devinView.webContents;
-  }
-  return null;
 }

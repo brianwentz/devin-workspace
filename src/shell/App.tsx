@@ -3,6 +3,8 @@ import { computeBounds, DEFAULT_TERMINAL_HEIGHT, RAIL_WIDTH } from '../core/layo
 import { useShellState } from './store';
 import { Rail } from './components/Rail';
 import { NotificationPanel } from './components/NotificationPanel';
+import { AccountPicker } from './components/AccountPicker';
+import { SavePasswordBanner } from './components/SavePasswordBanner';
 import { TitleBar } from './components/TitleBar';
 import { Splitter } from './components/Splitter';
 import { TerminalDock } from './components/TerminalDock';
@@ -59,7 +61,6 @@ export function App() {
         surface={state.surface}
         paneOpen={state.paneOpen}
         paneCollapsed={bounds.paneCollapsed}
-        credentialMatch={state.credentialMatch}
         terminalOpen={state.terminalOpen}
         terminalAllSurfaces={state.settings.terminal.allSurfaces}
       />
@@ -84,6 +85,8 @@ export function App() {
         <Splitter axis="y" rect={bounds.terminalSplitter} enabled={true} />
       )}
       <NotificationPanel />
+      <AccountPicker />
+      <SavePasswordBanner />
       {state.surface === 'settings' && (
         <SettingsPanel
           settings={state.settings}

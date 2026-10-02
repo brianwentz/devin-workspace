@@ -26,9 +26,17 @@ export const IpcChannels = {
   layoutDragReset: 'layout:dragReset',
   credentialsList: 'credentials:list',
   credentialsSave: 'credentials:save',
+  credentialsUpdate: 'credentials:update',
   credentialsDelete: 'credentials:delete',
-  credentialsFill: 'credentials:fill',
-  credentialsMenu: 'credentials:menu',
+  credentialsReveal: 'credentials:reveal',
+  // Autofill: hosted views ask for accounts/fills; the shell drives the picker.
+  autofillQuery: 'autofill:query',
+  autofillPicker: 'autofill:picker',
+  autofillFill: 'autofill:fill',
+  autofillPick: 'autofill:pick',
+  autofillPickerClose: 'autofill:pickerClose',
+  autofillSubmitted: 'autofill:submitted',
+  autofillPromptResolve: 'autofill:promptResolve',
   // P5 extras
   secretsHasPat: 'secrets:hasPat',
   secretsSetPat: 'secrets:setPat',
@@ -267,6 +275,43 @@ export const TerminalSummarySchema = z.object({
 });
 export type TerminalSummary = z.infer<typeof TerminalSummarySchema>;
 
+export const CredentialEntrySchema = z.object({
+  id: z.string().min(1),
+  origin: z.string(),
+  username: z.string(),
+  createdAt: z.number().finite(),
+  updatedAt: z.number().finite(),
+  lastUsedAt: z.number().finite().nullable(),
+});
+export type ShellCredentialEntry = z.infer<typeof CredentialEntrySchema>;
+
+export const AutofillQuerySchema = z.object({
+  hasPassword: z.boolean(),
+  hint: z.string().max(256).nullable(),
+});
+export const AutofillPickerSchema = z.object({
+  rect: z.object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    width: z.number().finite(),
+    height: z.number().finite(),
+  }),
+  field: z.enum(['username', 'password']),
+});
+export const AutofillPickSchema = z.object({ id: z.string().min(1) });
+export const AutofillFillSchema = z.object({
+  id: z.string().min(1),
+  username: z.string(),
+  password: z.string(),
+});
+export const AutofillSubmittedSchema = z.object({
+  username: z.string().max(256).nullable(),
+  password: z.string().min(1).max(1024),
+});
+export const AutofillPromptResolveSchema = z.object({
+  action: z.enum(['save', 'dismiss']),
+});
+
 export const ShellStateSchema = z.object({
   paneOpen: z.boolean(),
   paneFraction: z.number(),
@@ -280,10 +325,23 @@ export const ShellStateSchema = z.object({
     scope: z.string(),
     hiddenTabCount: z.number().int(),
   }),
-  credentialMatch: z
-    .object({ origin: z.string(), username: z.string() })
-    .nullable(),
-  credentials: z.array(z.object({ origin: z.string(), username: z.string() })),
+  credentials: z.array(CredentialEntrySchema),
+  autofill: z.object({
+    picker: z
+      .object({
+        accounts: z.array(z.object({ id: z.string(), username: z.string() })),
+        anchor: RectSchema,
+      })
+      .nullable(),
+    prompt: z
+      .object({
+        kind: z.enum(['save', 'update']),
+        origin: z.string(),
+        username: z.string(),
+        anchor: RectSchema,
+      })
+      .nullable(),
+  }),
   notifications: NotificationsStateSchema,
   // F5 terminal dock
   terminalOpen: z.boolean(),
@@ -298,11 +356,13 @@ export const CredentialSaveSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
 });
-export const CredentialDeleteSchema = z.object({ origin: z.string().min(1) });
-export const CredentialFillSchema = z.object({
-  field: z.enum(['username', 'password']),
-  pressEnter: z.boolean().default(false),
+export const CredentialUpdateSchema = z.object({
+  id: z.string().min(1),
+  username: z.string().min(1).optional(),
+  password: z.string().min(1).optional(),
 });
+export const CredentialDeleteSchema = z.object({ id: z.string().min(1) });
+export const CredentialRevealSchema = z.object({ id: z.string().min(1) });
 
 export const TabsCloseScopeArg = z.object({ scope: z.string() });
 export const TabsReloadMenuArg = z.object({ x: z.number(), y: z.number() });
