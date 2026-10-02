@@ -18,6 +18,8 @@ Download `DevinWorkspaces-Setup-<version>.exe` from the [GitHub Releases](../../
 
 The installer is currently unsigned, so Windows SmartScreen will warn on first run — choose *More info → Run anyway*.
 
+On macOS, download `DevinWorkspaces-<version>-arm64.dmg` (or `.zip`) instead. The Mac build is ad-hoc signed (not notarized), so macOS blocks it on first launch — open it via right-click → Open (or System Settings → Privacy & Security → Open Anyway), or run `xattr -d com.apple.quarantine "/Applications/Devin Workspaces.app"`.
+
 Requirements: Windows 10/11 x64. The Devin CLI is only needed for the Local surface and the terminal's `devin` tab.
 
 ## First run

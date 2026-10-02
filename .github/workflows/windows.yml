@@ -37,7 +37,7 @@ jobs:
       # Playwright drives Electron via _electron.launch (no browser download needed).
       - run: npm run test:e2e
 
-      # NSIS installer (unsigned; fuses flipped in afterPack).
+      # NSIS installer (unsigned; fuses flipped by electron-builder from build.electronFuses).
       - run: npm run dist:win
 
       # Silent per-user install -> smoke -> upgrade-in-place -> smoke -> silent uninstall.
@@ -88,6 +88,7 @@ jobs:
           ls dist/DevinWorkspaces-*-arm64.dmg
           ls dist/DevinWorkspaces-*-arm64.zip
           ls dist/DevinWorkspaces-*-arm64.zip.blockmap
+          codesign --verify --deep --strict --verbose=2 "dist/mac-arm64/Devin Workspaces.app"
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -16,7 +16,7 @@
     "os:input": "npm run build && node out/scripts/os-input.cjs",
     "icon": "node scripts/make-icon.mjs",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false",
     "smoke:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-install.ps1",
     "test:smoke": "playwright test --config playwright.smoke.config.ts",
     "measure:tabs": "npm run build && node out/scripts/measure-tabs.cjs",
@@ -125,6 +125,7 @@
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true,
       "loadBrowserProcessSpecificV8Snapshot": false,
+      "resetAdHocDarwinSignature": true,
       "grantFileProtocolExtraPrivileges": true
     },
     "asarUnpack": [
