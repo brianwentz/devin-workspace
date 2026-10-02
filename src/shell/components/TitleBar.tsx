@@ -14,7 +14,6 @@ interface TitleBarProps {
   tabs: Tab[];
   activeId: string | null;
   scope: string;
-  hiddenTabCount: number;
 }
 
 interface WindowControlsOverlayLike {
@@ -71,7 +70,6 @@ export function TitleBar({
   tabs,
   activeId,
   scope,
-  hiddenTabCount,
 }: TitleBarProps) {
   const overlayReserve = useOverlayReserve();
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
@@ -137,7 +135,12 @@ export function TitleBar({
             aria-label="Reload"
             className={navButton}
             disabled={!active}
+            title="Reload (right-click: reload all tabs in this session)"
             onClick={() => window.devinworkspaces.navigate('reload')}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              window.devinworkspaces.openReloadMenu(e.clientX, e.clientY);
+            }}
           >
             ↻
           </button>
@@ -145,7 +148,6 @@ export function TitleBar({
             tabs={tabs}
             activeId={activeId}
             scope={scope}
-            hiddenTabCount={hiddenTabCount}
           />
         </div>
       )}

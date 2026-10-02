@@ -151,6 +151,9 @@ jobs:
             npx electron-builder --mac --arm64 --publish never -c.mac.notarize=true
           else
             echo "signing: none (CSC_LINK secret not set) — Mac auto-update disabled in this build"
+            # electron-builder treats a *defined* CSC_LINK (even "") as a certificate
+            # path; the env block above always defines it, so drop them all here.
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --arm64 --publish never
           fi
 

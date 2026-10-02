@@ -147,9 +147,14 @@ const api = {
   closeScope: (scope: string) => {
     if (typeof scope === 'string') ipcRenderer.send(IpcChannels.tabsCloseScope, { scope });
   },
-  openScopeMenu: (x: number, y: number) => {
+  openReloadMenu: (x: number, y: number) => {
     if (Number.isFinite(x) && Number.isFinite(y)) {
-      ipcRenderer.send(IpcChannels.tabsScopeMenu, { x, y });
+      ipcRenderer.send(IpcChannels.tabsReloadMenu, { x, y });
+    }
+  },
+  openTabMenu: (id: string, x: number, y: number) => {
+    if (typeof id === 'string' && Number.isFinite(x) && Number.isFinite(y)) {
+      ipcRenderer.send(IpcChannels.tabsTabMenu, { id, x, y });
     }
   },
   navigate: (action: 'back' | 'forward' | 'reload') => {

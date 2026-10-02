@@ -31,13 +31,12 @@ interface TabStripProps {
   tabs: Tab[];
   activeId: string | null;
   scope: string;
-  hiddenTabCount: number;
 }
 
 // Tabs only ever move along the strip.
 const horizontalOnly: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
-export function TabStrip({ tabs, activeId, scope, hiddenTabCount }: TabStripProps) {
+export function TabStrip({ tabs, activeId, scope }: TabStripProps) {
   const stripRef = useRef<HTMLElement>(null);
   const sensors = useSensors(
     // Distance constraint keeps plain clicks (activate / close) working.
@@ -99,19 +98,6 @@ export function TabStrip({ tabs, activeId, scope, hiddenTabCount }: TabStripProp
             ? 'No GitHub tabs — links from Devin open here.'
             : 'No GitHub tabs for this session — links from the worklog open here.'}
         </div>
-      )}
-      {hiddenTabCount > 0 && (
-        <button
-          type="button"
-          id="scopeOverflow"
-          className="px-2 self-center whitespace-nowrap text-[#aeb9c8] text-[12px] hover:text-white"
-          title={`${hiddenTabCount} tab${hiddenTabCount === 1 ? '' : 's'} in other sessions`}
-          onClick={(event) =>
-            window.devinworkspaces.openScopeMenu(event.clientX, event.clientY)
-          }
-        >
-          ⋯ {hiddenTabCount} in other sessions
-        </button>
       )}
     </section>
   );
@@ -181,6 +167,10 @@ function SortableTab({ tab, active }: { tab: Tab; active: boolean }) {
       onAuxClick={onAuxClick}
       onMouseDown={onMouseDown}
       onKeyDown={onKeyDown}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        window.devinworkspaces.openTabMenu(tab.id, event.clientX, event.clientY);
+      }}
       {...pointerListeners}
     >
       {tab.favicon && <img className="favicon" src={tab.favicon} alt="" />}
