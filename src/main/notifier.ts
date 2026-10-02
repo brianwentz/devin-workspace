@@ -1,29 +1,39 @@
-import { Menu, nativeImage, Notification } from 'electron';
-import { badgeDataUrl } from '../core/badgePng';
+import { Menu } from 'electron';
+import { notificationStore } from './notifications';
+import { deriveNotifications } from '../core/notificationModel';
 import { DevinApiClient, DevinApiError, sanitizeMessage, type DevinSession } from '../core/devinApi';
 import {
   ACTIVE_POLL_MS,
   IDLE_POLL_MS,
   archivedScopes,
   backoffMs,
-  diffStatuses,
   newPullRequests,
   pollInterval,
   prsForSession,
-  sessionTitle,
-  snapshotOf,
-  waitingBody,
-  type StatusSnapshot,
 } from '../core/notifyModel';
 import { sessionUrl } from '../core/sessions';
 import type { SessionPr, Settings } from '../shared/ipc';
 import { log } from './log';
 import { route } from '../core/linkRouter';
-import { handleLink, routeContext } from './routing';
+import { handleLink, loadInDevinView, routeContext } from './routing';
 import { state, testMode } from './state';
-import { applyLayout, notifyShell } from './window';
+import { installUpdate } from './updater';
+import { applyLayout, notifyShell, setNotificationsPanel } from './window';
 
 const PAGE_SIZE = 100;
+
+function kindEnabled() {
+  const k = state.settings?.current.notifications.kinds;
+  return {
+    waiting: k?.waiting ?? true,
+    approval: k?.approval ?? true,
+    blocked: k?.blocked ?? true,
+    finished: k?.finished ?? false,
+    'pr-opened': k?.prOpened ?? true,
+    'pr-completed': k?.prCompleted ?? true,
+    update: k?.update ?? true,
+  };
+}
 
 // Test-only overrides: a short poll interval and a fixture API base.
 function pollBase(): { active: number; idle: number } {
@@ -39,27 +49,17 @@ export function apiBase(): string {
   return state.settings?.current.apiBase ?? 'https://api.devin.ai';
 }
 
-function notificationsEnabled(): boolean {
-  return state.settings?.current.notifications.enabled ?? true;
-}
-
-// F1: PR auto-open also needs the poller, independently of toasts.
+// P6: the poller runs whenever a token is present — the session list feeds
+// notifications, PR quick-open and archived-scope cleanup regardless.
+// autoOpenTabs only controls tab opening, not polling.
 function autoOpenEnabled(): boolean {
   return state.settings?.current.prs.autoOpenTabs ?? true;
-}
-
-// OS toasts are suppressed under DEVIN_WORKSPACES_TEST unless explicitly re-enabled,
-// so e2e runs don't spam the desktop; the log event is the test evidence.
-function toastsAllowed(): boolean {
-  if (testMode && process.env.DEVIN_WORKSPACES_TEST_TOAST !== '1') return false;
-  return Notification.isSupported();
 }
 
 class Notifier {
   private timer: NodeJS.Timeout | null = null;
   private inFlight = false;
   private running = false;
-  private snapshot: StatusSnapshot | null = null;
   private failures = 0;
   private orgId: string | null = null;
   private generation = 0;
@@ -71,7 +71,7 @@ class Notifier {
     this.generation += 1;
     log('shell', 'notifier-start', {
       detail: {
-        enabled: notificationsEnabled(),
+        collect: state.settings?.current.notifications.collect ?? true,
         autoOpenTabs: autoOpenEnabled(),
         hasToken: state.secrets?.hasPat() ?? false,
       },
@@ -91,13 +91,11 @@ class Notifier {
   // Token or settings changed: forget cached org/snapshot and poll again now.
   restart(reason: string): void {
     this.stop(reason);
-    this.snapshot = null;
     this.orgId = null;
     this.failures = 0;
     this.notBefore = 0;
     state.apiSessions = [];
-    state.notifications = { waitingCount: 0, lastPollAt: null, authError: false, lastError: null };
-    this.updateBadge(0);
+    state.notifications = { lastPollAt: null, authError: false, lastError: null };
     this.start();
     notifyShell();
   }
@@ -105,9 +103,7 @@ class Notifier {
   onSettingsChanged(previous: Settings, next: Settings): void {
     if (
       previous.apiBase !== next.apiBase ||
-      previous.notifications.enabled !== next.notifications.enabled ||
-      previous.notifications.orgId !== next.notifications.orgId ||
-      previous.prs.autoOpenTabs !== next.prs.autoOpenTabs
+      previous.notifications.orgId !== next.notifications.orgId
     ) {
       this.restart('settings-changed');
     }
@@ -131,7 +127,7 @@ class Notifier {
   private async poll(): Promise<void> {
     if (this.inFlight || !this.running || state.shuttingDown) return;
     const pat = state.secrets?.getPat() ?? null;
-    if (!pat || (!notificationsEnabled() && !autoOpenEnabled())) {
+    if (!pat) {
       // Nothing to do; re-check occasionally in case a token arrives via restart().
       this.schedule(pollBase().idle);
       return;
@@ -161,9 +157,6 @@ class Notifier {
       }
       const page = await client.listSessions({ orgId: this.orgId, first: PAGE_SIZE });
       const sessions = page.sessions;
-      const next = snapshotOf(sessions);
-      const diff = diffStatuses(this.snapshot, next);
-      this.snapshot = next;
       this.failures = 0;
       // P8/Q3: close tabs whose session archived, or vanished from a complete
       // (single-page) list — a partial page can't prove absence.
@@ -191,8 +184,17 @@ class Notifier {
         }
         if (opened > 0) applyLayout();
       }
+      // P6: derive in-app notifications from the session diff (baseline =
+      // sessions absent from the previous poll).
+      if (state.settings?.current.notifications.collect ?? true) {
+        for (const entry of deriveNotifications(previousSessions, sessions, {
+          enabled: kindEnabled(),
+          now: Date.now(),
+        })) {
+          notificationStore().add(entry);
+        }
+      }
       state.notifications = {
-        waitingCount: diff.waitingCount,
         lastPollAt: new Date().toISOString(),
         authError: false,
         lastError: null,
@@ -201,22 +203,11 @@ class Notifier {
       log('shell', 'poll', {
         detail: {
           sessions: sessions.length,
-          waiting: diff.waitingCount,
-          newlyWaiting: diff.newlyWaiting.length,
           hasNextPage: page.hasNextPage,
           intervalMs: delay,
           durationMs: Date.now() - started,
         },
       });
-      // Toasts and the badge stay gated on the notifications toggle; the poll
-      // itself may be running only for PR auto-open.
-      if (notificationsEnabled()) {
-        for (const id of diff.newlyWaiting) {
-          const session = sessions.find((item) => item.session_id === id);
-          if (session) this.notify(session, next[id] ?? 'waiting_for_user');
-        }
-        this.updateBadge(diff.waitingCount);
-      }
     } catch (error) {
       this.failures += 1;
       const apiError = error instanceof DevinApiError ? error : null;
@@ -258,70 +249,6 @@ class Notifier {
     }
   }
 
-  private notify(session: DevinSession, status: string): void {
-    const title = sessionTitle(session);
-    const body = waitingBody(status);
-    const toast = toastsAllowed();
-    if (toast) {
-      try {
-        const notification = new Notification({ title, body, silent: false });
-        notification.on('click', () => this.openSession(session.session_id, 'toast-click'));
-        notification.show();
-      } catch (error) {
-        log('shell', 'notification-error', { detail: { message: String(error) } });
-      }
-    }
-    log('shell', 'notification-shown', {
-      detail: { sessionId: session.session_id, status, toast },
-    });
-  }
-
-  openSession(sessionId: string, source: string): void {
-    const url = sessionUrl(state.tenantUrl, sessionId);
-    log('shell', 'notification-open', { url, detail: { sessionId, source } });
-    handleLink(url, 'shell');
-    state.surface = 'cloud';
-    applyLayout();
-    const windowRef = state.windowRef;
-    if (windowRef && !windowRef.isDestroyed()) {
-      if (windowRef.isMinimized()) windowRef.restore();
-      windowRef.show();
-      windowRef.focus();
-    }
-    state.devinView?.webContents.focus();
-  }
-
-  showTestNotification(): void {
-    const toast = toastsAllowed();
-    if (toast) {
-      try {
-        new Notification({
-          title: 'Devin Workspaces',
-          body: 'Notifications are working.',
-          silent: false,
-        }).show();
-      } catch (error) {
-        log('shell', 'notification-error', { detail: { message: String(error) } });
-      }
-    }
-    log('shell', 'notification-shown', { detail: { sessionId: null, status: 'test', toast } });
-  }
-
-  private updateBadge(count: number): void {
-    const windowRef = state.windowRef;
-    if (!windowRef || windowRef.isDestroyed()) return;
-    try {
-      if (count <= 0) {
-        windowRef.setOverlayIcon(null, '');
-      } else {
-        const image = nativeImage.createFromDataURL(badgeDataUrl(count));
-        windowRef.setOverlayIcon(image, `${count} Devin session${count === 1 ? '' : 's'} waiting`);
-      }
-      log('shell', 'badge', { detail: { count } });
-    } catch (error) {
-      log('shell', 'badge-error', { detail: { message: String(error) } });
-    }
-  }
 }
 
 export const notifier = new Notifier();
@@ -347,4 +274,39 @@ export function popupPrMenu(): number {
   log('shell', 'pr-menu', { detail: { count: prs.length } });
   menu.popup({ window: state.windowRef });
   return prs.length;
+}
+
+// P6: opening a notification marks it read, navigates the devin view to the
+// session (or installs the downloaded update), and a PR notification also
+// focuses the PR tab in that session's pane.
+export function openNotification(id: string): void {
+  const store = notificationStore();
+  const entry = store.entries().find((item) => item.id === id);
+  if (!entry) return;
+  store.markRead(id);
+  setNotificationsPanel(false);
+  log('shell', 'notification-open', {
+    detail: { id, kind: entry.kind, sessionId: entry.sessionId },
+  });
+  if (entry.kind === 'update') {
+    installUpdate();
+    return;
+  }
+  if (entry.sessionId) loadInDevinView(sessionUrl(state.tenantUrl, entry.sessionId));
+  state.surface = 'cloud';
+  applyLayout();
+  // Open the PR into the notification's session scope — the devin-view nav that
+  // switches the visible scope races handleLink, so go through the tabManager.
+  if (entry.prUrl && entry.sessionId) {
+    state.tabManager?.open(entry.prUrl, { originSessionId: entry.sessionId });
+  } else if (entry.prUrl) {
+    handleLink(entry.prUrl, 'shell');
+  }
+  const windowRef = state.windowRef;
+  if (windowRef && !windowRef.isDestroyed()) {
+    if (windowRef.isMinimized()) windowRef.restore();
+    windowRef.show();
+    windowRef.focus();
+  }
+  state.devinView?.webContents.focus();
 }

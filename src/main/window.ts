@@ -13,6 +13,7 @@ import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 import { currentFillTarget } from './credentials';
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
+import { notificationsUnread } from './notifications';
 import { state } from './state';
 
 // The dock is a Cloud-surface feature unless the user opts in for all surfaces.
@@ -54,9 +55,12 @@ export function publicState(): ShellState {
     credentials: state.credentials?.list() ?? [],
     notifications: {
       ...state.notifications,
-      enabled: state.settings?.current.notifications.enabled ?? true,
+      collect: state.settings?.current.notifications.collect ?? true,
+      banner: state.settings?.current.notifications.banner ?? true,
       hasToken: state.secrets?.hasPat() ?? false,
       currentSessionPrCount: prsForSession(state.apiSessions, state.currentSessionId).length,
+      unreadCount: notificationsUnread(),
+      panelOpen: state.notificationsPanelOpen,
     },
     terminalOpen: state.terminalOpen,
     terminalHeight: state.terminalHeight,
@@ -104,6 +108,35 @@ export function ensureAttached(view: View | null): void {
   state.windowRef.contentView.addChildView(view);
 }
 
+// Raise the shell DOM over every hosted view (transparent bg so they still
+// paint beneath) — used by the splitter drag and the notifications panel.
+export function raiseShell(): void {
+  const { windowRef, shellView } = state;
+  if (!windowRef || !shellView) return;
+  shellView.setBackgroundColor('#00000000');
+  windowRef.contentView.addChildView(shellView);
+}
+
+// Restore the normal stacking order (shell bottom, hosted views above).
+export function lowerShell(): void {
+  const { windowRef, shellView, devinView, tabManager } = state;
+  if (!windowRef || !shellView) return;
+  shellView.setBackgroundColor('#111827');
+  const children = [...windowRef.contentView.children];
+  for (const child of children) {
+    if (
+      child === shellView ||
+      child === devinView ||
+      tabManager?.getViews().includes(child as WebContentsView)
+    ) {
+      windowRef.contentView.removeChildView(child);
+    }
+  }
+  windowRef.contentView.addChildView(shellView, 0);
+  if (state.surface === 'cloud' && devinView) windowRef.contentView.addChildView(devinView);
+  if (state.paneOpen && !state.paneCollapsed) addAtTop(tabManager?.activeView ?? null);
+}
+
 export function applyLayout(): void {
   const { windowRef, shellView, devinView, tabManager } = state;
   if (!windowRef || !shellView || !devinView || !tabManager) return;
@@ -125,6 +158,9 @@ export function applyLayout(): void {
     const activeTabView = paneVisible ? tabManager.activeView : null;
     if (activeTabView) ensureAttached(activeTabView);
     else if (tabManager.activeView) detachView(tabManager.activeView);
+    // The notifications panel is a shell-DOM modal over hosted views — the
+    // raise must survive relayout.
+    if (state.notificationsPanelOpen) raiseShell();
   }
   notifyShell();
 }
@@ -138,26 +174,7 @@ export function cancelDrag(restore: boolean, reason: string): void {
     if (state.dragAxis === 'x') state.paneFraction = state.dragStartFraction;
     else state.terminalHeight = state.dragStartHeight;
   }
-  if (state.shellView) state.shellView.setBackgroundColor('#111827');
-  const { windowRef, shellView, devinView, tabManager } = state;
-  if (windowRef && shellView) {
-    const children = [...windowRef.contentView.children];
-    for (const child of children) {
-      if (
-        child === shellView ||
-        child === devinView ||
-        tabManager?.getViews().includes(child as WebContentsView)
-      ) {
-        windowRef.contentView.removeChildView(child);
-      }
-    }
-    windowRef.contentView.addChildView(shellView, 0);
-    if (state.surface === 'cloud' && devinView) windowRef.contentView.addChildView(devinView);
-    if (state.paneOpen && !state.paneCollapsed) addAtTop(tabManager?.activeView ?? null);
-    if (!windowRef.contentView.children.includes(shellView)) {
-      windowRef.contentView.addChildView(shellView, 0);
-    }
-  }
+  lowerShell();
   log('shell', 'drag-cancel', {
     detail: {
       reason,
@@ -183,8 +200,7 @@ export function beginDrag(axis: 'x' | 'y', pos: number): void {
   state.dragStartHeight = state.terminalHeight;
   state.dragLastX = pos;
   if (state.dragTimer) clearTimeout(state.dragTimer);
-  shellView.setBackgroundColor('#00000000');
-  windowRef.contentView.addChildView(shellView);
+  raiseShell();
   state.dragTimer = setTimeout(() => cancelDrag(true, 'safety-timeout'), 10_000);
   log('shell', 'drag-start', {
     detail: { axis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
@@ -219,6 +235,17 @@ export function moveDrag(pos: number): void {
   log('shell', 'drag-move', {
     detail: { axis: state.dragAxis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
   });
+}
+
+// P6: while the panel is open the shell is raised — hosted views paint beneath
+// it but get no input. No timeout (unlike the drag raise).
+export function setNotificationsPanel(open: boolean): void {
+  if (state.notificationsPanelOpen === open) return;
+  state.notificationsPanelOpen = open;
+  if (open) raiseShell();
+  else lowerShell();
+  applyLayout();
+  log('shell', 'notifications-panel', { detail: { open } });
 }
 
 export function endDrag(pos: number): void {

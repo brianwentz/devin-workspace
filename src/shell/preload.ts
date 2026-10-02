@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AppNotification } from '../core/notificationModel';
 import {
   IpcChannels,
   type SessionPr,
@@ -13,6 +14,10 @@ import {
 } from '../shared/ipc';
 
 const isString = (value: unknown): value is string => typeof value === 'string';
+const testEnvNumber = (name: string): number | undefined => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+};
 
 const localApi = {
   getLocalState: () => ipcRenderer.invoke(IpcChannels.localState) as Promise<LocalStatePublic>,
@@ -211,7 +216,24 @@ const api = {
   clearPat: () => ipcRenderer.invoke(IpcChannels.secretsClearPat) as Promise<SecretResult>,
   listPrs: () => ipcRenderer.invoke(IpcChannels.prsList) as Promise<SessionPr[]>,
   openPrMenu: () => ipcRenderer.send(IpcChannels.prsPopup),
-  testNotification: () => ipcRenderer.send(IpcChannels.notifyTest),
+  // P6 notification center
+  notificationsList: () =>
+    ipcRenderer.invoke(IpcChannels.notificationsList) as Promise<AppNotification[]>,
+  notificationsMarkRead: (id: string) => ipcRenderer.send(IpcChannels.notificationsMarkRead, { id }),
+  notificationsMarkAllRead: () => ipcRenderer.send(IpcChannels.notificationsMarkAllRead),
+  notificationsRemove: (id: string) => ipcRenderer.send(IpcChannels.notificationsRemove, { id }),
+  notificationsClear: () => ipcRenderer.send(IpcChannels.notificationsClear),
+  notificationsOpen: (id: string) => ipcRenderer.send(IpcChannels.notificationsOpen, { id }),
+  notificationsPanel: (open: boolean) => ipcRenderer.send(IpcChannels.notificationsPanel, { open }),
+  // DEVIN_WORKSPACES_TEST_BANNER_MS shortens the banner auto-hide in tests.
+  bannerMs: testEnvNumber('DEVIN_WORKSPACES_TEST_BANNER_MS'),
+  onNotificationBanner: (callback: (entry: AppNotification) => void) => {
+    const listener = (_event: unknown, entry: AppNotification) => callback(entry);
+    ipcRenderer.on(IpcChannels.notificationBanner, listener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.notificationBanner, listener);
+    };
+  },
 };
 
 export type SecretResult = { ok: true } | { ok: false; error: string };
