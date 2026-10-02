@@ -7,7 +7,8 @@ name: release
 # src/main/updater.ts), and commits the version bump to main. macOS code
 # signing + notarization run only when the CSC_LINK / CSC_KEY_PASSWORD /
 # APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID secrets are set;
-# unsigned Mac builds ship with the updater disabled. Mark the release as a
+# unsigned Mac builds are ad-hoc signed (mac.identity "-") and ship with the
+# updater disabled. Mark the release as a
 # pre-release to ship a build that existing clients will NOT auto-update to
 # (electron-updater ignores prereleases by default).
 on:
@@ -150,11 +151,11 @@ jobs:
             echo "signing: Developer ID + notarization"
             npx electron-builder --mac --arm64 --publish never -c.mac.notarize=true
           else
-            echo "signing: none (CSC_LINK secret not set) — Mac auto-update disabled in this build"
+            echo "signing: ad-hoc (no Developer ID) — Gatekeeper will require right-click → Open; Mac auto-update disabled"
             # electron-builder treats a *defined* CSC_LINK (even "") as a certificate
             # path; the env block above always defines it, so drop them all here.
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-            CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --arm64 --publish never
+            CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --arm64 --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
           fi
 
       - name: Check artifacts
@@ -164,6 +165,7 @@ jobs:
             [ -f "$f" ] || { echo "missing $f"; exit 1; }
           done
           grep -Eq "^version:[[:space:]]*$ver[[:space:]]*$" dist/latest-mac.yml || { echo "dist/latest-mac.yml does not declare version $ver"; cat dist/latest-mac.yml; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "dist/mac-arm64/Devin Workspaces.app"
 
       - name: Upload release assets
         env:
