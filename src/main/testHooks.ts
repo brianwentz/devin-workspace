@@ -72,6 +72,7 @@ export function registerTestHooks(): void {
         state.devinView?.webContents.loadURL(url).catch(() => undefined);
       },
       getTabBounds: (id: string) => state.tabManager?.getView(id)?.getBounds() ?? null,
+      getDevinBounds: () => state.devinView?.getBounds() ?? null,
       saveCredential: (credential: { origin: string; username: string; password: string }) =>
         state.credentials?.save(credential).then(() => true),
       getFillTargetUrl: () => currentFillTarget()?.getURL() ?? null,

@@ -14,3 +14,6 @@ test-results/
 **/settings.json
 **/credentials.json
 **/secrets.json
+
+# local-only evidence, plans and generated docs
+docs/

@@ -382,24 +382,82 @@ export async function clickLink(
 
 // Real pointer drag of one tab onto another in the shell strip (dnd-kit PointerSensor:
 // 5px activation distance, then horizontal moves, then release over the target).
+// Requires both tabs fully inside the strip — no autoscroll heuristics; use
+// keyboardReorderTab when the strip overflows.
 export async function dragTab(page: Page, fromId: string, toId: string): Promise<void> {
   const from = page.locator(`[data-tab-id="${fromId}"]`);
   const to = page.locator(`[data-tab-id="${toId}"]`);
+  await from.scrollIntoViewIfNeeded();
+  await to.scrollIntoViewIfNeeded();
+  const stripBox = await page.locator('#tabStrip').boundingBox();
   const fromBox = await from.boundingBox();
   const toBox = await to.boundingBox();
-  if (!fromBox || !toBox) throw new Error('Tab elements not visible for drag');
+  if (!fromBox || !toBox || !stripBox) throw new Error('Tab elements not visible for drag');
+  const inside = (b: { x: number; width: number }) =>
+    b.x >= stripBox.x - 1 && b.x + b.width <= stripBox.x + stripBox.width + 1;
+  if (!inside(fromBox) || !inside(toBox)) {
+    throw new Error(
+      `dragTab requires both tabs fully visible; strip overflows — widen the pane or use keyboardReorderTab (from ${JSON.stringify(fromBox)} to ${JSON.stringify(toBox)}, strip ${JSON.stringify(stripBox)})`,
+    );
+  }
+  const orderBefore = await page.locator('#tabStrip [data-tab-id]').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('data-tab-id')),
+  );
   const startX = fromBox.x + fromBox.width / 2;
   const y = fromBox.y + fromBox.height / 2;
-  const endX = toBox.x + toBox.width / 2 + (toBox.x > fromBox.x ? toBox.width / 4 : -toBox.width / 4);
+  const dir = Math.sign(toBox.x - fromBox.x) || 1;
   await page.mouse.move(startX, y);
   await page.mouse.down();
-  const steps = 12;
-  for (let i = 1; i <= steps; i += 1) {
-    await page.mouse.move(startX + ((endX - startX) * i) / steps, y);
+  // 4 moves of 4px (> 5px activation distance) in the target direction.
+  for (let i = 1; i <= 4; i += 1) {
+    await page.mouse.move(startX + dir * i * 4, y);
+    await page.waitForTimeout(30);
   }
-  await page.mouse.move(endX, y);
+  await page.mouse.move(toBox.x + toBox.width / 2 + (dir * toBox.width) / 4, y, { steps: 8 });
   await page.mouse.up();
-  // dnd-kit swallows document `click` events for 50 ms after a drop; let that window pass
-  // so follow-up clicks in the test reach React.
-  await page.waitForTimeout(150);
+  // Wait for the strip order to actually change rather than a fixed delay —
+  // the reorder applies after dnd-kit's drop animation.
+  try {
+    await page.waitForFunction(
+      (prev) => {
+        const ids = [...document.querySelectorAll('#tabStrip [data-tab-id]')].map((el) =>
+          el.getAttribute('data-tab-id'),
+        );
+        return ids.join(',') !== (prev as string[]).join(',');
+      },
+      orderBefore,
+      { timeout: 5000 },
+    );
+  } catch {
+    throw new Error(`Tab order did not change after drop: ${orderBefore.join(',')}`);
+  }
+}
+
+// Deterministic reorder via the dnd-kit KeyboardSensor on the tab's drag handle:
+// focus handle → Space (pick up) → ArrowLeft/Right → Space (drop).
+export async function keyboardReorderTab(
+  page: Page,
+  tabId: string,
+  direction: 'left' | 'right',
+): Promise<void> {
+  const orderBefore = await page.locator('#tabStrip [data-tab-id]').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('data-tab-id')),
+  );
+  const handle = page.locator(`[data-tab-id="${tabId}"] .dragHandle`);
+  await handle.focus();
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(120);
+  await page.keyboard.press(direction === 'left' ? 'ArrowLeft' : 'ArrowRight');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('Space');
+  await page.waitForFunction(
+    (prev) => {
+      const ids = [...document.querySelectorAll('#tabStrip [data-tab-id]')].map((el) =>
+        el.getAttribute('data-tab-id'),
+      );
+      return ids.join(',') !== (prev as string[]).join(',');
+    },
+    orderBefore,
+    { timeout: 5000 },
+  );
 }

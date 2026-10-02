@@ -6,7 +6,7 @@ import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
 import {
   currentDevinUrl,
-  dragTab,
+  keyboardReorderTab,
   evaluateInShell,
   evaluateInView,
   shellPage,
@@ -194,14 +194,13 @@ test('routes fixture navigation, manages tabs, persists state, and cleans up web
     }, guardedId);
     expect(left).toBe(true);
 
-    // Reorder: real pointer drag of the first tab onto its right neighbour (dnd-kit
-    // PointerSensor on the shell page). The strip overflows here, so both tabs are first
-    // scrolled into view; the full-width drag matrix lives in tabstrip.spec.ts.
+    // Reorder via the keyboard sensor (deterministic under an overflowing strip);
+    // the pointer drag matrix lives in tabstrip.spec.ts.
     const orderBeforeReorder = (await state(app)).tabs.tabs.map((tab) => tab.id);
     expect(orderBeforeReorder.length).toBeGreaterThanOrEqual(2);
     const shell = await shellPage(app);
     await shell.locator(`[data-tab-id="${orderBeforeReorder[0]}"]`).scrollIntoViewIfNeeded();
-    await dragTab(shell, orderBeforeReorder[0]!, orderBeforeReorder[1]!);
+    await keyboardReorderTab(shell, orderBeforeReorder[0]!, 'right');
     await waitForEvent(logFile, 'tab-reorder');
     await expect
       .poll(async () => (await state(app)).tabs.tabs.map((tab) => tab.id))

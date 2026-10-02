@@ -28,8 +28,16 @@ button:disabled {
   cursor: default;
 }
 
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 .tab {
-  min-width: 115px;
+  min-width: 104px;
   max-width: 220px;
   display: flex;
   align-items: center;
@@ -45,7 +53,8 @@ button:disabled {
 }
 
 .tab {
-  flex: 0 0 170px;
+  /* shrink to fit the title-row strip before it scrolls */
+  flex: 1 1 170px;
   height: 100%;
   cursor: default;
   user-select: none;
