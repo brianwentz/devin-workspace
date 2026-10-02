@@ -35,6 +35,7 @@ function kindEnabled() {
     'pr-opened': k?.prOpened ?? true,
     'pr-completed': k?.prCompleted ?? true,
     update: k?.update ?? true,
+    identity: true,
   };
 }
 
@@ -66,6 +67,7 @@ class Notifier {
   private failures = 0;
   private orgId: string | null = null;
   private userId: string | null = null;
+  private identityNotified = false;
   private generation = 0;
   private notBefore = 0;
 
@@ -97,6 +99,7 @@ class Notifier {
     this.stop(reason);
     this.orgId = null;
     this.userId = null;
+    this.identityNotified = false;
     this.failures = 0;
     this.notBefore = 0;
     state.apiSessions = [];
@@ -161,6 +164,9 @@ class Notifier {
         const override = state.settings?.current.notifications.orgId?.trim();
         const self = await client.getSelf();
         this.userId = self.userId;
+        // First poll of this identity resolution: drop persisted entries that
+        // were derived for a different token user (or a pre-owner build).
+        notificationStore().reconcile(this.userId);
         log('shell', 'notifier-self', {
           detail: { principalType: self.principalType, hasUserId: self.userId !== null },
         });
@@ -179,6 +185,18 @@ class Notifier {
           lastError: null,
           noUserIdentity: true,
         };
+        if (!this.identityNotified) {
+          this.identityNotified = true;
+          notificationStore().add({
+            kind: 'identity',
+            sessionId: null,
+            ownerUserId: null,
+            sessionTitle: 'Devin Workspaces',
+            title: 'API token has no user identity',
+            body: 'This is a service-user token, so no sessions or notifications are shown. Use a personal API token.',
+            createdAt: Date.now(),
+          });
+        }
         delay = base.idle;
         log('shell', 'poll', { detail: { sessions: 0, noUserIdentity: true } });
         return;
@@ -224,6 +242,7 @@ class Notifier {
         for (const entry of deriveNotifications(previousSessions, sessions, {
           enabled: kindEnabled(),
           now: Date.now(),
+          ownerUserId: this.userId,
         })) {
           notificationStore().add(entry);
         }
@@ -355,6 +374,11 @@ export function openNotification(id: string): void {
   });
   if (entry.kind === 'update') {
     installUpdate();
+    return;
+  }
+  if (entry.kind === 'identity') {
+    state.surface = 'settings';
+    applyLayout();
     return;
   }
   if (entry.sessionId && entry.prUrl) {

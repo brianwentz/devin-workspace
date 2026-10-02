@@ -10,6 +10,7 @@ import {
   markAllRead,
   markRead,
   MAX_NOTIFICATIONS,
+  pruneForeign,
   removeNotification,
   unreadCount,
   type AppNotification,
@@ -22,8 +23,9 @@ import { notifyShell } from './window';
 
 const AppNotificationSchema = z.object({
   id: z.string(),
-  kind: z.enum(['waiting', 'approval', 'blocked', 'finished', 'pr-opened', 'pr-completed', 'update']),
+  kind: z.enum(['waiting', 'approval', 'blocked', 'finished', 'pr-opened', 'pr-completed', 'update', 'identity']),
   sessionId: z.string().nullable(),
+  ownerUserId: z.string().nullable().optional(),
   sessionTitle: z.string(),
   prUrl: z.string().optional(),
   prState: z.string().optional(),
@@ -117,6 +119,22 @@ export class NotificationStore {
     return unreadCount(this.list);
   }
 
+  // Drop session-scoped entries derived for a different token user (or a
+  // pre-owner build). Runs once per identity resolution in the notifier.
+  reconcile(ownerUserId: string | null): number {
+    const before = this.list.length;
+    this.list = pruneForeign(this.list, ownerUserId);
+    const removed = before - this.list.length;
+    if (removed === 0) return 0;
+    this.persist();
+    this.changed();
+    this.updateBadge();
+    log('shell', 'notifications-pruned', {
+      detail: { removed, hasOwner: ownerUserId !== null },
+    });
+    return removed;
+  }
+
   private changed(): void {
     notifyShell();
   }
@@ -143,8 +161,8 @@ export class NotificationStore {
       this.saveTimer = null;
       try {
         mkdirSync(join(this.file, '..'), { recursive: true });
-        // 'update' entries are runtime-only — never persisted.
-        const stored = this.list.filter((item) => item.kind !== 'update');
+        // 'update'/'identity' entries are runtime-only — never persisted.
+        const stored = this.list.filter((item) => item.kind !== 'update' && item.kind !== 'identity');
         writeFileSync(this.file, JSON.stringify(stored.slice(0, MAX_NOTIFICATIONS)));
       } catch (error) {
         log('shell', 'notifications-save-error', { detail: { message: String(error) } });
@@ -160,7 +178,7 @@ export class NotificationStore {
     }
     try {
       mkdirSync(join(this.file, '..'), { recursive: true });
-      const stored = this.list.filter((item) => item.kind !== 'update');
+      const stored = this.list.filter((item) => item.kind !== 'update' && item.kind !== 'identity');
       writeFileSync(this.file, JSON.stringify(stored.slice(0, MAX_NOTIFICATIONS)));
     } catch {
       // best effort at shutdown
