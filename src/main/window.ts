@@ -50,7 +50,13 @@ export function publicState(): ShellState {
     tabs: state.tabManager?.publicState() ?? { tabs: [], activeId: null, scope: '', hiddenTabCount: 0 },
     credentialMatch: (() => {
       const target = currentFillTarget();
-      return target && state.credentials ? state.credentials.matchForUrl(target.getURL()) : null;
+      const accounts =
+        target && state.credentials ? state.credentials.matchForUrl(target.getURL()) : [];
+      if (!accounts.length) return null;
+      return {
+        origin: accounts[0]!.origin,
+        accounts: accounts.map((account) => ({ id: account.id, username: account.username })),
+      };
     })(),
     credentials: state.credentials?.list() ?? [],
     notifications: {

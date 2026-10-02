@@ -25,7 +25,9 @@ export const IpcChannels = {
   layoutDragReset: 'layout:dragReset',
   credentialsList: 'credentials:list',
   credentialsSave: 'credentials:save',
+  credentialsUpdate: 'credentials:update',
   credentialsDelete: 'credentials:delete',
+  credentialsReveal: 'credentials:reveal',
   credentialsFill: 'credentials:fill',
   credentialsMenu: 'credentials:menu',
   // P5 extras
@@ -265,6 +267,16 @@ export const TerminalSummarySchema = z.object({
 });
 export type TerminalSummary = z.infer<typeof TerminalSummarySchema>;
 
+export const CredentialEntrySchema = z.object({
+  id: z.string().min(1),
+  origin: z.string(),
+  username: z.string(),
+  createdAt: z.number().finite(),
+  updatedAt: z.number().finite(),
+  lastUsedAt: z.number().finite().nullable(),
+});
+export type ShellCredentialEntry = z.infer<typeof CredentialEntrySchema>;
+
 export const ShellStateSchema = z.object({
   paneOpen: z.boolean(),
   paneFraction: z.number(),
@@ -279,9 +291,12 @@ export const ShellStateSchema = z.object({
     hiddenTabCount: z.number().int(),
   }),
   credentialMatch: z
-    .object({ origin: z.string(), username: z.string() })
+    .object({
+      origin: z.string(),
+      accounts: z.array(z.object({ id: z.string(), username: z.string() })),
+    })
     .nullable(),
-  credentials: z.array(z.object({ origin: z.string(), username: z.string() })),
+  credentials: z.array(CredentialEntrySchema),
   notifications: NotificationsStateSchema,
   // F5 terminal dock
   terminalOpen: z.boolean(),
@@ -296,8 +311,15 @@ export const CredentialSaveSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
 });
-export const CredentialDeleteSchema = z.object({ origin: z.string().min(1) });
+export const CredentialUpdateSchema = z.object({
+  id: z.string().min(1),
+  username: z.string().min(1).optional(),
+  password: z.string().min(1).optional(),
+});
+export const CredentialDeleteSchema = z.object({ id: z.string().min(1) });
+export const CredentialRevealSchema = z.object({ id: z.string().min(1) });
 export const CredentialFillSchema = z.object({
+  id: z.string().min(1),
   field: z.enum(['username', 'password']),
   pressEnter: z.boolean().default(false),
 });

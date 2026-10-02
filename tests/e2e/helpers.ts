@@ -9,8 +9,18 @@ export type PublicState = {
   paneCollapsed: boolean;
   surface: 'cloud' | 'local' | 'settings';
   currentSessionId: string | null;
-  credentialMatch: { origin: string; username: string } | null;
-  credentials: Array<{ origin: string; username: string }>;
+  credentialMatch: {
+    origin: string;
+    accounts: Array<{ id: string; username: string }>;
+  } | null;
+  credentials: Array<{
+    id: string;
+    origin: string;
+    username: string;
+    createdAt: number;
+    updatedAt: number;
+    lastUsedAt: number | null;
+  }>;
   settings: Record<string, unknown> & {
     tabs: { keepAliveHours: number; maxLiveTabs: number };
     workspaces?: string[];

@@ -8,7 +8,10 @@ interface RailProps {
   surface: Surface;
   paneOpen: boolean;
   paneCollapsed: boolean;
-  credentialMatch: { origin: string; username: string } | null;
+  credentialMatch: {
+    origin: string;
+    accounts: { id: string; username: string }[];
+  } | null;
   terminalOpen: boolean;
   terminalAllSurfaces: boolean;
 }
@@ -98,7 +101,11 @@ export function Rail({
           id="credentialsButton"
           type="button"
           aria-label="Fill credentials"
-          title={`Fill saved credentials for ${credentialMatch.origin}`}
+          title={`Fill saved credentials for ${credentialMatch.origin}${
+            credentialMatch.accounts.length > 1
+              ? ` (${credentialMatch.accounts.length} accounts)`
+              : ''
+          }`}
           className={buttonClass}
           onClick={() => window.devinworkspaces.openCredentialsMenu()}
         >

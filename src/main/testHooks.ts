@@ -88,14 +88,24 @@ export function registerTestHooks(): void {
           terminalHeight: state.terminalHeight,
         }),
       saveCredential: (credential: { origin: string; username: string; password: string }) =>
-        state.credentials?.save(credential).then(() => true),
+        state.credentials?.add(credential) ?? null,
+      listCredentials: () => state.credentials?.list() ?? [],
+      revealCredential: (id: string) => state.credentials?.reveal(id) ?? null,
+      updateCredential: (id: string, patch: { username?: string; password?: string }) =>
+        state.credentials?.update(id, patch) ?? null,
+      deleteCredential: (id: string) => state.credentials?.delete(id) ?? false,
       getFillTargetUrl: () => currentFillTarget()?.getURL() ?? null,
       // Deterministic fill into a specific tab (target selection is asserted
       // separately via getFillTargetUrl; OS focus is unreliable on CI).
-      fillInto: (id: string, field: 'username' | 'password', pressEnter: boolean) => {
+      fillInto: (
+        id: string,
+        credentialId: string,
+        field: 'username' | 'password',
+        pressEnter: boolean,
+      ) => {
         const contents = state.tabManager?.getView(id)?.webContents;
         if (!contents || !state.credentials) return 'unavailable';
-        return state.credentials.fill(contents, field, pressEnter);
+        return state.credentials.fill(contents, credentialId, field, pressEnter);
       },
       // F4: would a foreign webContents (the devin view) pass the IPC guard?
       ipcProbe: () => ({

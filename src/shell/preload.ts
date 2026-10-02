@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AppNotification } from '../core/notificationModel';
+import type { CredentialEntry } from '../core/credentials';
 import {
   IpcChannels,
   type SessionPr,
@@ -180,15 +181,25 @@ const api = {
     if (reason === 'escape' || reason === 'pointer-cancel')
       ipcRenderer.send(IpcChannels.layoutDragCancel, reason);
   },
-  listCredentials: () => ipcRenderer.invoke(IpcChannels.credentialsList),
+  listCredentials: () =>
+    ipcRenderer.invoke(IpcChannels.credentialsList) as Promise<CredentialEntry[]>,
   saveCredential: (credential: { origin: string; username: string; password: string }) =>
     ipcRenderer.invoke(IpcChannels.credentialsSave, credential) as Promise<
+      { ok: true; entry: CredentialEntry } | { ok: false; error: string }
+    >,
+  updateCredential: (id: string, patch: { username?: string; password?: string }) =>
+    ipcRenderer.invoke(IpcChannels.credentialsUpdate, { id, ...patch }) as Promise<
       { ok: true } | { ok: false; error: string }
     >,
-  deleteCredential: (origin: string) =>
-    ipcRenderer.invoke(IpcChannels.credentialsDelete, { origin }) as Promise<boolean>,
-  fillCredential: (options: { field: 'username' | 'password'; pressEnter: boolean }) =>
-    ipcRenderer.invoke(IpcChannels.credentialsFill, options) as Promise<string>,
+  deleteCredential: (id: string) =>
+    ipcRenderer.invoke(IpcChannels.credentialsDelete, { id }) as Promise<boolean>,
+  revealCredential: (id: string) =>
+    ipcRenderer.invoke(IpcChannels.credentialsReveal, { id }) as Promise<string | null>,
+  fillCredential: (options: {
+    id: string;
+    field: 'username' | 'password';
+    pressEnter: boolean;
+  }) => ipcRenderer.invoke(IpcChannels.credentialsFill, options) as Promise<string>,
   openCredentialsMenu: () => ipcRenderer.send(IpcChannels.credentialsMenu),
   onDragGuide: (callback: (guide: { axis: 'x' | 'y'; pos: number }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {

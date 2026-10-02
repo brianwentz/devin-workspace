@@ -1,8 +1,9 @@
 import { useState, type CSSProperties, type FormEvent } from 'react';
-import { normalizeOrigin, SUGGESTED_ORIGINS, type CredentialEntry } from '../../core/credentials';
+import type { CredentialEntry } from '../../core/credentials';
 import { isAllowedAppUrl } from '../../core/sessions';
 import type { Settings } from '../../shared/ipc';
 import { NotificationSettings } from './NotificationSettings';
+import { PasswordsSection } from './PasswordsSection';
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -18,122 +19,6 @@ const inputClass =
   'w-full max-w-md px-2 py-1.5 rounded-md border border-[#39475a] bg-[#0d141d] text-sm text-[#e8edf5]';
 const saveClass =
   'px-3 py-1.5 rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] text-sm disabled:hover:bg-[#1a2330]';
-
-function CredentialsSection({
-  credentials,
-  tenantUrl,
-}: {
-  credentials: CredentialEntry[];
-  tenantUrl: string;
-}) {
-  const tenantOrigin = normalizeOrigin(tenantUrl);
-  const originOptions = [...SUGGESTED_ORIGINS, ...(tenantOrigin ? [tenantOrigin] : [])];
-  const [originChoice, setOriginChoice] = useState(originOptions[0] ?? 'custom');
-  const [customOrigin, setCustomOrigin] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const save = () => {
-    const raw = originChoice === 'custom' ? customOrigin : originChoice;
-    const origin = normalizeOrigin(raw);
-    if (!origin) {
-      setError('Origin must be a valid https:// origin');
-      return;
-    }
-    if (!username || !password) {
-      setError('Username and password are required');
-      return;
-    }
-    setError(null);
-    void window.devinworkspaces
-      .saveCredential({ origin, username, password })
-      .then((result) => {
-        if (!result.ok) setError(result.error);
-        else {
-          setUsername('');
-          setPassword('');
-        }
-      });
-  };
-
-  return (
-    <section id="credentialsSection" className="flex flex-col gap-3 border-t border-[#39475a] pt-5">
-      <h2 className="text-lg">Credentials</h2>
-      <p className="text-xs text-[#7f8ca0] max-w-md">
-        Click a login field in the page, then use the key button in the rail to fill it. Stored
-        encrypted with Windows DPAPI for your Windows account.
-      </p>
-      <ul className="flex flex-col gap-1 max-w-md">
-        {credentials.map((credential) => (
-          <li key={credential.origin} className="flex items-center gap-2 text-sm">
-            <span className="flex-1 truncate font-mono text-xs">
-              {credential.origin} — {credential.username}
-            </span>
-            <button
-              type="button"
-              className={saveClass}
-              onClick={() => void window.devinworkspaces.deleteCredential(credential.origin)}
-            >
-              Delete
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="flex flex-col gap-2 max-w-md">
-        <select
-          id="credentialOrigin"
-          className={inputClass}
-          value={originChoice}
-          onChange={(event) => setOriginChoice(event.target.value)}
-        >
-          {originOptions.map((origin) => (
-            <option key={origin} value={origin}>
-              {origin}
-            </option>
-          ))}
-          <option value="custom">Custom…</option>
-        </select>
-        {originChoice === 'custom' && (
-          <input
-            id="credentialOriginCustom"
-            className={inputClass}
-            value={customOrigin}
-            onChange={(event) => setCustomOrigin(event.target.value)}
-            placeholder="https://login.example.com"
-          />
-        )}
-        <input
-          id="credentialUsername"
-          className={inputClass}
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
-          placeholder="Username"
-          autoComplete="off"
-        />
-        <input
-          id="credentialPassword"
-          className={inputClass}
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Password"
-          autoComplete="off"
-        />
-        <div className="flex items-center gap-3">
-          <button id="credentialSave" type="button" className={saveClass} onClick={save}>
-            Save credential
-          </button>
-          {error && <span className="text-sm text-[#ff8a8a]">{error}</span>}
-        </div>
-      </div>
-      <p className="text-xs text-[#7f8ca0] max-w-md">
-        Sign-in tips: Prefer passkeys — enroll a passkey (Windows Hello) at Okta and GitHub for
-        one-prompt sign-in.
-      </p>
-    </section>
-  );
-}
 
 export function SettingsPanel({ settings, credentials, style }: SettingsPanelProps) {
   const [tenantUrl, setTenantUrl] = useState(settings.tenantUrl);
@@ -327,7 +212,7 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
           Restart not required — Cloud view reloads on tenant change.
         </p>
       </form>
-      <CredentialsSection credentials={credentials} tenantUrl={settings.tenantUrl} />
+      <PasswordsSection credentials={credentials} tenantUrl={settings.tenantUrl} />
       <NotificationSettings />
     </main>
   );

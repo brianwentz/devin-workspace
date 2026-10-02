@@ -5,7 +5,9 @@ import { currentFillTarget } from './credentials';
 import {
   CredentialDeleteSchema,
   CredentialFillSchema,
+  CredentialRevealSchema,
   CredentialSaveSchema,
+  CredentialUpdateSchema,
   DragCancelReasonArg,
   DragPosArg,
   DragStartArg,
@@ -180,7 +182,22 @@ export function setupIpc(): void {
       return { ok: false, error: 'invalid payload' };
     }
     try {
-      await state.credentials.save(parsed.data);
+      const entry = await state.credentials.add(parsed.data);
+      notifyShell();
+      return { ok: true, entry };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  guardedHandle(IpcChannels.credentialsUpdate, async (_event, payload: unknown) => {
+    const parsed = CredentialUpdateSchema.safeParse(payload);
+    if (!parsed.success || !state.credentials) {
+      return { ok: false, error: 'invalid payload' };
+    }
+    try {
+      const { id, ...patch } = parsed.data;
+      const entry = await state.credentials.update(id, patch);
+      if (!entry) return { ok: false, error: 'Unknown credential' };
       notifyShell();
       return { ok: true };
     } catch (error) {
@@ -190,34 +207,53 @@ export function setupIpc(): void {
   guardedHandle(IpcChannels.credentialsDelete, (_event, payload: unknown) => {
     const parsed = CredentialDeleteSchema.safeParse(payload);
     if (!parsed.success || !state.credentials) return false;
-    const removed = state.credentials.delete(parsed.data.origin);
+    const removed = state.credentials.delete(parsed.data.id);
     if (removed) notifyShell();
     return removed;
+  });
+  // Never log the returned plaintext.
+  guardedHandle(IpcChannels.credentialsReveal, async (_event, payload: unknown) => {
+    const parsed = CredentialRevealSchema.safeParse(payload);
+    if (!parsed.success || !state.credentials) return null;
+    return state.credentials.reveal(parsed.data.id);
   });
   guardedHandle(IpcChannels.credentialsFill, async (_event, payload: unknown) => {
     const parsed = CredentialFillSchema.safeParse(payload);
     const target = currentFillTarget();
     if (!parsed.success || !state.credentials || !target) return 'unavailable';
-    const result = await state.credentials.fill(target, parsed.data.field, parsed.data.pressEnter);
+    const result = await state.credentials.fill(
+      target,
+      parsed.data.id,
+      parsed.data.field,
+      parsed.data.pressEnter,
+    );
     return result;
   });
   guardedOn(IpcChannels.credentialsMenu, () => {
     const target = currentFillTarget();
-    const match =
-      target && state.credentials ? state.credentials.matchForUrl(target.getURL()) : null;
-    if (!match || !state.windowRef) return;
-    const fill = (field: 'username' | 'password', pressEnter: boolean) => {
+    const accounts =
+      target && state.credentials ? state.credentials.matchForUrl(target.getURL()) : [];
+    if (!accounts.length || !state.windowRef) return;
+    const fill = (id: string, field: 'username' | 'password', pressEnter: boolean) => {
       if (target && state.credentials) {
-        void state.credentials.fill(target, field, pressEnter);
+        void state.credentials.fill(target, id, field, pressEnter);
       }
     };
     const menu = Menu.buildFromTemplate([
-      {
-        label: `Fill username (${match.username})`,
-        click: () => fill('username', false),
-      },
-      { label: 'Fill password', click: () => fill('password', false) },
-      { label: 'Fill password + Enter', click: () => fill('password', true) },
+      ...accounts.flatMap((account): Electron.MenuItemConstructorOptions[] => [
+        {
+          label: `Fill username (${account.username})`,
+          click: () => fill(account.id, 'username', false),
+        },
+        {
+          label: `Fill password (${account.username})`,
+          click: () => fill(account.id, 'password', false),
+        },
+        {
+          label: `Fill password + Enter (${account.username})`,
+          click: () => fill(account.id, 'password', true),
+        },
+      ]),
       { type: 'separator' },
       {
         label: 'Manage credentials…',
