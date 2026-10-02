@@ -15,6 +15,7 @@ import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
 import { state } from './state';
+import { updateState } from './updater';
 
 // The dock is a Cloud-surface feature unless the user opts in for all surfaces.
 export function terminalVisible(): boolean {
@@ -74,6 +75,7 @@ export function publicState(): ShellState {
       unreadCount: notificationsUnread(),
       panelOpen: state.notificationsPanelOpen,
     },
+    update: updateState(),
     terminalOpen: state.terminalOpen,
     terminalHeight: state.terminalHeight,
     terminals: terminalHost.list(),

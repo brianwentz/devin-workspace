@@ -73,6 +73,7 @@ export type PublicState = {
     unreadCount: number;
     panelOpen: boolean;
   };
+  update: { version: string; available: string | null; downloaded: string | null };
 };
 
 export async function launchApp(

@@ -7,7 +7,7 @@ import { terminalHost } from './local/terminalHost';
 import type { Surface } from '../shared/ipc';
 import { notificationStore } from './notifications';
 import { notifier, openNotification, openPrs, openSessionPr } from './notifier';
-import { updateDownloaded } from './updater';
+import { updateAvailable, updateDownloaded } from './updater';
 import { handleLink } from './routing';
 import { copyTabAddress, reloadCurrentScope } from './ipc';
 import { historyAction, navigationTarget, openNewSession } from './shortcuts';
@@ -154,6 +154,7 @@ export function registerTestHooks(): void {
           ...(partial as object),
         }).id,
       simulateUpdateDownloaded: (version: string) => updateDownloaded(version),
+      simulateUpdateAvailable: (version: string) => updateAvailable(version),
       panelOpen: () => state.notificationsPanelOpen,
       notificationsOpen: (id: string) => openNotification(id),
       newSession: () => openNewSession(),

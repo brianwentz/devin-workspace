@@ -28,6 +28,7 @@ import { log } from './log';
 import { notificationStore } from './notifications';
 import { notifier, openNotification, openPrs, popupPrMenu } from './notifier';
 import { handleLink } from './routing';
+import { hasDownloadedUpdate, installUpdate } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
 import { NotificationIdArg, NotificationPanelArg } from '../shared/ipc';
 import { state } from './state';
@@ -268,5 +269,8 @@ function setupExtrasIpc(): void {
   guardedOn(IpcChannels.notificationsPanel, (_e, arg: unknown) => {
     const parsed = NotificationPanelArg.safeParse(arg);
     if (parsed.success) setNotificationsPanel(parsed.data.open);
+  });
+  guardedOn(IpcChannels.updateInstall, () => {
+    if (hasDownloadedUpdate()) installUpdate();
   });
 }

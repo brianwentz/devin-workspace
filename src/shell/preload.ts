@@ -245,6 +245,7 @@ const api = {
   notificationsClear: () => ipcRenderer.send(IpcChannels.notificationsClear),
   notificationsOpen: (id: string) => ipcRenderer.send(IpcChannels.notificationsOpen, { id }),
   notificationsPanel: (open: boolean) => ipcRenderer.send(IpcChannels.notificationsPanel, { open }),
+  updateInstall: () => ipcRenderer.send(IpcChannels.updateInstall),
   // DEVIN_WORKSPACES_TEST_BANNER_MS shortens the banner auto-hide in tests.
   bannerMs: testEnvNumber('DEVIN_WORKSPACES_TEST_BANNER_MS'),
   onNotificationBanner: (callback: (entry: AppNotification) => void) => {
