@@ -10,7 +10,6 @@ interface PrQuickOpenProps {
 export function PrQuickOpen({ buttonClass }: PrQuickOpenProps) {
   const state = useShellState();
   const count = state?.notifications.currentSessionPrCount ?? 0;
-  const waiting = state?.notifications.waitingCount ?? 0;
   return (
     <>
       {count > 0 && (
@@ -27,15 +26,6 @@ export function PrQuickOpen({ buttonClass }: PrQuickOpenProps) {
             {count}
           </span>
         </button>
-      )}
-      {waiting > 0 && (
-        <span
-          id="waitingBadge"
-          title={`${waiting} session${waiting === 1 ? '' : 's'} waiting for you`}
-          className="min-w-5 h-5 px-1 rounded-full bg-[#d93a2f] text-[11px] leading-5 text-center"
-        >
-          {waiting > 9 ? '9+' : waiting}
-        </span>
       )}
     </>
   );

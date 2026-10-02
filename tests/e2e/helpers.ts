@@ -44,13 +44,15 @@ export type PublicState = {
   activeTerminalId: string | null;
   // P5
   notifications: {
-    enabled: boolean;
+    collect: boolean;
+    banner: boolean;
     hasToken: boolean;
-    waitingCount: number;
     lastPollAt: string | null;
     authError: boolean;
     lastError: string | null;
     currentSessionPrCount: number;
+    unreadCount: number;
+    panelOpen: boolean;
   };
 };
 

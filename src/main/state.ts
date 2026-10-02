@@ -54,9 +54,10 @@ export const state = {
   secrets: null as SecretStore | null,
   apiSessions: [] as DevinSession[],
   notifications: {
-    waitingCount: 0,
     lastPollAt: null as string | null,
     authError: false,
     lastError: null as string | null,
   },
+  // P6: notification panel z-order raise flag (set via notifications:panel IPC).
+  notificationsPanelOpen: false,
 };

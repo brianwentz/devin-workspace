@@ -16,7 +16,9 @@ export function NotificationSettings() {
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [orgId, setOrgId] = useState('');
   const notifications = shell?.notifications;
-  const notificationsEnabled = shell?.settings.notifications.enabled ?? true;
+  const collect = shell?.settings.notifications.collect ?? true;
+  const banner = shell?.settings.notifications.banner ?? true;
+  const kinds = shell?.settings.notifications.kinds;
   const notificationsHasToken = notifications?.hasToken ?? false;
   const savedOrgId = shell?.settings.notifications.orgId ?? '';
   const autoOpenTabs = shell?.settings.prs.autoOpenTabs ?? true;
@@ -68,8 +70,17 @@ export function NotificationSettings() {
       .finally(() => setBusy(false));
   };
 
-  const toggleEnabled = (enabled: boolean) => {
-    void window.devinworkspaces.setSettings({ notifications: { enabled } });
+  const toggleCollect = (enabled: boolean) => {
+    void window.devinworkspaces.setSettings({ notifications: { collect: enabled } });
+  };
+  const toggleBanner = (enabled: boolean) => {
+    void window.devinworkspaces.setSettings({ notifications: { banner: enabled } });
+  };
+  const toggleKind = (
+    key: 'waiting' | 'approval' | 'blocked' | 'finished' | 'prOpened' | 'prCompleted' | 'update',
+    enabled: boolean,
+  ) => {
+    void window.devinworkspaces.setSettings({ notifications: { kinds: { [key]: enabled } } });
   };
 
   const toggleAutoOpenTabs = (enabled: boolean) => {
@@ -138,18 +149,46 @@ export function NotificationSettings() {
       </form>
       <label className="flex items-center gap-2 text-sm">
         <input
-          id="notificationsEnabledInput"
+          id="notificationsCollectInput"
           type="checkbox"
-          checked={notificationsEnabled}
-          onChange={(event) => toggleEnabled(event.target.checked)}
+          checked={collect}
+          onChange={(event) => toggleCollect(event.target.checked)}
         />
-        <span>Notify me when a session is waiting for me</span>
-        {notifications.waitingCount > 0 && (
-          <span id="waitingCount" className="text-xs text-[#e0a03c]">
-            {notifications.waitingCount} waiting
-          </span>
-        )}
+        <span>Collect notifications</span>
       </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          id="notificationsBannerInput"
+          type="checkbox"
+          checked={banner}
+          onChange={(event) => toggleBanner(event.target.checked)}
+        />
+        <span>Show banner for new notifications</span>
+      </label>
+      <fieldset className="flex flex-col gap-1 text-sm">
+        <span className="text-[#aeb9c8] text-xs">Notify me for</span>
+        {(
+          [
+            ['waiting', 'Waiting for reply'],
+            ['approval', 'Needs approval'],
+            ['blocked', 'Blocked'],
+            ['finished', 'Session finished'],
+            ['prOpened', 'PR opened'],
+            ['prCompleted', 'PR merged or closed'],
+            ['update', 'App updates'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key} className="flex items-center gap-2">
+            <input
+              id={`notificationKind-${key}`}
+              type="checkbox"
+              checked={kinds?.[key] ?? true}
+              onChange={(event) => toggleKind(key, event.target.checked)}
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+      </fieldset>
       <label className="flex items-center gap-2 text-sm">
         <input
           id="prAutoOpenTabsInput"
@@ -174,16 +213,6 @@ export function NotificationSettings() {
           </button>
         </div>
       </label>
-      <div>
-        <button
-          id="testNotification"
-          type="button"
-          className={buttonClass}
-          onClick={() => window.devinworkspaces.testNotification()}
-        >
-          Test notification
-        </button>
-      </div>
     </section>
   );
 }

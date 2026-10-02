@@ -186,15 +186,44 @@ describe('F2 window placements', () => {
   });
 });
 
-describe('notifications settings (P5)', () => {
-  it('defaults to enabled with no org override and merges shallowly', () => {
+describe('notifications settings (P5/P6)', () => {
+  const DEFAULT_KINDS = {
+    waiting: true,
+    approval: true,
+    blocked: true,
+    finished: false,
+    prOpened: true,
+    prCompleted: true,
+    update: true,
+  };
+  it('defaults collect/banner on, org blank, kinds with finished off', () => {
     const base = SettingsSchema.parse({});
-    expect(base.notifications).toEqual({ enabled: true, orgId: '' });
-    const merged = mergeSettings(base, { notifications: { enabled: false } });
-    expect(merged.notifications).toEqual({ enabled: false, orgId: '' });
+    expect(base.notifications).toEqual({
+      collect: true,
+      banner: true,
+      orgId: '',
+      kinds: DEFAULT_KINDS,
+    });
+    const merged = mergeSettings(base, { notifications: { collect: false, banner: false } });
+    expect(merged.notifications).toEqual({ collect: false, banner: false, orgId: '', kinds: DEFAULT_KINDS });
     const withOrg = mergeSettings(merged, { notifications: { orgId: 'org-123' } });
-    expect(withOrg.notifications).toEqual({ enabled: false, orgId: 'org-123' });
-    expect(SettingsPatchSchema.safeParse({ notifications: { enabled: 'yes' } }).success).toBe(false);
+    expect(withOrg.notifications.orgId).toBe('org-123');
+    expect(withOrg.notifications.collect).toBe(false);
+    // kind patches merge deep (a single kind does not reset the rest)
+    const kindsOff = mergeSettings(withOrg, { notifications: { kinds: { finished: true, prOpened: false } } });
+    expect(kindsOff.notifications.kinds).toEqual({ ...DEFAULT_KINDS, finished: true, prOpened: false });
+    expect(SettingsPatchSchema.safeParse({ notifications: { collect: 'yes' } }).success).toBe(false);
+    expect(SettingsPatchSchema.safeParse({ notifications: { kinds: { update: 'yes' } } }).success).toBe(false);
+  });
+  it('migrates notifications.enabled → collect', () => {
+    const { settings } = parseSettingsFile({
+      notifications: { enabled: false, orgId: 'org-9' },
+    });
+    expect(settings.notifications.collect).toBe(false);
+    expect(settings.notifications.orgId).toBe('org-9');
+    expect(settings.notifications).not.toHaveProperty('enabled');
+    const { settings: on } = parseSettingsFile({ notifications: { enabled: true } });
+    expect(on.notifications.collect).toBe(true);
   });
 });
 
@@ -208,7 +237,7 @@ describe('prs settings (F1)', () => {
     expect(off.notifications).toEqual(base.notifications);
     const on = mergeSettings(off, { prs: { autoOpenTabs: true } });
     expect(on.prs).toEqual({ autoOpenTabs: true });
-    expect(mergeSettings(off, { notifications: { enabled: false } }).prs).toEqual({ autoOpenTabs: false });
+    expect(mergeSettings(off, { notifications: { collect: false } }).prs).toEqual({ autoOpenTabs: false });
     expect(SettingsPatchSchema.safeParse({ prs: { autoOpenTabs: 'yes' } }).success).toBe(false);
     // A pre-F1 settings file without `prs` parses to the default.
     expect(parseSettingsFile({ tenantUrl: 'https://x.example' }).settings.prs).toEqual({ autoOpenTabs: true });
