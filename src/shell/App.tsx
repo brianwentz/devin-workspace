@@ -4,6 +4,7 @@ import { useShellState } from './store';
 import { Rail } from './components/Rail';
 import { TitleBar } from './components/TitleBar';
 import { Splitter } from './components/Splitter';
+import { TerminalDock } from './components/TerminalDock';
 import { SettingsPanel } from './components/SettingsPanel';
 import { LocalPanel } from './local/LocalPanel';
 
@@ -40,11 +41,13 @@ export function App() {
   }, []);
 
   if (!state) return null;
+  const terminalVisible =
+    state.terminalOpen && (state.surface === 'cloud' || state.settings.terminal.allSurfaces);
   const bounds = computeBounds(size, {
     paneOpen: state.paneOpen,
     paneFraction: state.paneFraction,
-    terminalOpen: false,
-    terminalHeight: DEFAULT_TERMINAL_HEIGHT,
+    terminalOpen: terminalVisible,
+    terminalHeight: state.terminalHeight,
   });
   const paneVisible = state.paneOpen && !bounds.paneCollapsed;
   const mainRect = bounds.devin;
@@ -56,6 +59,8 @@ export function App() {
         paneOpen={state.paneOpen}
         paneCollapsed={bounds.paneCollapsed}
         credentialMatch={state.credentialMatch}
+        terminalOpen={state.terminalOpen}
+        terminalAllSurfaces={state.settings.terminal.allSurfaces}
       />
       <TitleBar
         windowWidth={size.width}
@@ -68,10 +73,15 @@ export function App() {
         hiddenTabCount={state.tabs.hiddenTabCount}
       />
       {paneVisible && bounds.splitter && (
-        <Splitter
-          x={bounds.splitter.x}
-          paneOpen={state.paneOpen}
-        />
+        <Splitter axis="x" rect={bounds.splitter} enabled={state.paneOpen} />
+      )}
+      <TerminalDock
+        rect={terminalVisible ? bounds.terminal : null}
+        terminals={state.terminals}
+        activeTerminalId={state.activeTerminalId}
+      />
+      {terminalVisible && bounds.terminalSplitter && (
+        <Splitter axis="y" rect={bounds.terminalSplitter} enabled={true} />
       )}
       {state.surface === 'settings' && (
         <SettingsPanel

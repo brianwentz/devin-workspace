@@ -31,6 +31,17 @@ export type PublicState = {
       discarded?: boolean;
     }>;
   };
+  // F5 terminal dock
+  terminalOpen: boolean;
+  terminalHeight: number;
+  terminals: Array<{
+    id: string;
+    kind: 'devin' | 'shell';
+    cwd: string;
+    title: string;
+    exitCode: number | null;
+  }>;
+  activeTerminalId: string | null;
   // P5
   notifications: {
     enabled: boolean;

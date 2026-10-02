@@ -149,12 +149,19 @@ body.dragging * {
   cursor: col-resize !important;
 }
 
-body.dragging .shell-chrome {
+body.dragging-y,
+body.dragging-y * {
+  cursor: row-resize !important;
+}
+
+body.dragging .shell-chrome,
+body.dragging-y .shell-chrome {
   background: transparent;
   border-color: transparent;
 }
 
-body.dragging .shell-chrome button {
+body.dragging .shell-chrome button,
+body.dragging-y .shell-chrome button {
   background: transparent;
   border-color: transparent;
 }

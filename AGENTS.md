@@ -8,7 +8,7 @@ Electron desktop client for Devin (BaseWindow + WebContentsViews; React shell is
 - `npm run build` — esbuild (main/preload/scripts → `out/*.cjs`) + `vite build` (shell → `out/shell`)
 - `npm run test:e2e` — build + Playwright `_electron` (`tests/e2e`, fixture servers in `tests/fixtures/http.ts`)
 - `npm run dist:win` — build + electron-builder NSIS per-user x64 installer → `dist/DevinWorkspaces-Setup-<version>.exe` (unsigned, fuses flipped in `scripts/after-pack.cjs`, icon from `build/icon.ico` via `npm run icon`)
-- `npm run smoke:install` — `scripts/smoke-install.ps1`: silent install → `tests/smoke/installed.spec.ts` (CDP-driven, `playwright.smoke.config.ts`) → upgrade-in-place → uninstall; evidence in `docs/evidence/p3-smoke*` (docs/ is git-ignored — local output only). Run before pushing when packaging or the settings schema changes (it reads `settings.json` directly).
+- `npm run smoke:install` — `scripts/smoke-install.ps1`: silent install → `tests/smoke/installed.spec.ts` (CDP-driven, `playwright.smoke.config.ts`) → upgrade-in-place → uninstall; evidence in `docs/evidence/p3-smoke*` (docs/ is git-ignored - local output only). Run before pushing when packaging or the settings schema changes (it reads `settings.json` directly).
 - `npm start` / `npm run acp:probe`
 - CI: `.github/workflows/windows.yml` (push/PR: typecheck, unit, build, e2e, dist:win, smoke:install); `release.yml` (tag `v*`: `electron-builder --publish always` to GitHub Releases, feed used by `src/main/updater.ts`)
 
@@ -17,17 +17,16 @@ Electron desktop client for Devin (BaseWindow + WebContentsViews; React shell is
 P5 (test mode only): `DEVIN_WORKSPACES_API_BASE` (overrides `settings.apiBase` for the v3 poller), `DEVIN_WORKSPACES_POLL_MS` (poll interval for active and idle), `DEVIN_WORKSPACES_TEST_TOAST=1` (re-enable OS toasts, which are otherwise suppressed under `DEVIN_WORKSPACES_TEST=1`; `notification-shown` is logged either way).
 - `npm run acp:contract` — P4 contract run against the real `devin acp` (initialize/new/prompt/cancel/list/load); writes `docs/evidence/p4-acp-contract.jsonl` (git-ignored); exit 0 also when the CLI is missing/unauthenticated (reported in the file)
 `DEVIN_WORKSPACES_LOCAL_AGENT_CMD` (test mode only, e.g. `node out/fixtures/fakeAcpAgent.cjs`) replaces the `devin acp` spawn with a full command; the fake agent reads `FAKE_ACP_LIST=1` / `FAKE_ACP_LOAD=1` / `FAKE_ACP_LINK_URL`. `DEVIN_CLI` overrides the binary for `acp:probe` / `acp:contract`.
-`DEVIN_WORKSPACES_TEST_TERMINAL_CMD` (test mode only, e.g. `node out/fixtures/fakePty.cjs`) replaces the `devin` binary the embedded terminal spawns.
+`DEVIN_WORKSPACES_TEST_TERMINAL_CMD` (test mode only, e.g. `node out/fixtures/fakePty.cjs`) replaces the command the embedded terminal spawns — for both `devin`-kind (Local panel) and `shell`-kind (dock) ptys.
 
 ## Versions
 Requires Node ≥ 22.12; currently developed on Node 24.x. All deps are pinned exact — package.json is the source of truth.
 
 ## Layout & settings (F-features)
-- Frame: `titleBarStyle: 'hidden'` + `titleBarOverlay` on the BaseWindow, `Menu.setApplicationMenu(null)`; the shell's `TitleBar.tsx` renders the drag region and the GitHub tab strip. Zoom (Ctrl+= / Ctrl+- / Ctrl+0) and detached DevTools (F12 / Ctrl+Shift+I, dev only) live in `src/main/shortcuts.ts`.
-- Settings keys: `pane.open` + `pane.fraction` (0..1 share of the available width — px guards are derived in `computeBounds`, never persisted; `pane.width` migrates to fraction on load), `windowPlacements` (per-display-config window bounds/maximized).
-- `prs.autoOpenTabs` — open a lazy background tab when a session gains a PR.
+- Frame: `titleBarStyle: 'hidden'` + `titleBarOverlay` on the BaseWindow, `Menu.setApplicationMenu(null)`; the shell's `TitleBar.tsx` renders the drag region and the GitHub tab strip. Zoom (Ctrl+= / Ctrl+- / Ctrl+0) and detached DevTools (F12 / Ctrl+Shift+I, dev only) live in `src/main/shortcuts.ts`; Ctrl+` toggles the terminal dock.
+- Settings keys: `pane.open` + `pane.fraction` (0..1 share of the available width — px guards are derived in `computeBounds`, never persisted; `pane.width` migrates to fraction on load), `windowPlacements` (per-display-config window bounds/maximized), `layout.terminalOpen`/`layout.terminalHeight`, `terminal.allSurfaces` (show the dock on Local/Settings too), `prs.autoOpenTabs` (lazy background tab when a session gains a PR).
 - Removed channel: `pane:width` (width changes come from the splitter drag or `paneFraction` in ShellState).
-- New log events: `window-placement`, `pr-auto-open` (plus existing `drag-*` events now carry `axis`).
+- New log events: `window-placement`, `pr-auto-open`, `terminal-toggle` (plus existing `drag-*` events now carry `axis`).
 
 ## Conventions
 - `src/core/` is pure TS — no `electron` imports (unit-testable).

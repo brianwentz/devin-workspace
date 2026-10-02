@@ -5,19 +5,25 @@ import '@xterm/xterm/css/xterm.css';
 import { buttonClass } from './Cards';
 
 interface TerminalViewProps {
-  workspace: string;
+  // Host-owned pty id (see terminalHost). The view never opens or closes it.
+  id: string;
+  // When provided, an exit banner offers to restart (LocalPanel's devin pty).
+  onRestart?: () => void;
 }
 
-export function TerminalView({ workspace }: TerminalViewProps) {
+export function TerminalView({ id, onRestart }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const idRef = useRef<string | null>(null);
+  const idRef = useRef<string>(id);
   const [exitCode, setExitCode] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [restarting, setRestarting] = useState(0);
+
+  useEffect(() => {
+    idRef.current = id;
+  }, [id]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    setExitCode(null);
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 12,
@@ -42,14 +48,18 @@ export function TerminalView({ workspace }: TerminalViewProps) {
       }
       if (key === 'v') {
         void navigator.clipboard.readText().then((text) => {
-          if (idRef.current && text) window.devinworkspaces.terminalInput(idRef.current, text);
+          if (text) window.devinworkspaces.terminalInput(idRef.current, text);
         });
         return false;
       }
       return true;
     });
     term.onData((data) => {
-      if (idRef.current) window.devinworkspaces.terminalInput(idRef.current, data);
+      window.devinworkspaces.terminalInput(idRef.current, data);
+    });
+    // OSC 0/2 titles become dock tab labels; never logged.
+    term.onTitleChange((title) => {
+      window.devinworkspaces.terminalTitle(idRef.current, title);
     });
     try {
       fit.fit();
@@ -63,7 +73,7 @@ export function TerminalView({ workspace }: TerminalViewProps) {
       } catch {
         return;
       }
-      if (idRef.current) window.devinworkspaces.terminalResize(idRef.current, term.cols, term.rows);
+      window.devinworkspaces.terminalResize(idRef.current, term.cols, term.rows);
     });
     observer.observe(container);
 
@@ -74,54 +84,31 @@ export function TerminalView({ workspace }: TerminalViewProps) {
       if (payload.id === idRef.current) setExitCode(payload.exitCode);
     });
 
-    let cancelled = false;
-    void window.devinworkspaces.terminalOpen(workspace).then((result) => {
-      if (cancelled) return;
-      if (result.ok) {
-        idRef.current = result.id;
-        setError(null);
-        window.devinworkspaces.terminalResize(result.id, term.cols, term.rows);
-      } else {
-        setError(result.error);
-      }
-    });
+    window.devinworkspaces.terminalResize(id, term.cols, term.rows);
 
     return () => {
-      cancelled = true;
       offData();
       offExit();
       observer.disconnect();
       term.dispose();
-      // The host pty stays alive — it is keyed by workspace and reused on remount.
-      idRef.current = null;
+      // The host pty stays alive — it is keyed by id and reused on remount.
     };
-  }, [workspace, restarting]);
+  }, [id]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {exitCode !== null && (
+      {exitCode !== null && onRestart && (
         <div
           id="terminalExitBar"
           className="flex items-center gap-3 border-b border-[#39475a] bg-[#1a2330] px-3 py-1.5 text-xs text-[#e0a03c]"
         >
           devin exited (code {exitCode})
-          <button
-            type="button"
-            className={buttonClass}
-            onClick={() => {
-              setExitCode(null);
-              setError(null);
-              setRestarting((n) => n + 1);
-            }}
-          >
+          <button type="button" className={buttonClass} onClick={onRestart}>
             Restart
           </button>
         </div>
       )}
-      {error && (
-        <div className="border-b border-[#39475a] px-3 py-1.5 text-xs text-[#ff8a8a]">{error}</div>
-      )}
-      <div ref={containerRef} className="min-h-0 flex-1 px-1 pt-1" data-workspace={workspace} />
+      <div ref={containerRef} className="min-h-0 flex-1 px-1 pt-1" data-terminal-id={id} />
     </div>
   );
 }

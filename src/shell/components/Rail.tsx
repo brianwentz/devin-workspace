@@ -7,12 +7,22 @@ interface RailProps {
   paneOpen: boolean;
   paneCollapsed: boolean;
   credentialMatch: { origin: string; username: string } | null;
+  terminalOpen: boolean;
+  terminalAllSurfaces: boolean;
 }
 
 const buttonClass =
   'w-10 h-10 text-xl rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] aria-pressed:bg-[#31455f] aria-pressed:border-[#54749c]';
 
-export function Rail({ surface, paneOpen, paneCollapsed, credentialMatch }: RailProps) {
+export function Rail({
+  surface,
+  paneOpen,
+  paneCollapsed,
+  credentialMatch,
+  terminalOpen,
+  terminalAllSurfaces,
+}: RailProps) {
+  const terminalOffSurface = surface !== 'cloud' && !terminalAllSurfaces;
   return (
     <aside
       id="rail"
@@ -66,6 +76,21 @@ export function Rail({ surface, paneOpen, paneCollapsed, credentialMatch }: Rail
       )}
       <PrQuickOpen buttonClass={buttonClass} />
       <span className="flex-1" />
+      <button
+        id="terminalToggle"
+        type="button"
+        aria-label="Toggle terminal"
+        aria-pressed={terminalOpen}
+        title={
+          terminalOffSurface
+            ? 'Terminal dock shows on Cloud — enable for all surfaces in Settings'
+            : 'Toggle terminal (Ctrl+`)'
+        }
+        className={`${buttonClass} text-sm${terminalOffSurface ? ' opacity-50' : ''}`}
+        onClick={() => window.devinworkspaces.terminalToggle()}
+      >
+        &gt;_
+      </button>
       <button
         id="paneToggle"
         type="button"

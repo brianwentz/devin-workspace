@@ -1,5 +1,5 @@
 import type { BaseWindow, WebContentsView } from 'electron';
-import { DEFAULT_PANE_FRACTION } from '../core/layout';
+import { DEFAULT_PANE_FRACTION, DEFAULT_TERMINAL_HEIGHT } from '../core/layout';
 import type { Surface } from '../shared/ipc';
 import type { CredentialStore } from './credentials';
 import type { SettingsStore } from './settings';
@@ -41,6 +41,12 @@ export const state = {
   dragLastX: 0,
   dragTimer: null as NodeJS.Timeout | null,
   dragging: false,
+  // F5 terminal dock
+  terminalOpen: false,
+  terminalHeight: DEFAULT_TERMINAL_HEIGHT,
+  activeTerminalId: null as string | null,
+  dragAxis: 'x' as 'x' | 'y',
+  dragStartHeight: DEFAULT_TERMINAL_HEIGHT,
   shuttingDown: false,
   shutdownPromise: null as Promise<void> | null,
   lastFocused: null as Electron.WebContents | null,

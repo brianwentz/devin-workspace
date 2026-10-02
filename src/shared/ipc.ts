@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEFAULT_PANE_FRACTION } from '../core/layout';
+import { DEFAULT_PANE_FRACTION, DEFAULT_TERMINAL_HEIGHT, MIN_TERMINAL_HEIGHT } from '../core/layout';
 import { isAllowedAppUrl } from '../core/sessions';
 
 export const IpcChannels = {
@@ -54,6 +54,12 @@ export const IpcChannels = {
   terminalClose: 'terminal:close',
   terminalData: 'terminal:data',
   terminalExit: 'terminal:exit',
+  // F5: tabbed shell-terminal dock
+  terminalList: 'terminal:list',
+  terminalTitle: 'terminal:title',
+  terminalToggle: 'terminal:toggle',
+  terminalActivate: 'terminal:activate',
+  terminalCwdOptions: 'terminal:cwdOptions',
 } as const;
 
 export const SurfaceSchema = z.enum(['cloud', 'local', 'settings']);
@@ -86,6 +92,13 @@ const TabsFields = {
   keepAliveHours: z.number().min(0).max(168),
   maxLiveTabs: z.number().int().min(1).max(40),
 };
+// F5: docked terminal layout state (persisted via syncFromState) and the
+// opt-in to show it on non-Cloud surfaces.
+const LayoutFields = {
+  terminalOpen: z.boolean(),
+  terminalHeight: z.number().min(MIN_TERMINAL_HEIGHT),
+};
+const TerminalFields = { allSurfaces: z.boolean() };
 // F3: tenant/api URLs must be https (http allowed for localhost only).
 const AppUrl = z.url().refine(isAllowedAppUrl, 'must be https (http allowed for localhost only)');
 const SettingsFields = {
@@ -132,6 +145,15 @@ export const SettingsObject = z.object({
   prs: z
     .object({ autoOpenTabs: PrsFields.autoOpenTabs.default(true) })
     .default({ autoOpenTabs: true }),
+  layout: z
+    .object({
+      terminalOpen: LayoutFields.terminalOpen.default(false),
+      terminalHeight: LayoutFields.terminalHeight.default(DEFAULT_TERMINAL_HEIGHT),
+    })
+    .default({ terminalOpen: false, terminalHeight: DEFAULT_TERMINAL_HEIGHT }),
+  terminal: z
+    .object({ allSurfaces: TerminalFields.allSurfaces.default(false) })
+    .default({ allSurfaces: false }),
 });
 
 // Every field has a default or is optional, so parse({}) yields valid Settings.
@@ -147,6 +169,8 @@ export const SettingsPatchSchema = z.object({
   notifications: z.object(NotificationsFields).partial().optional(),
   prs: z.object(PrsFields).partial().optional(),
   local: z.object(LocalFields).partial().optional(),
+  layout: z.object(LayoutFields).partial().optional(),
+  terminal: z.object(TerminalFields).partial().optional(),
 });
 
 const TabSchema = z.object({
@@ -173,6 +197,15 @@ export const NotificationsStateSchema = z.object({
 });
 export type NotificationsState = z.infer<typeof NotificationsStateSchema>;
 
+export const TerminalSummarySchema = z.object({
+  id: z.string(),
+  kind: z.enum(['devin', 'shell']),
+  cwd: z.string(),
+  title: z.string(),
+  exitCode: z.number().int().nullable(),
+});
+export type TerminalSummary = z.infer<typeof TerminalSummarySchema>;
+
 export const ShellStateSchema = z.object({
   paneOpen: z.boolean(),
   paneFraction: z.number(),
@@ -191,6 +224,11 @@ export const ShellStateSchema = z.object({
     .nullable(),
   credentials: z.array(z.object({ origin: z.string(), username: z.string() })),
   notifications: NotificationsStateSchema,
+  // F5 terminal dock
+  terminalOpen: z.boolean(),
+  terminalHeight: z.number(),
+  terminals: z.array(TerminalSummarySchema),
+  activeTerminalId: z.string().nullable(),
 });
 export type ShellState = z.infer<typeof ShellStateSchema>;
 
@@ -215,7 +253,13 @@ export interface ScopeSummary {
 }
 
 // P4b terminal channels.
-export const TerminalOpenArg = z.object({ workspace: z.string().min(1) });
+export const TerminalOpenArg = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('devin'), workspace: z.string().min(1) }),
+  z.object({ kind: z.literal('shell'), cwd: z.string().min(1).max(4096).optional() }),
+]);
+export type TerminalOpenArgType = z.infer<typeof TerminalOpenArg>;
+export const TerminalTitleArg = z.object({ id: z.string().min(1), title: z.string().max(256) });
+export const TerminalActivateArg = z.object({ id: z.string().min(1) });
 export const TerminalInputArg = z.object({ id: z.string().min(1), data: z.string().max(65536) });
 export const TerminalResizeArg = z.object({
   id: z.string().min(1),
@@ -237,7 +281,11 @@ export const TabReorderArgs = z.tuple([z.string(), z.number().int()]);
 export const NavActionArg = z.enum(['back', 'forward', 'reload']);
 export const SurfaceArg = SurfaceSchema;
 export const LinkOpenArg = z.string().max(8192);
-export const DragXArg = z.number().finite();
+export const DragPosArg = z.number().finite();
+export const DragStartArg = z.object({
+  axis: z.enum(['x', 'y']),
+  pos: z.number().finite(),
+});
 export const DragCancelReasonArg = z.enum(['escape', 'pointer-cancel']);
 // P5: secrets:setPat payload. The value itself is never logged or echoed back.
 export const SetPatArg = z.object({ pat: z.string().min(10).max(4096) });

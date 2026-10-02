@@ -142,6 +142,7 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
   const [newWorkspace, setNewWorkspace] = useState('');
   const [allowExternal, setAllowExternal] = useState(settings.routing.allowExternal);
   const [keepAliveHours, setKeepAliveHours] = useState(String(settings.tabs.keepAliveHours));
+  const [terminalAllSurfaces, setTerminalAllSurfaces] = useState(settings.terminal.allSurfaces);
   const [maxLiveTabs, setMaxLiveTabs] = useState(String(settings.tabs.maxLiveTabs));
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -174,6 +175,7 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
         workspaces,
         routing: { allowExternal },
         tabs: { keepAliveHours: keepAlive, maxLiveTabs: maxLive },
+        terminal: { allSurfaces: terminalAllSurfaces },
       })
       .then(() => {
         setSaved(true);
@@ -286,6 +288,15 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
           <span className="text-xs text-[#7f8ca0]">
             Hard cap on live GitHub pages across all sessions (≈400 MB each); the tab you're looking at is exempt.
           </span>
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            id="terminalAllSurfacesInput"
+            type="checkbox"
+            checked={terminalAllSurfaces}
+            onChange={(event) => setTerminalAllSurfaces(event.target.checked)}
+          />
+          <span>Show terminal dock on Local and Settings too</span>
         </label>
         {error && <p className="text-sm text-[#ff8a8a]">{error}</p>}
         <div className="flex items-center gap-3">

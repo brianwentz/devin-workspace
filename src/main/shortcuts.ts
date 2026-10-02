@@ -125,6 +125,11 @@ export function handleShortcut(
   } else if (ctrl && !input.shift && !input.alt && key === 'n') {
     openNewSession();
     handled = true;
+  } else if (ctrl && !input.alt && key === '`') {
+    state.terminalOpen = !state.terminalOpen;
+    applyLayout();
+    focusVisibleContents(contents);
+    handled = true;
   } else if (ctrl && input.shift && (key === '[' || key === '{' || key === ']' || key === '}')) {
     // Step ±80 px in pixel space, store the result as a fraction.
     const windowWidth = state.windowRef?.getContentBounds().width ?? 1400;

@@ -99,6 +99,7 @@ export class SettingsStore {
     this.value = {
       ...this.value,
       pane: { open: state.paneOpen, fraction: state.paneFraction },
+      layout: { terminalOpen: state.terminalOpen, terminalHeight: state.terminalHeight },
       surface: state.surface,
       tabSnapshot: state.tabManager?.persistableState() ?? { version: 2, tabs: [] },
     };
