@@ -10,6 +10,7 @@ import {
   effectiveStatus,
   isActive,
   isWaiting,
+  newPullRequests,
   pollInterval,
   prTitle,
   prsForSession,
@@ -151,6 +152,84 @@ describe('scopeLabel (F10)', () => {
   it('truncates long titles at 60 chars', () => {
     const long = [{ ...make('s1', 'running'), title: 'x'.repeat(80) }];
     expect(scopeLabel('s1', long)).toBe(`${'x'.repeat(60)}…`);
+  });
+});
+
+describe('newPullRequests (F1)', () => {
+  const withPrs = (id: string, urls: string[], status = 'running'): DevinSession => ({
+    ...make(id, status),
+    pull_requests: urls.map((pr_url) => ({ pr_url, pr_state: null })),
+  });
+  const A = 'https://github.com/acme/widgets/pull/1';
+  const B = 'https://github.com/acme/widgets/pull/2';
+  const C = 'https://github.com/acme/gadgets/pull/7';
+
+  it.each([
+    {
+      name: 'first poll (no previous) is a baseline',
+      previous: [] as DevinSession[],
+      next: [withPrs('s1', [A])],
+      expected: [],
+    },
+    {
+      name: 'a PR added to a known session is reported',
+      previous: [withPrs('s1', [])],
+      next: [withPrs('s1', [A])],
+      expected: [{ sessionId: 's1', url: A }],
+    },
+    {
+      name: 'a PR removed is not reported',
+      previous: [withPrs('s1', [A])],
+      next: [withPrs('s1', [])],
+      expected: [],
+    },
+    {
+      name: 'the same PR on a now-archived session is not reported',
+      previous: [withPrs('s1', [A])],
+      next: [withPrs('s1', [A], 'archived')],
+      expected: [],
+    },
+    {
+      name: 'a PR appearing on an archived session is not reported',
+      previous: [withPrs('s1', [])],
+      next: [withPrs('s1', [A], 'archived')],
+      expected: [],
+    },
+    {
+      name: 'session reorder changes nothing',
+      previous: [withPrs('s1', [A]), withPrs('s2', [B])],
+      next: [withPrs('s2', [B]), withPrs('s1', [A])],
+      expected: [],
+    },
+    {
+      name: 'two sessions each gaining a PR',
+      previous: [withPrs('s1', [A]), withPrs('s2', [])],
+      next: [withPrs('s2', [C]), withPrs('s1', [A, B])],
+      expected: [
+        { sessionId: 's1', url: B },
+        { sessionId: 's2', url: C },
+      ],
+    },
+    {
+      name: 'a URL-only change reports the new URL',
+      previous: [withPrs('s1', [A])],
+      next: [withPrs('s1', [B])],
+      expected: [{ sessionId: 's1', url: B }],
+    },
+    {
+      name: 'a session first seen in next is a baseline even with PRs',
+      previous: [withPrs('s1', [A])],
+      next: [withPrs('s1', [A]), withPrs('s2', [B, C])],
+      expected: [],
+    },
+    {
+      name: 'the same URL on two sessions is reported once',
+      previous: [withPrs('s1', []), withPrs('s2', [])],
+      next: [withPrs('s1', [A]), withPrs('s2', [A])],
+      expected: [{ sessionId: 's1', url: A }],
+    },
+  ])('$name', ({ previous, next, expected }) => {
+    expect(newPullRequests(previous, next)).toEqual(expected);
   });
 });
 

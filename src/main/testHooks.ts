@@ -97,6 +97,18 @@ export function registerTestHooks(): void {
       setKeepAliveMs: (ms: number) => state.tabManager?.setKeepAliveMs(ms),
       getKeepAliveMs: () => state.tabManager?.keepAliveThresholdMs ?? null,
       listScopes: () => state.tabManager?.listScopes() ?? [],
+      // F1: inspect a tab in any scope (publicState only lists the visible scope).
+      tabInfo: (id: string) => {
+        const tab = state.tabManager?.getTab(id);
+        if (!tab) return null;
+        return {
+          url: tab.url,
+          originSessionId: tab.originSessionId ?? null,
+          discarded: tab.discarded,
+          loading: tab.loading,
+          hasView: tab.view !== null,
+        };
+      },
       currentScope: () => state.tabManager?.currentScope ?? '',
       // P5: secrets / notifier hooks. setPat goes through the same store as
       // the IPC path; nothing here ever returns the token.

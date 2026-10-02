@@ -19,6 +19,7 @@ export function NotificationSettings() {
   const notificationsEnabled = shell?.settings.notifications.enabled ?? true;
   const notificationsHasToken = notifications?.hasToken ?? false;
   const savedOrgId = shell?.settings.notifications.orgId ?? '';
+  const autoOpenTabs = shell?.settings.prs.autoOpenTabs ?? true;
 
   useEffect(() => {
     setHasToken(notificationsHasToken);
@@ -69,6 +70,10 @@ export function NotificationSettings() {
 
   const toggleEnabled = (enabled: boolean) => {
     void window.devinworkspaces.setSettings({ notifications: { enabled } });
+  };
+
+  const toggleAutoOpenTabs = (enabled: boolean) => {
+    void window.devinworkspaces.setSettings({ prs: { autoOpenTabs: enabled } });
   };
 
   const saveOrgId = () => {
@@ -144,6 +149,15 @@ export function NotificationSettings() {
             {notifications.waitingCount} waiting
           </span>
         )}
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          id="prAutoOpenTabsInput"
+          type="checkbox"
+          checked={autoOpenTabs}
+          onChange={(event) => toggleAutoOpenTabs(event.target.checked)}
+        />
+        <span>Open a tab when a session creates a PR</span>
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-[#aeb9c8]">Organization ID (optional override)</span>

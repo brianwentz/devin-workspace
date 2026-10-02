@@ -77,6 +77,8 @@ export const PlacementSchema = z.object({
 const WindowPlacementsSchema = z.record(z.string(), PlacementSchema);
 // P5: orgId overrides the org resolved from GET /v3/self (empty = auto).
 const NotificationsFields = { enabled: z.boolean(), orgId: z.string().max(128) };
+// F1: open a background tab (in the session's scope) when the poller sees a new PR.
+const PrsFields = { autoOpenTabs: z.boolean() };
 const LocalFields = { devinPath: z.string().nullable() };
 // P8: session-scoped tabs. keepAliveHours=0 discards hidden-scope tabs on switch;
 // maxLiveTabs caps live webContents across all scopes (the visible active tab excluded).
@@ -127,6 +129,9 @@ export const SettingsObject = z.object({
       orgId: NotificationsFields.orgId.default(''),
     })
     .default({ enabled: true, orgId: '' }),
+  prs: z
+    .object({ autoOpenTabs: PrsFields.autoOpenTabs.default(true) })
+    .default({ autoOpenTabs: true }),
 });
 
 // Every field has a default or is optional, so parse({}) yields valid Settings.
@@ -140,6 +145,7 @@ export const SettingsPatchSchema = z.object({
   pane: z.object(PaneFields).partial().optional(),
   tabs: z.object(TabsFields).partial().optional(),
   notifications: z.object(NotificationsFields).partial().optional(),
+  prs: z.object(PrsFields).partial().optional(),
   local: z.object(LocalFields).partial().optional(),
 });
 

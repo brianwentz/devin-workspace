@@ -41,6 +41,9 @@ export interface TabOpenOptions {
   background?: boolean;
   // Devin session this link was opened from; defaults to the visible scope.
   originSessionId?: string;
+  // F1: create a discarded placeholder (no webContents until first activation).
+  // Implies background; an existing (deduped) tab is left untouched.
+  lazy?: boolean;
 }
 
 export interface TabLog {
@@ -320,13 +323,21 @@ export class TabManager {
   // focus + navigate the existing tab; exact URL -> focus; otherwise a new tab.
   open(url: string, options: boolean | TabOpenOptions = {}): string {
     const opts: TabOpenOptions = typeof options === 'boolean' ? { background: options } : options;
-    const background = opts.background ?? false;
+    const lazy = opts.lazy ?? false;
+    const background = lazy || (opts.background ?? false);
     const scope = opts.originSessionId ?? this.scope;
     const result = openTab(this.state, url, {
       id: randomUUID(),
       background,
       scope,
     });
+
+    if (!result.created && lazy) {
+      // Lazy opens never disturb a tab the user already has: no navigate, no
+      // activation, no model change (openTab may have updated url/loading).
+      this.log('tab-existing', { id: result.id, background, lazy: true }, url);
+      return result.id;
+    }
     this.state = result.state;
 
     if (!result.created) {
@@ -357,18 +368,28 @@ export class TabManager {
       id: result.id,
       url,
       title: created?.title ?? url,
-      loading: true,
+      loading: !lazy,
       ...(scope !== GLOBAL ? { originSessionId: scope } : {}),
       view: null,
       closing: false,
       closeCancelled: false,
       protected: false,
-      discarded: false,
+      // Lazy tabs are state-safe placeholders (like restored tabs): the page loads on activation.
+      discarded: lazy,
       discarding: false,
       lastActiveAt: Date.now(),
     };
     this.entries.set(result.id, entry);
-    if (background) {
+    if (lazy) {
+      // No webContents: nothing to load, nothing for the live cap to count.
+      this.state = updateTab(this.state, result.id, { loading: false });
+      // ...unless it is now the visible scope's only (hence active) tab: render it
+      // rather than show an active-but-empty pane. Nothing else was showing, so
+      // this steals no focus. activate() -> ensureView() clears `discarded`.
+      if (scope === this.scope && activeIdFor(this.state, scope) === result.id) {
+        this.activate(result.id);
+      }
+    } else if (background) {
       // Create the view now so the page loads while hidden; it is attached on activation.
       this.ensureView(result.id);
     } else {
@@ -376,10 +397,15 @@ export class TabManager {
     }
     this.log(
       'tab-open',
-      { id: result.id, background, originSessionId: scope !== GLOBAL ? scope : null },
+      {
+        id: result.id,
+        background,
+        originSessionId: scope !== GLOBAL ? scope : null,
+        ...(lazy ? { lazy: true } : {}),
+      },
       url,
     );
-    this.enforceLiveCap();
+    if (!lazy) this.enforceLiveCap();
     this.onChange();
     return result.id;
   }
