@@ -35,6 +35,7 @@ export interface DevinSession {
   status_detail: string | null;
   updated_at: number;
   url?: string | undefined;
+  user_id: string | null;
   pull_requests: DevinPullRequest[];
 }
 
@@ -47,6 +48,7 @@ export interface SessionsPage {
 export interface SelfInfo {
   principalType: string | null;
   orgId: string | null;
+  userId: string | null;
 }
 
 export type DevinApiErrorKind = 'auth' | 'forbidden' | 'rateLimited' | 'http' | 'network' | 'parse';
@@ -117,6 +119,7 @@ export function normalizeSession(raw: unknown): DevinSession | null {
     status_detail: str(record.status_detail),
     updated_at: updatedAt,
     url: str(record.url) ?? undefined,
+    user_id: str(record.user_id),
     pull_requests: pullRequests,
   };
 }
@@ -147,6 +150,7 @@ export class DevinApiClient {
     return {
       principalType: record ? str(record.principal_type) : null,
       orgId: record ? str(record.org_id) : null,
+      userId: record ? str(record.user_id) : null,
     };
   }
 
@@ -154,10 +158,12 @@ export class DevinApiClient {
     orgId: string;
     first?: number;
     cursor?: string | null;
+    userIds?: string[];
   }): Promise<SessionsPage> {
     const first = Math.min(200, Math.max(1, Math.floor(options.first ?? 100)));
     const params = new URLSearchParams({ first: String(first) });
     if (options.cursor) params.set('after', options.cursor);
+    for (const userId of options.userIds ?? []) params.append('user_ids', userId);
     const path = `/v3/organizations/${encodeURIComponent(options.orgId)}/sessions?${params}`;
     const body = await this.request(path);
     const record = asRecord(body);

@@ -245,7 +245,8 @@ export const NotificationsStateSchema = z.object({
   lastPollAt: z.string().nullable(),
   authError: z.boolean(),
   lastError: z.string().nullable(),
-  currentSessionPrCount: z.number().int(),
+  noUserIdentity: z.boolean(),
+  openPrCount: z.number().int(),
   unreadCount: z.number().int(),
   panelOpen: z.boolean(),
 });
@@ -333,8 +334,11 @@ export const TerminalCloseArg = z.object({ id: z.string().min(1) });
 
 export const SessionPrSchema = z.object({
   sessionId: z.string(),
-  title: z.string(),
+  sessionTitle: z.string(),
+  ref: z.string(),
+  title: z.string().nullable(),
   url: z.string(),
+  state: z.string().nullable(),
 });
 export type SessionPr = z.infer<typeof SessionPrSchema>;
 

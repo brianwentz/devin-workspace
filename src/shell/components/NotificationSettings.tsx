@@ -137,14 +137,21 @@ export function NotificationSettings() {
         >
           {status}
         </p>
+        {notifications.noUserIdentity && (
+          <p id="patNoUser" className="text-xs text-[#ffcc80]">
+            This token has no user identity (service user), so no sessions, notifications or pull
+            requests are shown. Use a personal API token.
+          </p>
+        )}
         {message && (
           <p className={`text-xs ${message.kind === 'ok' ? 'text-[#8fd18f]' : 'text-[#ff8a8a]'}`}>
             {message.text}
           </p>
         )}
         <p className="text-xs text-[#7f8ca0]">
-          Use a Devin PAT or service-user token with ViewOrgSessions (not the CLI&apos;s Windsurf
-          token). Stored with OS encryption; never shown again.
+          Use a personal Devin API token (not the CLI&apos;s Windsurf token): the app only shows
+          sessions, notifications and pull requests created by the token&apos;s user, so service-user
+          tokens show nothing. Stored with OS encryption; never shown again.
         </p>
       </form>
       <label className="flex items-center gap-2 text-sm">

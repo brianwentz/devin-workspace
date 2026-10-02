@@ -1,20 +1,23 @@
 import { Menu } from 'electron';
 import { notificationStore } from './notifications';
 import { deriveNotifications } from '../core/notificationModel';
-import { DevinApiClient, DevinApiError, sanitizeMessage, type DevinSession } from '../core/devinApi';
+import { DevinApiClient, DevinApiError, sanitizeMessage } from '../core/devinApi';
 import {
   ACTIVE_POLL_MS,
   IDLE_POLL_MS,
   archivedScopes,
   backoffMs,
   newPullRequests,
+  openPullRequests,
   pollInterval,
-  prsForSession,
+  prMenuLabel,
+  scopeLabel,
 } from '../core/notifyModel';
 import { sessionUrl } from '../core/sessions';
 import type { SessionPr, Settings } from '../shared/ipc';
 import { log } from './log';
 import { route } from '../core/linkRouter';
+import { prTitles } from './prTitles';
 import { handleLink, loadInDevinView, routeContext } from './routing';
 import { state, testMode } from './state';
 import { installUpdate } from './updater';
@@ -62,6 +65,7 @@ class Notifier {
   private running = false;
   private failures = 0;
   private orgId: string | null = null;
+  private userId: string | null = null;
   private generation = 0;
   private notBefore = 0;
 
@@ -92,10 +96,16 @@ class Notifier {
   restart(reason: string): void {
     this.stop(reason);
     this.orgId = null;
+    this.userId = null;
     this.failures = 0;
     this.notBefore = 0;
     state.apiSessions = [];
-    state.notifications = { lastPollAt: null, authError: false, lastError: null };
+    state.notifications = {
+      lastPollAt: null,
+      authError: false,
+      lastError: null,
+      noUserIdentity: false,
+    };
     this.start();
     notifyShell();
   }
@@ -149,14 +159,38 @@ class Notifier {
       });
       if (!this.orgId) {
         const override = state.settings?.current.notifications.orgId?.trim();
-        this.orgId = override || (await client.getSelf()).orgId;
+        const self = await client.getSelf();
+        this.userId = self.userId;
+        log('shell', 'notifier-self', {
+          detail: { principalType: self.principalType, hasUserId: self.userId !== null },
+        });
+        this.orgId = override || self.orgId;
         if (!this.orgId) {
           throw new DevinApiError('http', 'no org id for this token (set notifications.orgId)');
         }
         log('shell', 'notifier-org', { detail: { source: override ? 'settings' : 'self' } });
       }
-      const page = await client.listSessions({ orgId: this.orgId, first: PAGE_SIZE });
-      const sessions = page.sessions;
+      if (!this.userId) {
+        // Service-user token: no user identity, so "my sessions" is empty.
+        state.apiSessions = [];
+        state.notifications = {
+          lastPollAt: new Date().toISOString(),
+          authError: false,
+          lastError: null,
+          noUserIdentity: true,
+        };
+        delay = base.idle;
+        log('shell', 'poll', { detail: { sessions: 0, noUserIdentity: true } });
+        return;
+      }
+      const page = await client.listSessions({
+        orgId: this.orgId,
+        first: PAGE_SIZE,
+        userIds: [this.userId],
+      });
+      // Defensive: keep only the token user's sessions even if the server
+      // ignores user_ids.
+      const sessions = page.sessions.filter((session) => session.user_id === this.userId);
       this.failures = 0;
       // P8/Q3: close tabs whose session archived, or vanished from a complete
       // (single-page) list — a partial page can't prove absence.
@@ -194,10 +228,12 @@ class Notifier {
           notificationStore().add(entry);
         }
       }
+      prTitles.ensure(openPullRequests(sessions).map((pr) => pr.url));
       state.notifications = {
         lastPollAt: new Date().toISOString(),
         authError: false,
         lastError: null,
+        noUserIdentity: false,
       };
       delay = pollInterval(sessions, base);
       log('shell', 'poll', {
@@ -253,27 +289,56 @@ class Notifier {
 
 export const notifier = new Notifier();
 
-export function currentSessionPrs(): SessionPr[] {
-  return prsForSession(state.apiSessions, state.currentSessionId);
+// Open PRs across all of the token user's sessions, with GitHub titles when
+// the prTitles cache has resolved them.
+export function openPrs(): SessionPr[] {
+  return openPullRequests(state.apiSessions).map((pr) => ({ ...pr, title: prTitles.get(pr.url) }));
 }
 
-// Native popup listing the current session's PRs; each item routes through
-// handleLink so GitHub URLs land in the pane.
+// Native popup listing open PRs grouped by session; clicking one switches the
+// devin view to that session and opens the PR in its pane.
 export function popupPrMenu(): number {
-  const prs = currentSessionPrs();
+  const prs = openPrs();
   if (prs.length === 0 || !state.windowRef) return 0;
-  const menu = Menu.buildFromTemplate(
-    prs.map((pr) => ({
-      label: pr.title,
-      click: () => {
-        log('shell', 'pr-open', { url: pr.url, detail: { sessionId: pr.sessionId } });
-        handleLink(pr.url, 'shell');
-      },
-    })),
-  );
-  log('shell', 'pr-menu', { detail: { count: prs.length } });
+  const template: Electron.MenuItemConstructorOptions[] = [];
+  const sessionIds: string[] = [];
+  let lastSession: string | null = null;
+  for (const pr of prs) {
+    if (pr.sessionId !== lastSession) {
+      if (template.length > 0) template.push({ type: 'separator' });
+      lastSession = pr.sessionId;
+      sessionIds.push(pr.sessionId);
+      template.push({ label: scopeLabel(pr.sessionId, state.apiSessions), enabled: false });
+    }
+    template.push({
+      label: prMenuLabel(pr.ref, pr.title),
+      click: () => openSessionPr(pr.sessionId, pr.url),
+    });
+  }
+  const menu = Menu.buildFromTemplate(template);
+  log('shell', 'pr-menu', { detail: { count: prs.length, sessions: sessionIds } });
   menu.popup({ window: state.windowRef });
   return prs.length;
+}
+
+// Open a PR for a specific session: navigate the devin view to that session
+// (its scope's tabs come along via the did-navigate scope switch), then open
+// the PR in that scope.
+export function openSessionPr(sessionId: string, prUrl: string): void {
+  log('shell', 'pr-open', { url: prUrl, detail: { sessionId } });
+  if (sessionId !== state.currentSessionId) {
+    loadInDevinView(sessionUrl(state.tenantUrl, sessionId));
+  }
+  state.surface = 'cloud';
+  applyLayout();
+  state.tabManager?.open(prUrl, { originSessionId: sessionId });
+  const windowRef = state.windowRef;
+  if (windowRef && !windowRef.isDestroyed()) {
+    if (windowRef.isMinimized()) windowRef.restore();
+    windowRef.show();
+    windowRef.focus();
+  }
+  state.devinView?.webContents.focus();
 }
 
 // P6: opening a notification marks it read, navigates the devin view to the
@@ -292,14 +357,14 @@ export function openNotification(id: string): void {
     installUpdate();
     return;
   }
+  if (entry.sessionId && entry.prUrl) {
+    openSessionPr(entry.sessionId, entry.prUrl);
+    return;
+  }
   if (entry.sessionId) loadInDevinView(sessionUrl(state.tenantUrl, entry.sessionId));
   state.surface = 'cloud';
   applyLayout();
-  // Open the PR into the notification's session scope — the devin-view nav that
-  // switches the visible scope races handleLink, so go through the tabManager.
-  if (entry.prUrl && entry.sessionId) {
-    state.tabManager?.open(entry.prUrl, { originSessionId: entry.sessionId });
-  } else if (entry.prUrl) {
+  if (entry.prUrl) {
     handleLink(entry.prUrl, 'shell');
   }
   const windowRef = state.windowRef;

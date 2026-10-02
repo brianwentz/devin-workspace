@@ -50,7 +50,8 @@ export type PublicState = {
     lastPollAt: string | null;
     authError: boolean;
     lastError: string | null;
-    currentSessionPrCount: number;
+    noUserIdentity: boolean;
+    openPrCount: number;
     unreadCount: number;
     panelOpen: boolean;
   };

@@ -39,7 +39,9 @@ Once a token is set the poller runs continuously (10 s while a session is active
 
 - **Notification center** — the bell in the rail. New events (a session waiting for your reply, needing approval or blocked; a PR opened or merged/closed; a downloaded app update) land in the panel with unread highlighting, a taskbar overlay count and an optional title-bar banner. Clicking an entry opens its session (or the PR tab, or installs the update). *Collect notifications*, *Show banner* and the per-kind toggles live in Settings → Notifications; "Session finished" is off by default. History persists across restarts (last 50).
 - **Open a tab when a session creates a PR** — a background tab for the PR opens in that session's pane within one poll interval. PRs that already existed when the token was saved are not opened, and closing an auto-opened tab does not bring it back.
-- **PR quick-open** — the `PR` rail button lists the current session's pull requests.
+- **PR quick-open** — the `PR` rail button lists open pull requests across your sessions with their GitHub titles; clicking one switches to that session and opens the PR in its pane.
+
+The poller only lists sessions created by the token's user (`GET /v3/self` → `user_ids` filter). A service-user token has no user identity, so it shows no sessions, notifications or pull requests — use a personal API token.
 
 ## Devin Local
 

@@ -57,6 +57,7 @@ export const state = {
     lastPollAt: null as string | null,
     authError: false,
     lastError: null as string | null,
+    noUserIdentity: false,
   },
   // P6: notification panel z-order raise flag (set via notifications:panel IPC).
   notificationsPanelOpen: false,

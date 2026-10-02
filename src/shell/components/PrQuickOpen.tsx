@@ -4,20 +4,20 @@ interface PrQuickOpenProps {
   buttonClass: string;
 }
 
-// P5: shown only when the current Devin session (from the last API poll) has
-// pull requests. Clicking opens a native Menu.popup in main; each item routes
-// through handleLink so GitHub URLs land in the pane.
+// P5: shown when any of the token user's sessions (from the last API poll)
+// have open pull requests. Clicking opens a native Menu.popup in main grouped
+// by session; each item switches to its session and opens the PR in the pane.
 export function PrQuickOpen({ buttonClass }: PrQuickOpenProps) {
   const state = useShellState();
-  const count = state?.notifications.currentSessionPrCount ?? 0;
+  const count = state?.notifications.openPrCount ?? 0;
   return (
     <>
       {count > 0 && (
         <button
           id="prQuickOpen"
           type="button"
-          aria-label={`Open session pull requests (${count})`}
-          title={`Session pull requests (${count})`}
+          aria-label={`Open pull requests (${count})`}
+          title={`Open pull requests (${count})`}
           className={`${buttonClass} relative text-sm`}
           onClick={() => window.devinworkspaces.openPrMenu()}
         >

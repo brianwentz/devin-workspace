@@ -28,7 +28,14 @@ test.afterAll(async () => {
   await fixtures.close();
 });
 
-type PrLink = { sessionId: string; title: string; url: string };
+type PrLink = {
+  sessionId: string;
+  sessionTitle: string;
+  ref: string;
+  title: string | null;
+  url: string;
+  state: string | null;
+};
 
 function hooks(app: ElectronApplication) {
   return {
@@ -39,6 +46,12 @@ function hooks(app: ElectronApplication) {
     pollNow: () => app.evaluate(() => (globalThis as any).__devinworkspaces.pollNow() as Promise<void>),
     listPrs: () =>
       app.evaluate(() => (globalThis as any).__devinworkspaces.listPrs() as PrLink[]),
+    openSessionPr: (sessionId: string, url: string) =>
+      app.evaluate(
+        (_e, args: { sessionId: string; url: string }) =>
+          (globalThis as any).__devinworkspaces.openSessionPr(args.sessionId, args.url),
+        { sessionId, url },
+      ),
     newSession: () => app.evaluate(() => (globalThis as any).__devinworkspaces.newSession()),
     // P6 notification center
     notifications: () => app.evaluate(() => (globalThis as any).__devinworkspaces.notifications()),
@@ -99,6 +112,7 @@ async function quit(app: ElectronApplication, profile: string) {
 
 test.beforeEach(() => {
   fixtures.api.setMode({ kind: 'ok' });
+  fixtures.api.setSelf('pat_user');
   fixtures.api.setSessions([]);
   fixtures.api.clearRequests();
 });
@@ -133,9 +147,12 @@ test('stores the PAT encrypted, polls with it, notifies in-app on waiting_for_us
     expect((await state(app)).notifications.unreadCount).toBe(0);
 
     // Status flips to waiting_for_user -> unread entry + notification-added + badge.
+    // sess-other belongs to a different user and is filtered out (user_ids) —
+    // it must never produce a notification.
     fixtures.api.setSessions([
       { session_id: 'sess-1', title: 'Fix login bug', status: 'running', status_detail: 'waiting_for_user', updated_at: 11 },
       { session_id: 'sess-2', title: 'Old one', status: 'exit', status_detail: 'finished', updated_at: 5 },
+      { session_id: 'sess-other', title: 'Not mine', status: 'running', status_detail: 'waiting_for_user', updated_at: 20, user_id: 'user-other' },
     ]);
     const flippedAt = Date.now();
     await expect
@@ -251,45 +268,104 @@ test('surfaces 401 as authError and honours 429 Retry-After', async () => {
   }
 });
 
-test('lists the current session PRs for quick-open and Ctrl+N goes to the new-session surface', async () => {
+test('lists open PRs across my sessions with GitHub titles and opens them in their session', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
   const logFile = join(profile, 'events.jsonl');
   const app = await launch(profile, logFile);
   const h = hooks(app);
+  const longTitle = 'A very long pull request title that keeps on going past sixty-four chars';
+  fixtures.github.setPrTitle(42, 'Fix widget alignment');
+  fixtures.github.setPrTitle(43, longTitle);
   try {
-    const prs = [
-      { pr_url: `${fixtures.githubUrl}/acme/widgets/pull/42`, pr_state: 'open' },
-      { pr_url: `${fixtures.githubUrl}/acme/widgets/pull/43`, pr_state: null },
-    ];
+    const pr42 = `${fixtures.githubUrl}/acme/widgets/pull/42`;
+    const pr43 = `${fixtures.githubUrl}/acme/widgets/pull/43`;
+    const pr44 = `${fixtures.githubUrl}/acme/widgets/pull/44`;
+    const pr7 = `${fixtures.githubUrl}/acme/widgets/pull/7`;
+    const pr99 = `${fixtures.githubUrl}/acme/widgets/pull/99`;
     fixtures.api.setSessions([
-      { session_id: 'sess-pr', title: 'PR session', status: 'running', status_detail: 'working', updated_at: 3, pull_requests: prs },
-      { session_id: 'sess-none', title: 'No PRs', status: 'running', status_detail: 'working', updated_at: 2 },
+      {
+        session_id: 'sess-pr',
+        title: 'PR session',
+        status: 'running',
+        status_detail: 'working',
+        updated_at: 3,
+        pull_requests: [
+          { pr_url: pr42, pr_state: 'open' },
+          { pr_url: pr43, pr_state: null },
+          { pr_url: pr44, pr_state: 'merged' },
+        ],
+      },
+      {
+        session_id: 'sess-two',
+        title: 'Second session',
+        status: 'running',
+        status_detail: 'working',
+        updated_at: 2,
+        pull_requests: [{ pr_url: pr7, pr_state: 'open' }],
+      },
+      // Another user's session: filtered out by user_ids, never listed.
+      {
+        session_id: 'sess-other',
+        title: 'Not mine',
+        status: 'running',
+        status_detail: 'working',
+        updated_at: 9,
+        user_id: 'user-other',
+        pull_requests: [{ pr_url: pr99, pr_state: 'open' }],
+      },
     ]);
     await h.setPat(PAT);
     await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
 
-    // No current session -> nothing to open; Rail button hidden.
-    expect(await h.listPrs()).toEqual([]);
-    expect(await evaluateInShell(app, `Boolean(document.getElementById('prQuickOpen'))`)).toBe(false);
+    // The sessions request carries user_ids=user-fixture.
+    expect(
+      fixtures.api
+        .requests()
+        .some((r) => r.path.includes('/sessions') && r.path.includes('user_ids=user-fixture')),
+    ).toBe(true);
 
-    await h.loadDevinUrl(`${fixtures.devinUrl}/sessions/sess-pr`);
-    await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-pr');
-    await expect.poll(async () => (await state(app)).notifications.currentSessionPrCount).toBe(2);
-    expect(await h.listPrs()).toEqual([
-      { sessionId: 'sess-pr', title: 'acme/widgets#42 (open)', url: prs[0]!.pr_url },
-      { sessionId: 'sess-pr', title: 'acme/widgets#43', url: prs[1]!.pr_url },
+    // Open PRs across my sessions, ordered by session updated_at desc (#44
+    // merged and sess-other's #99 are excluded). Works with no current session.
+    const prs = await h.listPrs();
+    expect(prs).toMatchObject([
+      { sessionId: 'sess-pr', sessionTitle: 'PR session', ref: 'acme/widgets#42', url: pr42, state: 'open' },
+      { sessionId: 'sess-pr', sessionTitle: 'PR session', ref: 'acme/widgets#43', url: pr43, state: null },
+      { sessionId: 'sess-two', sessionTitle: 'Second session', ref: 'acme/widgets#7', url: pr7, state: 'open' },
     ]);
+    expect(prs.some((pr) => pr.sessionId === 'sess-other')).toBe(false);
+    await expect.poll(async () => (await state(app)).notifications.openPrCount).toBe(3);
     await expect
       .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('prQuickOpen'))`))
       .toBe(true);
     // The IPC path returns the same list the menu is built from.
     const viaIpc = (await evaluateInShell(app, `window.devinworkspaces.listPrs()`)) as unknown[];
-    expect(viaIpc).toHaveLength(2);
+    expect(viaIpc).toHaveLength(3);
 
-    await h.loadDevinUrl(`${fixtures.devinUrl}/sessions/sess-none`);
-    await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-none');
-    await expect.poll(async () => (await state(app)).notifications.currentSessionPrCount).toBe(0);
-    expect(await h.listPrs()).toEqual([]);
+    // GitHub titles resolve via the pr-title fetch (menu truncation is
+    // unit-tested — `title` itself is never truncated).
+    await expect
+      .poll(async () => (await h.listPrs()).find((pr) => pr.url === pr42)?.title)
+      .toBe('Fix widget alignment');
+    await expect
+      .poll(async () => (await h.listPrs()).find((pr) => pr.url === pr43)?.title)
+      .toBe(longTitle);
+
+    // Opening a PR for another session switches the devin view to it (its
+    // scope's tabs come along) and opens the PR as the active tab.
+    await h.loadDevinUrl(`${fixtures.devinUrl}/sessions/sess-pr`);
+    await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-pr');
+    await h.openSessionPr('sess-two', pr7);
+    await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-two');
+    expect((await state(app)).surface).toBe('cloud');
+    await expect.poll(async () => (await state(app)).tabs.scope).toBe('sess-two');
+    await expect.poll(async () => {
+      const tabs = (await state(app)).tabs;
+      const tab = tabs.tabs.find((t) => t.url === pr7);
+      return tab && tabs.activeId === tab.id;
+    }).toBe(true);
+    const prOpen = (await readEvents(logFile)).filter((e) => e.event === 'pr-open');
+    expect(prOpen.at(-1)?.url).toBe(pr7);
+    expect((prOpen.at(-1)?.detail as any).sessionId).toBe('sess-two');
 
     // Ctrl+N: back to the tenant's create surface (root) on the Cloud surface.
     await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
@@ -298,7 +374,48 @@ test('lists the current session PRs for quick-open and Ctrl+N goes to the new-se
     await expect.poll(async () => (await state(app)).surface).toBe('cloud');
     await expect.poll(() => h.devinUrl()).toBe(`${fixtures.devinUrl}/`);
     await waitForEvent(logFile, 'new-session');
+  } finally {
+    await quit(app, profile);
+  }
+});
 
+test('shows nothing for a service-user token', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  try {
+    fixtures.api.setSelf('service_user');
+    fixtures.api.setSessions([
+      {
+        session_id: 'sess-pr',
+        title: 'PR session',
+        status: 'running',
+        status_detail: 'waiting_for_user',
+        updated_at: 3,
+        pull_requests: [{ pr_url: `${fixtures.githubUrl}/acme/widgets/pull/42`, pr_state: 'open' }],
+      },
+    ]);
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.noUserIdentity).toBe(true);
+    await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
+    expect((await state(app)).notifications.openPrCount).toBe(0);
+    expect(await h.listPrs()).toEqual([]);
+    // No sessions list request was ever made — only /v3/self.
+    expect(fixtures.api.requests().every((r) => !r.path.includes('/sessions'))).toBe(true);
+    expect(fixtures.api.requests().some((r) => r.path === '/v3/self')).toBe(true);
+    expect((await state(app)).notifications.unreadCount).toBe(0);
+    await expect
+      .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('prQuickOpen'))`))
+      .toBe(false);
+
+    // The Settings surface explains the empty state.
+    await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
+    await expect.poll(async () => (await state(app)).surface).toBe('settings');
+    await expect
+      .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('patNoUser'))`))
+      .toBe(true);
+    expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
   } finally {
     await quit(app, profile);
   }

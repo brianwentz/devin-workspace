@@ -11,8 +11,10 @@ import {
   isWaiting,
   newPullRequests,
   pollInterval,
+  prMenuLabel,
   prTitle,
-  prsForSession,
+  openPullRequests,
+  truncateTitle,
 } from '../../src/core/notifyModel';
 import { badgeLabel, encodePng, renderBadgePng } from '../../src/core/badgePng';
 
@@ -22,6 +24,7 @@ const make = (id: string, status: string, detail: string | null = null): DevinSe
   status,
   status_detail: detail,
   updated_at: 0,
+  user_id: null,
   pull_requests: [],
 });
 
@@ -194,24 +197,103 @@ describe('newPullRequests (F1)', () => {
   });
 });
 
-describe('prsForSession / prTitle', () => {
-  it('lists PRs for the current session only, with owner/repo#N titles', () => {
+describe('openPullRequests / prTitle', () => {
+  const withPrs = (
+    id: string,
+    prs: { pr_url: string; pr_state: string | null }[],
+    updated_at: number,
+    status = 'running',
+    title: string | null = id,
+  ): DevinSession => ({
+    ...make(id, status),
+    title,
+    updated_at,
+    pull_requests: prs,
+  });
+
+  it('lists open PRs across sessions ordered by updated_at desc', () => {
     const sessions: DevinSession[] = [
-      {
-        ...make('s1', 'running'),
-        pull_requests: [
+      withPrs('s2', [{ pr_url: 'https://github.com/a/b/pull/7', pr_state: 'open' }], 2),
+      withPrs(
+        's1',
+        [
           { pr_url: 'https://github.com/acme/widgets/pull/42', pr_state: 'open' },
           { pr_url: 'https://example.org/x/y', pr_state: null },
         ],
-      },
-      { ...make('s2', 'running'), pull_requests: [{ pr_url: 'https://github.com/a/b/pull/1', pr_state: null }] },
+        3,
+        'running',
+        'First session',
+      ),
     ];
-    expect(prsForSession(sessions, 's1')).toEqual([
-      { sessionId: 's1', title: 'acme/widgets#42 (open)', url: 'https://github.com/acme/widgets/pull/42' },
-      { sessionId: 's1', title: 'example.org/x/y', url: 'https://example.org/x/y' },
+    expect(openPullRequests(sessions)).toEqual([
+      {
+        sessionId: 's1',
+        sessionTitle: 'First session',
+        ref: 'acme/widgets#42',
+        url: 'https://github.com/acme/widgets/pull/42',
+        state: 'open',
+      },
+      {
+        sessionId: 's1',
+        sessionTitle: 'First session',
+        ref: 'example.org/x/y',
+        url: 'https://example.org/x/y',
+        state: null,
+      },
+      {
+        sessionId: 's2',
+        sessionTitle: 's2',
+        ref: 'a/b#7',
+        url: 'https://github.com/a/b/pull/7',
+        state: 'open',
+      },
     ]);
-    expect(prsForSession(sessions, null)).toEqual([]);
-    expect(prsForSession(sessions, 'missing')).toEqual([]);
     expect(prTitle('not a url')).toBe('not a url');
+  });
+
+  it('skips archived sessions and merged/closed PRs; falls back to the id for blank titles', () => {
+    const sessions: DevinSession[] = [
+      withPrs(
+        'arch',
+        [{ pr_url: 'https://github.com/a/b/pull/1', pr_state: 'open' }],
+        9,
+        'archived',
+      ),
+      withPrs(
+        's1',
+        [
+          { pr_url: 'https://github.com/a/b/pull/2', pr_state: 'merged' },
+          { pr_url: 'https://github.com/a/b/pull/3', pr_state: 'closed' },
+          { pr_url: 'https://github.com/a/b/pull/4', pr_state: null },
+        ],
+        5,
+        'running',
+        '   ',
+      ),
+    ];
+    expect(openPullRequests(sessions)).toEqual([
+      {
+        sessionId: 's1',
+        sessionTitle: 's1',
+        ref: 'a/b#4',
+        url: 'https://github.com/a/b/pull/4',
+        state: null,
+      },
+    ]);
+  });
+});
+
+describe('truncateTitle / prMenuLabel', () => {
+  it('returns titles at the limit untouched and truncates with an ellipsis', () => {
+    expect(truncateTitle('x'.repeat(64))).toBe('x'.repeat(64));
+    expect(truncateTitle('y'.repeat(65))).toBe(`${'y'.repeat(63)}…`);
+    expect(truncateTitle('short', 10)).toBe('short');
+    expect(truncateTitle('a'.repeat(11), 10)).toBe(`${'a'.repeat(9)}…`);
+  });
+
+  it('labels menu items with ref + truncated title, or ref alone', () => {
+    expect(prMenuLabel('a/b#1', 'Fix it')).toBe('a/b#1  Fix it');
+    expect(prMenuLabel('a/b#1', null)).toBe('a/b#1');
+    expect(prMenuLabel('a/b#1', 't'.repeat(70))).toBe(`a/b#1  ${'t'.repeat(63)}…`);
   });
 });
