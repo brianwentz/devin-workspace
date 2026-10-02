@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeSettings, parseSettingsFile } from '../../src/core/settings';
+import { mergeSettings, migrateSettingsRaw, parseSettingsFile } from '../../src/core/settings';
 import { SettingsPatchSchema, SettingsSchema, type Settings } from '../../src/shared/ipc';
 
 describe('parseSettingsFile', () => {
@@ -9,7 +9,7 @@ describe('parseSettingsFile', () => {
       apiBase: 'https://api.example.com',
       workspaces: ['C:\\work'],
       routing: { allowExternal: false },
-      pane: { open: false, width: 500 },
+      pane: { open: false, fraction: 0.4 },
       surface: 'local',
       tabs: { keepAliveHours: 48, maxLiveTabs: 12 },
     };
@@ -17,7 +17,7 @@ describe('parseSettingsFile', () => {
     expect(dropped).toEqual([]);
     expect(settings.tenantUrl).toBe('https://tenant.example.com');
     expect(settings.routing.allowExternal).toBe(false);
-    expect(settings.pane).toEqual({ open: false, width: 500 });
+    expect(settings.pane).toEqual({ open: false, fraction: 0.4 });
     expect(settings.surface).toBe('local');
   });
 
@@ -34,13 +34,13 @@ describe('parseSettingsFile', () => {
     const { settings, dropped } = parseSettingsFile({
       tenantUrl: 42,
       apiBase: 'https://api.example.com',
-      pane: { open: false, width: 500 },
+      pane: { open: false, fraction: 0.4 },
       surface: 'local',
     });
     expect(dropped).toEqual(['tenantUrl']);
     expect(settings.tenantUrl).toBe('https://cloudbeds.devinenterprise.com');
     expect(settings.apiBase).toBe('https://api.example.com');
-    expect(settings.pane).toEqual({ open: false, width: 500 });
+    expect(settings.pane).toEqual({ open: false, fraction: 0.4 });
     expect(settings.surface).toBe('local');
   });
 
@@ -66,20 +66,21 @@ describe('mergeSettings', () => {
   const current: Settings = {
     ...SettingsSchema.parse({}),
     tenantUrl: 'https://x.example',
-    pane: { open: false, width: 560 },
+    pane: { open: false, fraction: 0.4 },
   };
 
   it('does not leak defaults into the patch schema', () => {
     expect(SettingsPatchSchema.parse({})).toEqual({});
-    expect(SettingsPatchSchema.parse({ pane: { width: 700 } })).toEqual({
-      pane: { width: 700 },
+    expect(SettingsPatchSchema.parse({ pane: { fraction: 0.6 } })).toEqual({
+      pane: { fraction: 0.6 },
     });
+    expect(SettingsPatchSchema.safeParse({ pane: { fraction: 1.5 } }).success).toBe(false);
   });
 
   it('updates only the patched pane field', () => {
-    const next = mergeSettings(current, { pane: { width: 700 } });
+    const next = mergeSettings(current, { pane: { fraction: 0.6 } });
     expect(next.tenantUrl).toBe('https://x.example');
-    expect(next.pane).toEqual({ open: false, width: 700 });
+    expect(next.pane).toEqual({ open: false, fraction: 0.6 });
   });
 
   it('updates only the patched tabs field', () => {
@@ -93,7 +94,7 @@ describe('mergeSettings', () => {
     const next = mergeSettings(current, { routing: { allowExternal: false } });
     expect(next.routing.allowExternal).toBe(false);
     expect(next.tenantUrl).toBe('https://x.example');
-    expect(next.pane).toEqual({ open: false, width: 560 });
+    expect(next.pane).toEqual({ open: false, fraction: 0.4 });
   });
 
   it('is a no-op for an empty patch', () => {
@@ -126,6 +127,62 @@ describe('P8 migration', () => {
       tabs: { keepAliveHours: 10, maxLiveTabs: 4 },
     });
     expect(settings.tabs).toEqual({ keepAliveHours: 10, maxLiveTabs: 4 });
+  });
+});
+
+describe('F2 pane fraction migration', () => {
+  // Legacy px widths were recorded against the 1400 px default window: 1400 - 56 - 6 = 1338.
+  it('converts pane.width px to pane.fraction and drops width', () => {
+    const { settings, dropped } = parseSettingsFile({ pane: { open: true, width: 500 } });
+    expect(dropped).toEqual([]);
+    expect(settings.pane.fraction).toBeCloseTo(500 / 1338, 6);
+    expect(settings.pane.open).toBe(true);
+    expect('width' in settings.pane).toBe(false);
+  });
+
+  it('clamps out-of-range px to [0, 1]', () => {
+    expect(parseSettingsFile({ pane: { width: 5000 } }).settings.pane.fraction).toBe(1);
+    expect(parseSettingsFile({ pane: { width: -20 } }).settings.pane.fraction).toBe(0);
+  });
+
+  it('keeps an explicit fraction when both are present', () => {
+    const { settings } = parseSettingsFile({ pane: { width: 500, fraction: 0.7 } });
+    expect(settings.pane.fraction).toBe(0.7);
+  });
+
+  it('falls back to the 0.5 default when width is not a finite number', () => {
+    expect(parseSettingsFile({ pane: { width: 'wide' } }).settings.pane.fraction).toBe(0.5);
+    expect(parseSettingsFile({ pane: { open: false } }).settings.pane).toEqual({
+      open: false,
+      fraction: 0.5,
+    });
+    expect(SettingsSchema.parse({}).pane).toEqual({ open: true, fraction: 0.5 });
+  });
+
+  it('migrateSettingsRaw strips width even when fraction already exists', () => {
+    expect(migrateSettingsRaw({ pane: { width: 500, fraction: 0.3 } })).toEqual({
+      pane: { fraction: 0.3 },
+    });
+  });
+});
+
+describe('F2 window placements', () => {
+  it('defaults to an empty record and merges as a top-level replace', () => {
+    const base = SettingsSchema.parse({});
+    expect(base.windowPlacements).toEqual({});
+    const placement = { bounds: { x: 1, y: 2, width: 800, height: 600 }, maximized: false, savedAt: 10 };
+    const merged = mergeSettings(base, { windowPlacements: { a: placement } });
+    expect(merged.windowPlacements).toEqual({ a: placement });
+    const replaced = mergeSettings(merged, { windowPlacements: { b: placement } });
+    expect(replaced.windowPlacements).toEqual({ b: placement });
+    expect(SettingsPatchSchema.safeParse({ windowPlacements: { a: { bounds: {} } } }).success).toBe(false);
+  });
+
+  it('drops an invalid windowPlacements field on repair but keeps the rest', () => {
+    const { settings, dropped } = parseSettingsFile({ windowPlacements: 'nope', surface: 'local' });
+    expect(dropped).toEqual(['windowPlacements']);
+    expect(settings.windowPlacements).toEqual({});
+    expect(settings.surface).toBe('local');
   });
 });
 

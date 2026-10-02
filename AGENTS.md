@@ -24,6 +24,9 @@ Requires Node ≥ 22.12; currently developed on Node 24.x. All deps are pinned e
 
 ## Layout & settings (F-features)
 - Frame: `titleBarStyle: 'hidden'` + `titleBarOverlay` on the BaseWindow, `Menu.setApplicationMenu(null)`; the shell's `TitleBar.tsx` renders the drag region and the GitHub tab strip. Zoom (Ctrl+= / Ctrl+- / Ctrl+0) and detached DevTools (F12 / Ctrl+Shift+I, dev only) live in `src/main/shortcuts.ts`.
+- Settings keys: `pane.open` + `pane.fraction` (0..1 share of the available width — px guards are derived in `computeBounds`, never persisted; `pane.width` migrates to fraction on load), `windowPlacements` (per-display-config window bounds/maximized).
+- Removed channel: `pane:width` (width changes come from the splitter drag or `paneFraction` in ShellState).
+- New log events: `window-placement` (plus existing `drag-*` events now carry `axis`).
 
 ## Conventions
 - `src/core/` is pure TS — no `electron` imports (unit-testable).

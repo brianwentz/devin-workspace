@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { clampPaneWidth } from '../core/layout';
+import { clampPaneWidth, fractionFromPx, paneWidthPx } from '../core/layout';
 import { newSessionUrl } from '../core/sessions';
 import { log } from './log';
 import { state, testMode, type ViewName } from './state';
@@ -126,10 +126,13 @@ export function handleShortcut(
     openNewSession();
     handled = true;
   } else if (ctrl && input.shift && (key === '[' || key === '{' || key === ']' || key === '}')) {
-    state.paneWidth = clampPaneWidth(
-      state.paneWidth + (key === '[' || key === '{' ? -80 : 80),
-      state.windowRef?.getContentBounds().width ?? 1400,
+    // Step ±80 px in pixel space, store the result as a fraction.
+    const windowWidth = state.windowRef?.getContentBounds().width ?? 1400;
+    const panePx = clampPaneWidth(
+      paneWidthPx(state.paneFraction, windowWidth) + (key === '[' || key === '{' ? -80 : 80),
+      windowWidth,
     );
+    state.paneFraction = fractionFromPx(panePx, windowWidth);
     applyLayout();
     focusVisibleContents(contents);
     handled = true;

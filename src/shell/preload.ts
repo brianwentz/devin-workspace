@@ -130,9 +130,6 @@ const api = {
       ipcRenderer.send(IpcChannels.navAction, action);
     }
   },
-  setPaneWidth: (width: number) => {
-    if (Number.isFinite(width)) ipcRenderer.send(IpcChannels.paneWidth, Math.round(width));
-  },
   setSurface: (surface: Surface) => {
     if (surface === 'cloud' || surface === 'local' || surface === 'settings') {
       ipcRenderer.send(IpcChannels.surfaceSet, surface);

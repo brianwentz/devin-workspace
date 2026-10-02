@@ -253,9 +253,9 @@ test('routes fixture navigation, manages tabs, persists state, and cleans up web
 
     await app.evaluate((_electron) => {
       const api = (globalThis as typeof globalThis & {
-        __devinworkspaces: { setPaneOpen(value: boolean): void; setPaneWidth(value: number): void };
+        __devinworkspaces: { setPaneOpen(value: boolean): void; setPaneFraction(value: number): void };
       }).__devinworkspaces;
-      api.setPaneWidth(500);
+      api.setPaneFraction(0.374);
       api.setPaneOpen(true);
     });
     const persistedId = await openTab(app, `${fixtures.githubUrl}/page/persisted`);
@@ -272,7 +272,7 @@ test('routes fixture navigation, manages tabs, persists state, and cleans up web
     await waitForTabCount(app, 1);
     const restored = await state(app);
     expect(restored.paneOpen).toBe(true);
-    expect(restored.paneWidth).toBe(500);
+    expect(restored.paneFraction).toBeCloseTo(0.374, 2);
     expect(restored.tabs.activeId).toBe(persistedId);
     expect(restored.tabs.tabs[0]?.url).toBe(`${fixtures.githubUrl}/page/persisted`);
     expect(await app.evaluate(({ webContents }) => webContents.getAllWebContents().length)).toBe(3);

@@ -1,5 +1,13 @@
 import { View, type WebContentsView } from 'electron';
-import { clampPaneWidth, computeBounds, type Rect } from '../core/layout';
+import {
+  clampPaneWidth,
+  computeBounds,
+  DEFAULT_TERMINAL_HEIGHT,
+  fractionFromPx,
+  SPLITTER_WIDTH,
+  type LayoutState,
+  type Rect,
+} from '../core/layout';
 import { prsForSession } from '../core/notifyModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 import { currentFillTarget } from './credentials';
@@ -12,10 +20,20 @@ function nativeBounds(rect: Rect | null): Electron.Rectangle {
     : { x: 0, y: 0, width: 0, height: 0 };
 }
 
+// Stream C fills in the terminal fields; until then they are constant.
+export function layoutState(): LayoutState {
+  return {
+    paneOpen: state.paneOpen,
+    paneFraction: state.paneFraction,
+    terminalOpen: false,
+    terminalHeight: DEFAULT_TERMINAL_HEIGHT,
+  };
+}
+
 export function publicState(): ShellState {
   return {
     paneOpen: state.paneOpen,
-    paneWidth: state.paneWidth,
+    paneFraction: state.paneFraction,
     paneCollapsed: state.paneCollapsed,
     surface: state.surface,
     currentSessionId: state.currentSessionId,
@@ -72,10 +90,7 @@ export function ensureAttached(view: View | null): void {
 export function applyLayout(): void {
   const { windowRef, shellView, devinView, tabManager } = state;
   if (!windowRef || !shellView || !devinView || !tabManager) return;
-  const bounds = computeBounds(windowRef.getContentBounds(), {
-    paneOpen: state.paneOpen,
-    paneWidth: state.paneWidth,
-  });
+  const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
   state.paneCollapsed = bounds.paneCollapsed;
   const size = windowRef.getContentBounds();
   shellView.setBounds({ x: 0, y: 0, width: size.width, height: size.height });
@@ -102,7 +117,7 @@ export function cancelDrag(restoreWidth: boolean, reason: string): void {
   state.dragging = false;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   state.dragTimer = null;
-  if (restoreWidth) state.paneWidth = state.dragStartWidth;
+  if (restoreWidth) state.paneFraction = state.dragStartFraction;
   if (state.shellView) state.shellView.setBackgroundColor('#111827');
   const { windowRef, shellView, devinView, tabManager } = state;
   if (windowRef && shellView) {
@@ -124,7 +139,7 @@ export function cancelDrag(restoreWidth: boolean, reason: string): void {
     }
   }
   log('shell', 'drag-cancel', {
-    detail: { reason, restoreWidth, paneWidth: state.paneWidth, x: state.dragLastX },
+    detail: { reason, restoreWidth, paneFraction: state.paneFraction, x: state.dragLastX },
   });
   applyLayout();
   state.shellView?.webContents.send(IpcChannels.layoutDragReset);
@@ -134,33 +149,30 @@ export function beginDrag(x: number): void {
   const { windowRef, shellView } = state;
   if (!windowRef || !shellView || !state.paneOpen || state.paneCollapsed || state.dragging) return;
   state.dragging = true;
-  state.dragStartWidth = state.paneWidth;
+  state.dragStartFraction = state.paneFraction;
   state.dragLastX = x;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   shellView.setBackgroundColor('#00000000');
   windowRef.contentView.addChildView(shellView);
   state.dragTimer = setTimeout(() => cancelDrag(true, 'safety-timeout'), 10_000);
-  log('shell', 'drag-start', { detail: { x, paneWidth: state.paneWidth } });
+  log('shell', 'drag-start', { detail: { x, paneFraction: state.paneFraction } });
 }
 
 export function moveDrag(x: number): void {
   const { windowRef, shellView } = state;
   if (!state.dragging || !windowRef) return;
   state.dragLastX = x;
-  state.paneWidth = clampPaneWidth(
-    windowRef.getContentBounds().width - x - 6,
-    windowRef.getContentBounds().width,
-  );
-  const bounds = computeBounds(windowRef.getContentBounds(), {
-    paneOpen: state.paneOpen,
-    paneWidth: state.paneWidth,
-  });
+  // Pointer → pane px (guarded) → stored as a fraction of the available width.
+  const windowWidth = windowRef.getContentBounds().width;
+  const panePx = clampPaneWidth(windowWidth - x - SPLITTER_WIDTH, windowWidth);
+  state.paneFraction = fractionFromPx(panePx, windowWidth);
+  const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
   if (bounds.splitter) {
     const { width, height } = windowRef.getContentBounds();
     shellView?.setBounds({ x: 0, y: 0, width, height });
     shellView?.webContents.send(IpcChannels.layoutDragGuide, bounds.splitter.x);
   }
-  log('shell', 'drag-move', { detail: { x, paneWidth: state.paneWidth } });
+  log('shell', 'drag-move', { detail: { x, paneFraction: state.paneFraction } });
 }
 
 export function endDrag(x: number): void {
@@ -171,6 +183,6 @@ export function endDrag(x: number): void {
   if (state.dragTimer) clearTimeout(state.dragTimer);
   state.dragTimer = null;
   if (state.shellView) state.shellView.setBackgroundColor('#111827');
-  log('shell', 'drag-end', { detail: { x, paneWidth: state.paneWidth } });
+  log('shell', 'drag-end', { detail: { x, paneFraction: state.paneFraction } });
   applyLayout();
 }

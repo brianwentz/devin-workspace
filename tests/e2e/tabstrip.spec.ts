@@ -32,8 +32,15 @@ async function order(app: ElectronApplication): Promise<string[]> {
   return (await state(app)).tabs.tabs.map((tab) => tab.id);
 }
 
-async function setPaneWidth(app: ElectronApplication, width: number): Promise<void> {
-  await app.evaluate((_e, value: number) => (globalThis as any).__devinworkspaces.setPaneWidth(value), width);
+// Fractions of the 1338 px available at the 1400 px test window (see core/layout paneAvailable).
+const WIDE_PANE = 0.568; // ≈760 px, rendered at 698 px so the devin view keeps MIN_DEVIN_WIDTH
+const NARROW_PANE = 0.314; // ≈420 px
+
+async function setPaneFraction(app: ElectronApplication, fraction: number): Promise<void> {
+  await app.evaluate(
+    (_e, value: number) => (globalThis as any).__devinworkspaces.setPaneFraction(value),
+    fraction,
+  );
 }
 
 async function domOrder(shell: Page): Promise<string[]> {
@@ -48,7 +55,7 @@ test('pointer and keyboard reorder, keyboard activate/close, titles', async () =
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
   try {
     await expect.poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
-    await setPaneWidth(app, 760);
+    await setPaneFraction(app, WIDE_PANE);
     const a = await openTab(app, `${fixtures.githubUrl}/page/strip-a`);
     const b = await openTab(app, `${fixtures.githubUrl}/page/strip-b`);
     const c = await openTab(app, `${fixtures.githubUrl}/page/strip-c`);
@@ -136,7 +143,7 @@ test('overflowing strip scrolls the active tab into view', async () => {
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
   try {
     await expect.poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
-    await setPaneWidth(app, 420);
+    await setPaneFraction(app, NARROW_PANE);
     const ids: string[] = [];
     for (let i = 0; i < 8; i += 1) {
       ids.push(await openTab(app, `${fixtures.githubUrl}/page/overflow-${i}`));

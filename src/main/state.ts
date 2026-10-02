@@ -1,5 +1,5 @@
 import type { BaseWindow, WebContentsView } from 'electron';
-import { DEFAULT_PANE_WIDTH } from '../core/layout';
+import { DEFAULT_PANE_FRACTION } from '../core/layout';
 import type { Surface } from '../shared/ipc';
 import type { CredentialStore } from './credentials';
 import type { SettingsStore } from './settings';
@@ -33,11 +33,11 @@ export const state = {
   credentials: null as CredentialStore | null,
   tenantUrl: 'https://cloudbeds.devinenterprise.com',
   paneOpen: true,
-  paneWidth: DEFAULT_PANE_WIDTH,
+  paneFraction: DEFAULT_PANE_FRACTION,
   paneCollapsed: false,
   surface: 'cloud' as Surface,
   currentSessionId: null as string | null,
-  dragStartWidth: DEFAULT_PANE_WIDTH,
+  dragStartFraction: DEFAULT_PANE_FRACTION,
   dragLastX: 0,
   dragTimer: null as NodeJS.Timeout | null,
   dragging: false,
