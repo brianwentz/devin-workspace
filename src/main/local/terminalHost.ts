@@ -92,6 +92,32 @@ export class TerminalHost {
     return { file: shell, args: [] };
   }
 
+  // Pty env: drop inherited vars that break or redirect child processes —
+  // NODE_OPTIONS/ELECTRON_RUN_AS_NODE re-route node/electron children
+  // (ELECTRON_RUN_AS_NODE in particular turns spawned devin/node binaries into
+  // plain node), NODE_INSPECT_* hijack ports, and JB_*/IDEA_*/WEBSTORM_* leak
+  // IDE debugger hooks when launched from JetBrains. Only names are logged.
+  private ptyEnv(): Record<string, string> {
+    const strip = (name: string) =>
+      name === 'NODE_OPTIONS' ||
+      name.startsWith('NODE_INSPECT_') ||
+      name.startsWith('ELECTRON_') ||
+      name.startsWith('JB_') ||
+      name.startsWith('IDEA_') ||
+      name.startsWith('WEBSTORM_');
+    const env: Record<string, string> = {};
+    const stripped: string[] = [];
+    for (const [name, value] of Object.entries(process.env)) {
+      if (value === undefined) continue;
+      if (strip(name)) stripped.push(name);
+      else env[name] = value;
+    }
+    if (stripped.length > 0) {
+      log('local', 'terminal-env', { detail: { stripped } });
+    }
+    return env;
+  }
+
   open(options: TerminalOpenOptions, cols = 120, rows = 30): OpenResult {
     const workspaces = (state.settings?.current.workspaces ?? []).map((w) => resolve(w));
     const normalized =
@@ -128,7 +154,7 @@ export class TerminalHost {
         cwd: normalized,
         cols,
         rows,
-        env: process.env as Record<string, string>,
+        env: this.ptyEnv(),
         name: 'xterm-256color',
         useConpty: true,
       });

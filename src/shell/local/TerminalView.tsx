@@ -7,12 +7,16 @@ import { buttonClass } from './Cards';
 interface TerminalViewProps {
   // Host-owned pty id (see terminalHost). The view never opens or closes it.
   id: string;
+  // When true, focus the xterm once it is displayed — callers pass it so typed
+  // input lands in the terminal instead of staying on the invoking button.
+  active?: boolean;
   // When provided, an exit banner offers to restart (LocalPanel's devin pty).
   onRestart?: () => void;
 }
 
-export function TerminalView({ id, onRestart }: TerminalViewProps) {
+export function TerminalView({ id, active = false, onRestart }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
   const idRef = useRef<string>(id);
   const [exitCode, setExitCode] = useState<number | null>(null);
 
@@ -54,6 +58,7 @@ export function TerminalView({ id, onRestart }: TerminalViewProps) {
       }
       return true;
     });
+    termRef.current = term;
     term.onData((data) => {
       window.devinworkspaces.terminalInput(idRef.current, data);
     });
@@ -91,9 +96,17 @@ export function TerminalView({ id, onRestart }: TerminalViewProps) {
       offExit();
       observer.disconnect();
       term.dispose();
+      termRef.current = null;
       // The host pty stays alive — it is keyed by id and reused on remount.
     };
   }, [id]);
+
+  // Focus after a rAF: the container may have just flipped display:none→flex.
+  useEffect(() => {
+    if (!active) return;
+    const raf = requestAnimationFrame(() => termRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
+  }, [active]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
