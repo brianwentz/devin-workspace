@@ -143,6 +143,7 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
   const [allowExternal, setAllowExternal] = useState(settings.routing.allowExternal);
   const [keepAliveHours, setKeepAliveHours] = useState(String(settings.tabs.keepAliveHours));
   const [terminalAllSurfaces, setTerminalAllSurfaces] = useState(settings.terminal.allSurfaces);
+  const [terminalShell, setTerminalShell] = useState(settings.terminal.shell);
   const [maxLiveTabs, setMaxLiveTabs] = useState(String(settings.tabs.maxLiveTabs));
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -175,7 +176,7 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
         workspaces,
         routing: { allowExternal },
         tabs: { keepAliveHours: keepAlive, maxLiveTabs: maxLive },
-        terminal: { allSurfaces: terminalAllSurfaces },
+        terminal: { allSurfaces: terminalAllSurfaces, shell: terminalShell.trim() },
       })
       .then(() => {
         setSaved(true);
@@ -297,6 +298,19 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
             onChange={(event) => setTerminalAllSurfaces(event.target.checked)}
           />
           <span>Show terminal dock on Local and Settings too</span>
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[#aeb9c8]">Shell command</span>
+          <input
+            id="terminalShellInput"
+            className="w-full max-w-md px-2 py-1.5 rounded-md border border-[#39475a] bg-[#0d141d] text-sm text-[#e8edf5]"
+            value={terminalShell}
+            onChange={(event) => setTerminalShell(event.target.value)}
+            placeholder="e.g. pwsh.exe or wsl.exe -d Ubuntu"
+          />
+          <span className="text-xs text-[#7f8ca0]">
+            Blank = Windows Terminal default profile, else PowerShell.
+          </span>
         </label>
         {error && <p className="text-sm text-[#ff8a8a]">{error}</p>}
         <div className="flex items-center gap-3">

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { launchApp, readEvents, shellPage, state, waitForEvent } from './helpers';
+import { evaluateInShell, launchApp, readEvents, shellPage, state, waitForEvent } from './helpers';
 
 type Hooks = {
   terminalOpen(
@@ -261,8 +261,11 @@ test('terminal dock: rail toggle, shell tabs, surface gating, persisted height',
 
     // The chevron opens the cwd menu — it must be a real, unclipped overlay:
     // rect inside the dock and the first item hit-tests to itself.
+    const profiles = (await evaluateInShell(app, `window.devinworkspaces.terminalProfiles()`)) as unknown[];
+    expect(Array.isArray(profiles)).toBe(true);
     await page.click('#terminalNewCwd');
     await page.waitForSelector('#terminalNewMenu button');
+    await expect(page.locator('#terminalNewMenu >> text=Open in…')).toHaveCount(1);
     const options = await page.locator('#terminalNewMenu button').allTextContents();
     expect(options.length).toBeGreaterThan(0);
     const menuBox = await page.locator('#terminalNewMenu').boundingBox();

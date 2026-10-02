@@ -24,7 +24,7 @@ Requirements: Windows 10/11 x64. The Devin CLI is only needed for the Local surf
 
 1. The window opens on the **Cloud** surface (☁ in the left rail) pointing at the default tenant. If you use a different Devin tenant, open **Settings** (⚙) and change *Tenant URL*, then sign in as you normally would — SSO flows run inside the hosted view, nothing is intercepted.
 2. Click any GitHub link in a session; it opens in the pane on the right. Toggle the pane with the **GH** rail button or `Ctrl+Shift+G`, drag the splitter to resize.
-3. Toggle the terminal dock with the **>_** rail button or `` Ctrl+` ``; use **+** in the dock to open a shell in a workspace folder or your home directory.
+3. Toggle the terminal dock with the **>_** rail button or `` Ctrl+` ``; use **+** in the dock to open a shell in a workspace folder or your home directory. On Windows the shell is your Windows Terminal default profile when available (WSL distros included); the **▾** menu lists other launchable profiles.
 
 ## Notifications and PR auto-open
 
@@ -55,6 +55,7 @@ Two checkboxes control what the poller does; both are on by default and polling 
 | Open non-GitHub links in system browser | Settings | GitHub links always stay in the pane |
 | Keep hidden tabs live for (hours) / Max live tabs | Settings | Memory controls for GitHub tabs of sessions you're not viewing |
 | Show terminal dock on Local and Settings too | Settings | Dock is Cloud-only by default |
+| Shell command | Settings | Blank = Windows Terminal default profile, else PowerShell |
 | Notifications / PR auto-open / token / org id | Settings → Notifications | See above |
 | Credentials | Settings → Credentials | Origin + username + password, DPAPI-encrypted; fill via the 🔑 rail button |
 

@@ -30,6 +30,9 @@ export function TerminalDock({ rect, terminals, activeTerminalId }: TerminalDock
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuLeft, setMenuLeft] = useState(0);
   const [cwdOptions, setCwdOptions] = useState<string[]>([]);
+  const [profiles, setProfiles] = useState<
+    { guid: string; name: string; default: boolean; available: boolean }[]
+  >([]);
   const sectionRef = useRef<HTMLElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -68,12 +71,17 @@ export function TerminalDock({ rect, terminals, activeTerminalId }: TerminalDock
     }
     setMenuOpen(true);
     void window.devinworkspaces.terminalCwdOptions().then(setCwdOptions);
+    void window.devinworkspaces.terminalProfiles().then(setProfiles);
   };
 
-  const openShell = (cwd: string | undefined) => {
+  const openShell = (cwd: string | undefined, profile?: string) => {
     setMenuOpen(false);
     void window.devinworkspaces
-      .terminalOpen(cwd === undefined ? { kind: 'shell' } : { kind: 'shell', cwd })
+      .terminalOpen({
+        kind: 'shell',
+        ...(cwd === undefined ? {} : { cwd }),
+        ...(profile === undefined ? {} : { profile }),
+      })
       .then((result) => {
         if (result.ok) window.devinworkspaces.terminalActivate(result.id);
       });
@@ -106,7 +114,7 @@ export function TerminalDock({ rect, terminals, activeTerminalId }: TerminalDock
             role="tab"
             aria-selected={entry.id === activeId}
             aria-label={entry.title}
-            title={`${entry.title} — ${entry.cwd}`}
+            title={`${entry.profile ?? entry.title} — ${entry.cwd}`}
             className={`tab terminal-tab${entry.id === activeId ? ' active' : ''}`}
             data-terminal-tab={entry.id}
             onClick={(event) => {
@@ -186,6 +194,9 @@ export function TerminalDock({ rect, terminals, activeTerminalId }: TerminalDock
             maxHeight: Math.max(60, (rect?.height ?? 0) - 34),
           }}
         >
+          <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[#7f8ca0]">
+            Open in…
+          </div>
           {cwdOptions.map((cwd) => (
             <button
               key={cwd}
@@ -198,6 +209,27 @@ export function TerminalDock({ rect, terminals, activeTerminalId }: TerminalDock
               <span className="ml-2 text-[#7f8ca0]">{cwd}</span>
             </button>
           ))}
+          {profiles.some((p) => p.available) && (
+            <>
+              <div className="mt-1 border-t border-[#39475a] px-3 py-1 text-[10px] uppercase tracking-wide text-[#7f8ca0]">
+                Shell
+              </div>
+              {profiles
+                .filter((p) => p.available)
+                .map((p) => (
+                  <button
+                    key={p.guid}
+                    type="button"
+                    className="block w-full truncate px-3 py-1.5 text-left text-xs text-[#e8edf5] hover:bg-[#2a394d]"
+                    title={p.name}
+                    onClick={() => openShell(undefined, p.guid)}
+                  >
+                    {p.name}
+                    {p.default && <span className="ml-2 text-[#7f8ca0]">(default)</span>}
+                  </button>
+                ))}
+            </>
+          )}
         </div>
       )}
       <div className="relative min-h-0 flex-1">
