@@ -5,6 +5,7 @@ import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
 import {
+  closeApp,
   evaluateInShell,
   evaluateInView,
   launchApp,
@@ -32,14 +33,18 @@ interface SavedCredential {
   username: string;
 }
 
-// The prompt show-fallback and auto-dismiss are shortened for tests.
-async function launch(): Promise<{ app: ElectronApplication; profile: string; logFile: string }> {
+// The prompt show-fallback is shortened for tests; the auto-dismiss stays at
+// the default 10 s so polls have a wide visibility window (the auto-dismiss
+// test opts into a short window via DISMISS_MS).
+async function launch(
+  extraEnv: Record<string, string> = {},
+): Promise<{ app: ElectronApplication; profile: string; logFile: string }> {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-capture-'));
   const logFile = join(profile, 'events.jsonl');
   writeFileSync(logFile, '', 'utf8');
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
-    // Also the auto-dismiss window — a shorter value risks the poll missing it.
-    DEVIN_WORKSPACES_TEST_AUTOFILL_PROMPT_MS: '1000',
+    DEVIN_WORKSPACES_TEST_AUTOFILL_PROMPT_MS: '300',
+    ...extraEnv,
   });
   await expect
     .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
@@ -48,9 +53,8 @@ async function launch(): Promise<{ app: ElectronApplication; profile: string; lo
 }
 
 async function close(app: ElectronApplication, profile: string): Promise<void> {
-  await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-  await app.close().catch(() => undefined);
-  rmSync(profile, { recursive: true, force: true });
+  await closeApp(app);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 }
 
 async function saveCredential(
@@ -316,7 +320,9 @@ test('a pending capture survives a scope switch caused by another navigation', a
 });
 
 test('the prompt auto-dismisses', async () => {
-  const { app, profile, logFile } = await launch();
+  const { app, profile, logFile } = await launch({
+    DEVIN_WORKSPACES_TEST_AUTOFILL_DISMISS_MS: '1000',
+  });
   try {
     await openTab(app, loginUrl());
     await waitForTabTitle(app, 'Fixture login');

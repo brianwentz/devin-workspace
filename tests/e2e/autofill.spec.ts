@@ -5,6 +5,7 @@ import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
 import {
+  closeApp,
   evaluateInShell,
   evaluateInView,
   launchApp,
@@ -43,9 +44,8 @@ async function launch(): Promise<{ app: ElectronApplication; profile: string; lo
 }
 
 async function close(app: ElectronApplication, profile: string): Promise<void> {
-  await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-  await app.close().catch(() => undefined);
-  rmSync(profile, { recursive: true, force: true });
+  await closeApp(app);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 }
 
 async function save(

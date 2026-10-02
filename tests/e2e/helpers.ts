@@ -201,6 +201,11 @@ export async function fixtureFrameUrl(
   );
 }
 
+// executeJavaScript can hang forever when the renderer never runs the script
+// (mid-navigation, hung isolate). Race it inside the evaluated callback so a
+// hang becomes a test failure, not a worker-teardown timeout.
+// (The 20 s literal is inlined because app.evaluate serializes the callback.)
+
 export async function evaluateInView(
   app: ElectronApplication,
   urlPrefix: string,
@@ -212,7 +217,20 @@ export async function evaluateInView(
         .getAllWebContents()
         .find((candidate) => candidate.getURL().startsWith(args.urlPrefix));
       if (!contents) throw new Error(`No webContents for ${args.urlPrefix}`);
-      return contents.executeJavaScript(args.script);
+      return Promise.race([
+        contents.executeJavaScript(args.script),
+        new Promise((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `executeJavaScript timed out for ${args.urlPrefix}: ${args.script.slice(0, 80)}`,
+                ),
+              ),
+            20_000,
+          ),
+        ),
+      ]);
     },
     { urlPrefix, script },
   );
@@ -227,7 +245,18 @@ export async function evaluateInShell(
       .getAllWebContents()
       .find((candidate) => candidate.getURL().startsWith('app://shell/'));
     if (!contents) throw new Error('Shell WebContents not found');
-    return contents.executeJavaScript(source);
+    return Promise.race([
+      contents.executeJavaScript(source),
+      new Promise((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(`executeJavaScript timed out for shell: ${source.slice(0, 80)}`),
+            ),
+          20_000,
+        ),
+      ),
+    ]);
   }, script);
 }
 
@@ -267,6 +296,32 @@ export async function openTab(app: ElectronApplication, url: string): Promise<st
   }, url);
   if (typeof id !== 'string') throw new Error(`Could not open fixture tab at ${url}`);
   return id;
+}
+
+// Quit + close with hard ceilings, then kill the process if it's still
+// alive — a hung quit() must not stall the worker teardown. Every step can
+// throw synchronously when the connection is already half-closed, so each is
+// individually wrapped.
+export async function closeApp(app: ElectronApplication): Promise<void> {
+  try {
+    await Promise.race([
+      app.evaluate(({ app: electronApp }) => electronApp.quit()),
+      new Promise((resolve) => setTimeout(resolve, 5000)),
+    ]);
+  } catch {
+    // connection gone or hung — fall through to close/kill
+  }
+  try {
+    await Promise.race([app.close(), new Promise((resolve) => setTimeout(resolve, 10_000))]);
+  } catch {
+    // ignore — kill below covers a lingering process
+  }
+  try {
+    const proc = app.process();
+    if (proc && proc.exitCode === null && !proc.killed) proc.kill();
+  } catch {
+    // no process handle available
+  }
 }
 
 export async function readEvents(logFile: string): Promise<Array<Record<string, unknown>>> {

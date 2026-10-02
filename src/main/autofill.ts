@@ -12,14 +12,14 @@ import { log } from './log';
 import { fixtureOrigins, state, testMode } from './state';
 import { applyLayout, lowerShell, notifyShell, overlayOpen, raiseShell } from './window';
 
-// DEVIN_WORKSPACES_TEST_AUTOFILL_PROMPT_MS (test mode only) shortens both the
-// show-delay fallback and the auto-dismiss window.
-const promptMs = (fallback: number): number => {
-  const override = testMode ? Number(process.env.DEVIN_WORKSPACES_TEST_AUTOFILL_PROMPT_MS) : NaN;
-  return Number.isFinite(override) && override > 0 ? override : fallback;
+// Test-only knobs (DEVIN_WORKSPACES_TEST=1): PROMPT_MS shortens the show-delay
+// fallback; DISMISS_MS shortens the 10 s auto-dismiss.
+const testOverrideMs = (name: string): number | null => {
+  const value = testMode ? Number(process.env[name]) : NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
 };
-const SHOW_FALLBACK_MS = () => promptMs(1500);
-const PROMPT_DISMISS_MS = () => promptMs(10_000);
+const SHOW_FALLBACK_MS = () => testOverrideMs('DEVIN_WORKSPACES_TEST_AUTOFILL_PROMPT_MS') ?? 1500;
+const PROMPT_DISMISS_MS = () => testOverrideMs('DEVIN_WORKSPACES_TEST_AUTOFILL_DISMISS_MS') ?? 10_000;
 const PENDING_TTL_MS = 60_000;
 
 // Navigation of the sender dismisses its picker; teardown dismisses both its
