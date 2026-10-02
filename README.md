@@ -52,6 +52,7 @@ Two checkboxes control what the poller does; both are on by default and polling 
 |---|---|---|
 | Tenant URL / API base | Settings | Must be `https` |
 | Workspaces | Settings → Workspaces | Folders for Devin Local and terminal working directories |
+| Tabs | Settings → Keep-alive / Max live tabs | The session you're viewing keeps its tabs loaded; hidden sessions' tabs are discarded after the keep-alive window and the live cap only ever applies to them |
 | Open non-GitHub links in system browser | Settings | GitHub links always stay in the pane |
 | Keep hidden tabs live for (hours) / Max live tabs | Settings | Memory controls for GitHub tabs of sessions you're not viewing |
 | Show terminal dock on Local and Settings too | Settings | Dock is Cloud-only by default |

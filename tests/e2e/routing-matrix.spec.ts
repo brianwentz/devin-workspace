@@ -533,16 +533,14 @@ test('restart restores tabs (order, active, originSessionId) and window close le
       `${fixtures.githubUrl}/page/one`,
       `${fixtures.githubAltUrl}/page/two`,
     ]);
-    // Only the active restored tab gets a webContents (lazy restore): shell + devin + 1.
-    await expect.poll(() => webContentsCount(app)).toBe(3);
+    // Every visible-scope tab is preloaded in the background: shell + devin + 3.
+    await expect.poll(() => webContentsCount(app)).toBe(5);
     await waitForTabTitle(app, 'two');
 
-    // Activating a restored tab creates its view; closing it destroys the webContents.
-    await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.activate(id), ids[0]!);
-    await expect.poll(() => webContentsCount(app)).toBe(4);
+    // Closing a restored tab destroys its webContents.
     const closedTab = await app.evaluate((_e, id: string) => (globalThis as any).__devinworkspaces.close(id), ids[0]!);
     expect(closedTab).toBe(true);
-    await expect.poll(() => webContentsCount(app)).toBe(3);
+    await expect.poll(() => webContentsCount(app)).toBe(4);
 
     await app.evaluate(() => (globalThis as any).__devinworkspaces.closeWindow());
     await waitForEventCount(logFile, 'window-close-complete', 2);

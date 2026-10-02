@@ -293,20 +293,22 @@ export interface DiscardCandidateEntry {
   live: boolean;
   // beforeunload-protected (a cancelled discard / unsaved draft) — always skipped.
   protected: boolean;
-  isVisibleActive: boolean;
+  // Belongs to the visible scope — those tabs are all preloaded/live by design
+  // and never count toward, nor get picked by, the cap.
+  inVisibleScope: boolean;
 }
 
-// LRU: which live-but-not-visible-active, unprotected tabs to discard so that
-// live tabs stay under `cap`. Returns ids, oldest first.
+// LRU: which live, hidden-scope, unprotected tabs to discard so that live
+// hidden tabs stay under `cap`. Returns ids, oldest first.
 export function pickDiscardCandidates(
   entries: DiscardCandidateEntry[],
   cap: number,
 ): string[] {
-  const live = entries.filter((entry) => entry.live);
-  const excess = live.filter((entry) => !entry.isVisibleActive).length - cap;
+  const live = entries.filter((entry) => entry.live && !entry.inVisibleScope);
+  const excess = live.length - cap;
   if (excess <= 0) return [];
   return live
-    .filter((entry) => !entry.isVisibleActive && !entry.protected)
+    .filter((entry) => !entry.protected)
     .sort((a, b) => a.lastActiveAt - b.lastActiveAt)
     .slice(0, excess)
     .map((entry) => entry.id);

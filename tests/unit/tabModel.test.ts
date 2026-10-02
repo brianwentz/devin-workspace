@@ -317,15 +317,15 @@ describe('pickDiscardCandidates', () => {
   const entry = (
     id: string,
     lastActiveAt: number,
-    extra: Partial<{ live: boolean; protected: boolean; isVisibleActive: boolean }> = {},
-  ) => ({ id, lastActiveAt, live: true, protected: false, isVisibleActive: false, ...extra });
+    extra: Partial<{ live: boolean; protected: boolean; inVisibleScope: boolean }> = {},
+  ) => ({ id, lastActiveAt, live: true, protected: false, inVisibleScope: false, ...extra });
 
   it('returns LRU-ordered ids until under the cap', () => {
     const entries = [
       entry('newest', 300),
       entry('oldest', 100),
       entry('middle', 200),
-      entry('active', 50, { isVisibleActive: true }),
+      entry('active', 50, { inVisibleScope: true }),
     ];
     expect(pickDiscardCandidates(entries, 2)).toEqual(['oldest']);
     expect(pickDiscardCandidates(entries, 1)).toEqual(['oldest', 'middle']);
@@ -341,5 +341,21 @@ describe('pickDiscardCandidates', () => {
     ];
     // 3 live non-active (guarded, open, other) over cap=1 -> skip protected 'guarded'.
     expect(pickDiscardCandidates(entries, 1)).toEqual(['other', 'open']);
+  });
+
+  it('exempts every visible-scope tab from both the count and the candidates', () => {
+    const entries = [
+      entry('vis1', 100, { inVisibleScope: true }),
+      entry('vis2', 90, { inVisibleScope: true }),
+      entry('vis3', 80, { inVisibleScope: true }),
+      entry('vis4', 70, { inVisibleScope: true }),
+      entry('vis5', 60, { inVisibleScope: true }),
+      entry('hid-oldest', 10),
+      entry('hid-mid', 20),
+      entry('hid-new', 30),
+    ];
+    // 5 visible + 3 hidden live, cap 2 → only the oldest hidden goes.
+    expect(pickDiscardCandidates(entries, 2)).toEqual(['hid-oldest']);
+    expect(pickDiscardCandidates(entries, 3)).toEqual([]);
   });
 });
