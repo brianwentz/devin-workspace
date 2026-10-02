@@ -193,3 +193,54 @@ test('migrates legacy spike-state.json into settings.json', async () => {
     rmSync(profile, { recursive: true, force: true });
   }
 });
+
+test('window placement restores content bounds exactly once, then stays stable', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-place-'));
+  const logFile = join(profile, 'events.jsonl');
+  const env = {
+    DEVIN_WORKSPACES_TEST_PLACEMENT: '1',
+    DEVIN_WORKSPACES_TEST_WINDOW_SIZE: '1410x910',
+  };
+  const bounds = async (app: Parameters<typeof state>[0]) =>
+    app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.getContentBounds());
+  try {
+    let app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, env);
+    await expect
+      .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
+      .toBe(true);
+    // The launch-0 forced setContentSize emits a resize; the debounced save
+    // writes the content bounds under this display key.
+    await expect
+      .poll(async () => {
+        const saved = JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8'));
+        return Object.keys(saved.windowPlacements ?? {}).length;
+      })
+      .toBe(1);
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await app.close();
+
+    app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, env);
+    await expect
+      .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
+      .toBe(true);
+    const restored = await bounds(app);
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await app.close();
+
+    app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, env);
+    await expect
+      .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
+      .toBe(true);
+    const again = await bounds(app);
+    // No compounding growth: launch 3's content equals launch 2's exactly.
+    expect(again).toEqual(restored);
+    // And the restore lands within a few DIP of the requested size
+    // (fractional-DIP rounding at 125% snaps once, then converges).
+    expect(Math.abs(restored.width - 1410)).toBeLessThanOrEqual(4);
+    expect(Math.abs(restored.height - 910)).toBeLessThanOrEqual(4);
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await app.close();
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
+});

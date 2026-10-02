@@ -9,6 +9,11 @@ import {
 import { log } from './log';
 import { state, testMode } from './state';
 
+// Disabled under test mode unless a test explicitly opts in.
+function placementEnabled(): boolean {
+  return !testMode || process.env.DEVIN_WORKSPACES_TEST_PLACEMENT === '1';
+}
+
 // F2: remember window bounds per display configuration. The whole module is a
 // no-op in test mode (e2e drives explicit window sizes). Only the key and the
 // source are logged — never bounds.
@@ -33,7 +38,7 @@ function currentKey(): string {
 export function initialWindowOptions(): Partial<BaseWindowConstructorOptions> & {
   restored: Placement | null;
 } {
-  if (testMode) return { ...DEFAULT_WINDOW_SIZE, restored: null };
+  if (!placementEnabled()) return { ...DEFAULT_WINDOW_SIZE, restored: null };
   const key = currentKey();
   const saved = state.settings?.current.windowPlacements ?? {};
   const restored = pickPlacement(saved, key, currentDisplays());
@@ -45,6 +50,7 @@ export function initialWindowOptions(): Partial<BaseWindowConstructorOptions> & 
     y: Math.round(y),
     width: Math.round(width),
     height: Math.round(height),
+    useContentSize: true,
     restored,
   };
 }
@@ -55,9 +61,14 @@ let applying = false;
 let applyTimer: NodeJS.Timeout | null = null;
 let lastKey = '';
 
+// Bounds are stored as *content* bounds: on Windows the hidden title bar leaves
+// invisible resize borders that getNormalBounds() includes but the constructor/
+// setBounds do not round-trip, which grew the window by several px per launch.
+// A maximized window has no "normal content bounds" getter — its restore rect
+// comes from getNormalBounds and lands a few px off on unmaximize; acceptable.
 function placementOf(window: BaseWindow): Placement {
   return {
-    bounds: window.getNormalBounds(),
+    bounds: window.isMaximized() ? window.getNormalBounds() : window.getContentBounds(),
     maximized: window.isMaximized(),
     savedAt: Date.now(),
   };
@@ -72,7 +83,7 @@ function saveUnder(key: string): void {
 
 // Persist the current placement immediately (shutdown path).
 export function savePlacementNow(): void {
-  if (testMode || !tracked) return;
+  if (!placementEnabled() || !tracked) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = null;
   saveUnder(lastKey || currentKey());
@@ -92,7 +103,7 @@ function applyPlacement(window: BaseWindow, placement: Placement): void {
   if (applyTimer) clearTimeout(applyTimer);
   if (window.isMaximized()) window.unmaximize();
   const { x, y, width, height } = placement.bounds;
-  window.setBounds({
+  window.setContentBounds({
     x: Math.round(x),
     y: Math.round(y),
     width: Math.round(width),
@@ -125,7 +136,7 @@ function onDisplayChange(): void {
 }
 
 export function attachPlacementTracking(window: BaseWindow): void {
-  if (testMode) return;
+  if (!placementEnabled()) return;
   tracked = window;
   lastKey = currentKey();
   window.on('resize', scheduleSave);
