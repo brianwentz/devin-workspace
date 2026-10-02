@@ -138,9 +138,9 @@ test('tabs follow the visible session; hidden tabs stay live and keep scroll/for
     expect(
       await evaluateInShell(
         app,
-        `document.getElementById('scopeOverflow')?.textContent ?? null`,
+        `document.getElementById('scopeOverflow')`,
       ),
-    ).toBe('⋯ 3 in other sessions');
+    ).toBe(null);
   } finally {
     await quit(app, profile);
   }
@@ -364,6 +364,56 @@ test('v1 tab snapshot migrates into scopes', async () => {
     const s = await state(app);
     expect(s.tabs.tabs.map((t) => t.id)).toEqual(['old-1', 'old-2']);
     expect(s.tabs.activeId).toBe('old-1');
+  } finally {
+    await quit(app, profile);
+  }
+});
+
+// Right-click strip menus are native (views paint over the shell); the test
+// drives the same code paths via __devinworkspaces hooks.
+test('tab menus: copy address and reload all tabs in this session', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-menus-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
+  try {
+    await expect.poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
+    await openSession(app, 'A');
+    await routeLink(app, `${fixtures.githubUrl}/page/session-a-1`);
+    await routeLink(app, `${fixtures.githubUrl}/page/session-a-2`);
+    await waitForTabCount(app, 2);
+    await waitForTabTitle(app, 'session-a-2');
+    const tabs = (await state(app)).tabs.tabs;
+    const ids = tabs.map((t) => t.id);
+    const firstUrl = tabs[0]!.url;
+
+    // The "N in other sessions" overflow button is gone for good.
+    expect(await evaluateInShell(app, `document.getElementById('scopeOverflow')`)).toBe(null);
+
+    // Copy address writes the tab's URL to the clipboard and logs it.
+    const copied = await app.evaluate((_e, id: string) => {
+      return (globalThis as any).__devinworkspaces.copyTabAddress(id);
+    }, ids[0]!);
+    expect(copied).toBe(true);
+    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(firstUrl);
+    await waitForEvent(logFile, 'tab-copy-address');
+    expect(
+      await app.evaluate(() => (globalThis as any).__devinworkspaces.copyTabAddress('nope')),
+    ).toBe(false);
+
+    // Reload all tabs in this session: both live tabs reload (did-stop-loading
+    // fires once more per tab than before the reload).
+    const stopCount = async (id: string) =>
+      (await readEvents(logFile)).filter(
+        (e) => e.event === 'did-stop-loading' && (e.detail as { id?: string })?.id === id,
+      ).length;
+    const before = [await stopCount(ids[0]!), await stopCount(ids[1]!)];
+    const reloaded = await app.evaluate(
+      () => (globalThis as any).__devinworkspaces.reloadScope(),
+    );
+    expect(reloaded).toBe(2);
+    await waitForEvent(logFile, 'tabs-reload-scope');
+    await expect.poll(async () => stopCount(ids[0]!)).toBe(before[0]! + 1);
+    await expect.poll(async () => stopCount(ids[1]!)).toBe(before[1]! + 1);
   } finally {
     await quit(app, profile);
   }

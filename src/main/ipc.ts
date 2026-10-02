@@ -1,4 +1,4 @@
-import { Menu } from 'electron';
+import { clipboard, Menu } from 'electron';
 import { guardedHandle, guardedOn } from './ipcGuard';
 import { clampFraction01 } from '../core/layout';
 import { currentFillTarget } from './credentials';
@@ -19,16 +19,14 @@ import {
   TabIdArg,
   TabReorderArgs,
   TabsCloseScopeArg,
-  TabsScopeMenuArg,
+  TabsReloadMenuArg,
+  TabsTabMenuArg,
   type Settings,
 } from '../shared/ipc';
-import { GLOBAL } from '../core/tabModel';
-import { sessionUrl } from '../core/sessions';
 import { log } from './log';
-import { scopeLabel } from '../core/notifyModel';
 import { notificationStore } from './notifications';
 import { currentSessionPrs, notifier, openNotification, popupPrMenu } from './notifier';
-import { handleLink, loadInDevinView } from './routing';
+import { handleLink } from './routing';
 import { historyAction, navigationTarget } from './shortcuts';
 import { NotificationIdArg, NotificationPanelArg } from '../shared/ipc';
 import { state } from './state';
@@ -43,6 +41,20 @@ import {
   publicState,
   setNotificationsPanel,
 } from './window';
+
+// "Reload all tabs in this session" (strip menu + test hook).
+export function reloadCurrentScope(): number {
+  return state.tabManager?.reloadScope() ?? 0;
+}
+
+// "Copy address" (tab context menu + test hook). Returns false when the tab is gone.
+export function copyTabAddress(tabId: string): boolean {
+  const tab = state.tabManager?.getTab(tabId);
+  if (!tab) return false;
+  clipboard.writeText(tab.url);
+  log('shell', 'tab-copy-address', { detail: { id: tabId }, url: tab.url });
+  return true;
+}
 
 export function setupIpc(): void {
   guardedHandle(IpcChannels.stateGet, () => publicState());
@@ -101,38 +113,25 @@ export function setupIpc(): void {
     void state.tabManager?.closeScope(parsed.data.scope).then(applyLayout);
   });
   guardedHandle(IpcChannels.tabsListScopes, () => state.tabManager?.listScopes() ?? []);
-  // Native menu: hosted views paint over the shell, so this can't be DOM.
-  guardedOn(IpcChannels.tabsScopeMenu, (_event, payload: unknown) => {
-    const parsed = TabsScopeMenuArg.safeParse(payload);
+  // Native menus: hosted views paint over the shell, so these can't be DOM.
+  guardedOn(IpcChannels.tabsReloadMenu, (_event, payload: unknown) => {
+    const parsed = TabsReloadMenuArg.safeParse(payload);
     if (!parsed.success || !state.windowRef) return;
-    const items = (state.tabManager?.listScopes() ?? []).filter(
-      (entry) => entry.scope !== state.tabManager?.currentScope,
-    );
-    if (items.length === 0) return;
-    const template: Electron.MenuItemConstructorOptions[] = items.flatMap((entry) => {
-      const label = scopeLabel(entry.scope, state.apiSessions);
-      return [
-        {
-          label: `${label} — ${entry.count} tab${entry.count === 1 ? '' : 's'} (${entry.liveCount} live)`,
-          enabled: false,
-        },
-        {
-          label: 'Switch to session',
-          click: () => {
-            // F7: loadInDevinView sets surface='cloud' for both paths.
-            if (entry.scope === GLOBAL) loadInDevinView(state.tenantUrl);
-            else loadInDevinView(sessionUrl(state.tenantUrl, entry.scope));
-            applyLayout();
-          },
-        },
-        {
-          label: 'Close its tabs',
-          click: () => void state.tabManager?.closeScope(entry.scope).then(applyLayout),
-        },
-        { type: 'separator' },
-      ];
+    Menu.buildFromTemplate([
+      { label: 'Reload all tabs in this session', click: () => reloadCurrentScope() },
+    ]).popup({
+      window: state.windowRef,
+      x: Math.round(parsed.data.x),
+      y: Math.round(parsed.data.y),
     });
-    Menu.buildFromTemplate(template).popup({
+  });
+  guardedOn(IpcChannels.tabsTabMenu, (_event, payload: unknown) => {
+    const parsed = TabsTabMenuArg.safeParse(payload);
+    if (!parsed.success || !state.windowRef) return;
+    if (!state.tabManager?.getTab(parsed.data.id)) return;
+    Menu.buildFromTemplate([
+      { label: 'Copy address', click: () => copyTabAddress(parsed.data.id) },
+    ]).popup({
       window: state.windowRef,
       x: Math.round(parsed.data.x),
       y: Math.round(parsed.data.y),

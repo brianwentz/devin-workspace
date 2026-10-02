@@ -746,6 +746,21 @@ export class TabManager {
     }));
   }
 
+  // Reload every live tab in the visible scope; discarded tabs are skipped
+  // (they reload on activation anyway). Returns the number reloaded.
+  reloadScope(): number {
+    let count = 0;
+    for (const entry of this.entries.values()) {
+      if (scopeOf(entry) !== this.scope || entry.discarded || !entry.view) continue;
+      const contents = entry.view.webContents;
+      if (contents.isDestroyed()) continue;
+      contents.reload();
+      count += 1;
+    }
+    this.log('tabs-reload-scope', { scope: this.scope, count });
+    return count;
+  }
+
   reorder(tabId: string, toIndex: number): void {
     this.state = reorderTab(this.state, tabId, toIndex);
     this.log('tab-reorder', { id: tabId, toIndex });

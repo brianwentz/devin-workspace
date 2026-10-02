@@ -71,7 +71,6 @@ export function App() {
         tabs={state.tabs.tabs}
         activeId={state.tabs.activeId}
         scope={state.tabs.scope}
-        hiddenTabCount={state.tabs.hiddenTabCount}
       />
       {paneVisible && bounds.splitter && (
         <Splitter axis="x" rect={bounds.splitter} enabled={state.paneOpen} />
