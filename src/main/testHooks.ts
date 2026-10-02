@@ -10,6 +10,7 @@ import { notificationStore } from './notifications';
 import { currentSessionPrs, notifier, openNotification } from './notifier';
 import { updateDownloaded } from './updater';
 import { handleLink } from './routing';
+import { copyTabAddress, reloadCurrentScope } from './ipc';
 import { historyAction, navigationTarget, openNewSession } from './shortcuts';
 import { state, testMode } from './state';
 import { applyLayout, publicState } from './window';
@@ -113,6 +114,8 @@ export function registerTestHooks(): void {
       setKeepAliveMs: (ms: number) => state.tabManager?.setKeepAliveMs(ms),
       getKeepAliveMs: () => state.tabManager?.keepAliveThresholdMs ?? null,
       listScopes: () => state.tabManager?.listScopes() ?? [],
+      reloadScope: () => reloadCurrentScope(),
+      copyTabAddress: (id: string) => copyTabAddress(id),
       // F1: inspect a tab in any scope (publicState only lists the visible scope).
       tabInfo: (id: string) => {
         const tab = state.tabManager?.getTab(id);

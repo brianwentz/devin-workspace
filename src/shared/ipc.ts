@@ -13,7 +13,8 @@ export const IpcChannels = {
   tabReorder: 'tab:reorder',
   tabsCloseScope: 'tabs:closeScope',
   tabsListScopes: 'tabs:listScopes',
-  tabsScopeMenu: 'tabs:scopeMenu',
+  tabsReloadMenu: 'tabs:reloadMenu',
+  tabsTabMenu: 'tabs:tabMenu',
   navAction: 'nav:action',
   surfaceSet: 'surface:set',
   linkOpen: 'link:open',
@@ -303,7 +304,8 @@ export const CredentialFillSchema = z.object({
 });
 
 export const TabsCloseScopeArg = z.object({ scope: z.string() });
-export const TabsScopeMenuArg = z.object({ x: z.number(), y: z.number() });
+export const TabsReloadMenuArg = z.object({ x: z.number(), y: z.number() });
+export const TabsTabMenuArg = z.object({ id: z.string(), x: z.number(), y: z.number() });
 export interface ScopeSummary {
   scope: string;
   count: number;
