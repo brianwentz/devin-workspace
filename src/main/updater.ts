@@ -6,11 +6,23 @@ import { shutdown } from './index';
 import { log } from './log';
 import { notificationStore } from './notifications';
 import { testMode } from './state';
+import type { UpdateState } from '../shared/ipc';
+import { notifyShell } from './window';
 
 const INITIAL_DELAY_MS = 30_000;
 const INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 let downloadedVersion: string | null = null;
+let availableVersion: string | null = null;
+
+export function updateState(): UpdateState {
+  return { version: app.getVersion(), available: availableVersion, downloaded: downloadedVersion };
+}
+
+export function updateAvailable(version: string): void {
+  availableVersion = version;
+  notifyShell();
+}
 
 export function hasDownloadedUpdate(): boolean {
   return downloadedVersion !== null;
@@ -42,6 +54,7 @@ export function installUpdate(): void {
 // Called from updater's update-downloaded event and the test hook.
 export function updateDownloaded(version: string): void {
   downloadedVersion = version;
+  availableVersion = version;
   log('shell', 'update-downloaded', { detail: { version } });
   notificationStore().add({
     kind: 'update',
@@ -106,9 +119,10 @@ export function setupUpdater(): void {
   autoUpdater.logger = null;
 
   autoUpdater.on('checking-for-update', () => log('shell', 'update-check'));
-  autoUpdater.on('update-available', (info) =>
-    log('shell', 'update-available', { detail: { version: info.version } }),
-  );
+  autoUpdater.on('update-available', (info) => {
+    log('shell', 'update-available', { detail: { version: info.version } });
+    updateAvailable(info.version);
+  });
   autoUpdater.on('update-not-available', (info) =>
     log('shell', 'update-not-available', { detail: { version: info.version } }),
   );

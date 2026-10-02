@@ -61,6 +61,8 @@ function hooks(app: ElectronApplication) {
       app.evaluate((_e, value: Record<string, unknown>) => (globalThis as any).__devinworkspaces.pushNotification(value), partial),
     simulateUpdate: (version: string) =>
       app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.simulateUpdateDownloaded(value), version),
+    simulateUpdateAvailable: (version: string) =>
+      app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.simulateUpdateAvailable(value), version),
     panelOpen: () => app.evaluate(() => (globalThis as any).__devinworkspaces.panelOpen()),
     childViews: () => app.evaluate(() => (globalThis as any).__devinworkspaces.childViews()),
     loadDevinUrl: (url: string) =>
@@ -670,6 +672,54 @@ test('notification panel: badge, banner, open/read/delete, update entry, restart
     } finally {
       await quit(app2, profile);
     }
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('settings shows the app version and an Update now button', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-update-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  const shell = async (expr: string) => evaluateInShell(app, expr);
+  const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string };
+  try {
+    expect((await state(app)).update).toEqual({ version: pkg.version, available: null, downloaded: null });
+
+    // Switch to the settings surface; the About block renders the version.
+    await app.evaluate(() => (globalThis as any).__devinworkspaces.setSurface('settings'));
+    await expect
+      .poll(async () => shell(`document.getElementById('appVersion')?.textContent`))
+      .toBe(pkg.version);
+    await expect
+      .poll(async () => shell(`document.getElementById('updateStatus')?.getAttribute('data-update-state')`))
+      .toBe('none');
+
+    // Update available: downloading state, no Update now button yet.
+    await h.simulateUpdateAvailable('9.9.9');
+    await expect.poll(async () => (await state(app)).update.available).toBe('9.9.9');
+    expect((await state(app)).update.downloaded).toBeNull();
+    await expect
+      .poll(async () => shell(`Boolean(document.querySelector('#updateStatus[data-update-state="downloading"]'))`))
+      .toBe(true);
+    expect(await shell(`Boolean(document.getElementById('updateNow'))`)).toBe(false);
+
+    // Downloaded: ready state with the Update now button.
+    await h.simulateUpdate('9.9.9');
+    await expect.poll(async () => (await state(app)).update.downloaded).toBe('9.9.9');
+    await expect
+      .poll(async () => shell(`Boolean(document.querySelector('#updateStatus[data-update-state="ready"]'))`))
+      .toBe(true);
+    await expect.poll(async () => shell(`Boolean(document.getElementById('updateNow'))`)).toBe(true);
+
+    // Click installs (test mode: logs update-install, removes the update entry).
+    await shell(`document.getElementById('updateNow').click()`);
+    await waitForEvent(logFile, 'update-install');
+    await expect
+      .poll(async () => ((await h.notifications()) as { kind: string }[]).filter((e) => e.kind === 'update').length)
+      .toBe(0);
   } finally {
     await app.close().catch(() => undefined);
     rmSync(profile, { recursive: true, force: true });
