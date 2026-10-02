@@ -293,7 +293,8 @@ export async function startFixtureServers(): Promise<FixtureServers> {
       const prMatch = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)$/.exec(url.pathname);
       if (prMatch) {
         const [, owner, repo, num] = prMatch;
-        const title = prTitles.get(Number(num)) ?? `Fixture PR #${num}`;
+        // Default keeps the path in the title: routing specs match tab titles on it.
+        const title = prTitles.get(Number(num)) ?? `GitHub fixture: ${owner}/${repo}/pull/${num}`;
         html(
           response,
           `<title>${title} by devin-ai-integration[bot] · Pull Request #${num} · ${owner}/${repo}</title><main>PR ${num}</main>`,
