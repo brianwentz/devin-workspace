@@ -3,6 +3,7 @@ import { computeBounds, DEFAULT_TERMINAL_HEIGHT, RAIL_WIDTH } from '../core/layo
 import { useShellState } from './store';
 import { Rail } from './components/Rail';
 import { NotificationPanel } from './components/NotificationPanel';
+import { AccountPicker } from './components/AccountPicker';
 import { TitleBar } from './components/TitleBar';
 import { Splitter } from './components/Splitter';
 import { TerminalDock } from './components/TerminalDock';
@@ -85,6 +86,7 @@ export function App() {
         <Splitter axis="y" rect={bounds.terminalSplitter} enabled={true} />
       )}
       <NotificationPanel />
+      <AccountPicker />
       {state.surface === 'settings' && (
         <SettingsPanel
           settings={state.settings}

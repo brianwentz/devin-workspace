@@ -21,6 +21,12 @@ export type PublicState = {
     updatedAt: number;
     lastUsedAt: number | null;
   }>;
+  autofill: {
+    picker: {
+      accounts: Array<{ id: string; username: string }>;
+      anchor: { x: number; y: number; width: number; height: number };
+    } | null;
+  };
   settings: Record<string, unknown> & {
     tabs: { keepAliveHours: number; maxLiveTabs: number };
     workspaces?: string[];

@@ -199,6 +199,15 @@ export async function startFixtureServers(): Promise<FixtureServers> {
       redirect(response, `${idpUrl}/devin-finish`);
       return;
     }
+    // Cross-origin iframe embedding the GitHub login — the frame's preload must
+    // bail and main must reject any autofill IPC from it.
+    if (url.pathname === '/embed-login') {
+      html(
+        response,
+        `<title>Fixture embed login</title><main><iframe id="frame" src="${githubUrl}/login"></iframe></main>`,
+      );
+      return;
+    }
     // P8 e2e: two named sessions with distinct GitHub links + a text input (so
     // "typed text survives a scope switch" assertions have something to type into).
     const named = /^\/sessions\/(A|B)$/.exec(url.pathname);
@@ -305,6 +314,32 @@ export async function startFixtureServers(): Promise<FixtureServers> {
              <input id="pass" type="password">
              <button id="submit" type="submit">Sign in</button>
            </form>`,
+        );
+        return;
+      }
+      // Two-step (identifier-first) login, à la Okta.
+      if (url.pathname === '/login-steps') {
+        html(
+          response,
+          `<title>Fixture login steps</title>
+           <form id="step1" onsubmit="document.getElementById('step1').hidden=true;document.getElementById('step2').hidden=false;return false;">
+             <input id="identifier" name="identifier" autocomplete="username">
+             <button id="next" type="submit">Next</button>
+           </form>
+           <form id="step2" hidden onsubmit="document.title='submitted:'+document.getElementById('identifier').value+':'+document.getElementById('pass').value;return false;">
+             <input id="pass" type="password">
+             <button id="submit2" type="submit">Sign in</button>
+           </form>`,
+        );
+        return;
+      }
+      // Search-only page: no login form, must never trigger an autofill query.
+      if (url.pathname === '/search') {
+        html(
+          response,
+          `<title>Fixture search</title>
+           <form><input type="search" name="q">
+           <input name="q2" placeholder="Search repos"></form>`,
         );
         return;
       }

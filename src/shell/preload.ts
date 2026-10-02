@@ -201,6 +201,10 @@ const api = {
     pressEnter: boolean;
   }) => ipcRenderer.invoke(IpcChannels.credentialsFill, options) as Promise<string>,
   openCredentialsMenu: () => ipcRenderer.send(IpcChannels.credentialsMenu),
+  autofillPick: (id: string) => {
+    if (isString(id)) ipcRenderer.send(IpcChannels.autofillPick, { id });
+  },
+  autofillPickerClose: () => ipcRenderer.send(IpcChannels.autofillPickerClose),
   onDragGuide: (callback: (guide: { axis: 'x' | 'y'; pos: number }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
       if (

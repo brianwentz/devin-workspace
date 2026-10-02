@@ -30,6 +30,12 @@ export const IpcChannels = {
   credentialsReveal: 'credentials:reveal',
   credentialsFill: 'credentials:fill',
   credentialsMenu: 'credentials:menu',
+  // Autofill: hosted views ask for accounts/fills; the shell drives the picker.
+  autofillQuery: 'autofill:query',
+  autofillPicker: 'autofill:picker',
+  autofillFill: 'autofill:fill',
+  autofillPick: 'autofill:pick',
+  autofillPickerClose: 'autofill:pickerClose',
   // P5 extras
   secretsHasPat: 'secrets:hasPat',
   secretsSetPat: 'secrets:setPat',
@@ -277,6 +283,26 @@ export const CredentialEntrySchema = z.object({
 });
 export type ShellCredentialEntry = z.infer<typeof CredentialEntrySchema>;
 
+export const AutofillQuerySchema = z.object({
+  hasPassword: z.boolean(),
+  hint: z.string().max(256).nullable(),
+});
+export const AutofillPickerSchema = z.object({
+  rect: z.object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    width: z.number().finite(),
+    height: z.number().finite(),
+  }),
+  field: z.enum(['username', 'password']),
+});
+export const AutofillPickSchema = z.object({ id: z.string().min(1) });
+export const AutofillFillSchema = z.object({
+  id: z.string().min(1),
+  username: z.string(),
+  password: z.string(),
+});
+
 export const ShellStateSchema = z.object({
   paneOpen: z.boolean(),
   paneFraction: z.number(),
@@ -297,6 +323,14 @@ export const ShellStateSchema = z.object({
     })
     .nullable(),
   credentials: z.array(CredentialEntrySchema),
+  autofill: z.object({
+    picker: z
+      .object({
+        accounts: z.array(z.object({ id: z.string(), username: z.string() })),
+        anchor: RectSchema,
+      })
+      .nullable(),
+  }),
   notifications: NotificationsStateSchema,
   // F5 terminal dock
   terminalOpen: z.boolean(),

@@ -59,6 +59,14 @@ export function publicState(): ShellState {
       };
     })(),
     credentials: state.credentials?.list() ?? [],
+    autofill: {
+      picker: state.autofillPicker
+        ? {
+            accounts: state.autofillPicker.accounts,
+            anchor: state.autofillPicker.anchor,
+          }
+        : null,
+    },
     notifications: {
       ...state.notifications,
       collect: state.settings?.current.notifications.collect ?? true,
@@ -164,9 +172,9 @@ export function applyLayout(): void {
     const activeTabView = paneVisible ? tabManager.activeView : null;
     if (activeTabView) ensureAttached(activeTabView);
     else if (tabManager.activeView) detachView(tabManager.activeView);
-    // The notifications panel is a shell-DOM modal over hosted views — the
-    // raise must survive relayout.
-    if (state.notificationsPanelOpen) raiseShell();
+    // The notifications panel and the autofill picker are shell-DOM modals
+    // over hosted views — the raise must survive relayout.
+    if (state.notificationsPanelOpen || state.autofillPicker) raiseShell();
   }
   notifyShell();
 }

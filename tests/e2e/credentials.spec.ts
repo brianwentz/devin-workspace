@@ -37,6 +37,13 @@ async function fillCredential(
   ) as Promise<string>;
 }
 
+const fieldValues = (app: ElectronApplication) =>
+  evaluateInView(
+    app,
+    `${fixtures.githubUrl}/login`,
+    `({ user: document.getElementById('user').value, pass: document.getElementById('pass').value })`,
+  ) as Promise<{ user: string; pass: string }>;
+
 // Deterministic variant: fill a specific tab via the test hook. Target
 // selection itself is asserted with getFillTargetUrl; OS focus on a background
 // CI desktop is not reliable enough to drive the IPC path for every fill.
@@ -98,6 +105,16 @@ test('credential vault saves, fills, denies non-saved origins, and keeps secrets
 
     const loginId = await openTab(app, `${fixtures.githubUrl}/login`);
     await waitForTabTitle(app, 'Fixture login');
+    // Autofill (Commit 2) pre-fills the single saved account; clear both fields
+    // so the manual insertText fill below stays deterministic.
+    await expect
+      .poll(async () => fieldValues(app))
+      .toEqual({ user: 'alice', pass: 's3cret' });
+    await evaluateInView(
+      app,
+      `${fixtures.githubUrl}/login`,
+      `document.getElementById('user').value=''; document.getElementById('pass').value='';`,
+    );
     await app.evaluate((_electron, id: string) => {
       (globalThis as typeof globalThis & { __devinworkspaces: { focus(id: string): void } })
         .__devinworkspaces.focus(id);

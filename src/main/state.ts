@@ -60,4 +60,11 @@ export const state = {
   },
   // P6: notification panel z-order raise flag (set via notifications:panel IPC).
   notificationsPanelOpen: false,
+  // Autofill account picker anchored to a hosted view's field. While set the
+  // shell is raised (same mechanism as the notifications panel).
+  autofillPicker: null as {
+    sender: Electron.WebContents;
+    accounts: { id: string; username: string }[];
+    anchor: { x: number; y: number; width: number; height: number };
+  } | null,
 };
