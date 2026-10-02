@@ -146,6 +146,7 @@ export function registerTestHooks(): void {
         notificationStore().add({
           kind: 'waiting',
           sessionId: null,
+          ownerUserId: null,
           sessionTitle: 'Devin Workspaces',
           title: 'Test',
           body: 'Test notification',

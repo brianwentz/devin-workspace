@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -406,7 +406,8 @@ test('shows nothing for a service-user token', async () => {
     // No sessions list request was ever made — only /v3/self.
     expect(fixtures.api.requests().every((r) => !r.path.includes('/sessions'))).toBe(true);
     expect(fixtures.api.requests().some((r) => r.path === '/v3/self')).toBe(true);
-    expect((await state(app)).notifications.unreadCount).toBe(0);
+    // The service-user state is surfaced as a single 'identity' notification.
+    expect((await state(app)).notifications.unreadCount).toBe(1);
     await expect
       .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('prQuickOpen'))`))
       .toBe(false);
@@ -417,6 +418,89 @@ test('shows nothing for a service-user token', async () => {
     await expect
       .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('patNoUser'))`))
       .toBe(true);
+    expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
+  } finally {
+    await quit(app, profile);
+  }
+});
+
+test('prunes persisted notifications from other users on identity resolution', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
+  const logFile = join(profile, 'events.jsonl');
+  const seed = (id: string, sessionId: string, ownerUserId?: string) => ({
+    id,
+    kind: 'waiting',
+    sessionId,
+    sessionTitle: sessionId,
+    title: `title-${id}`,
+    body: 'body',
+    createdAt: 1,
+    readAt: null,
+    ...(ownerUserId === undefined ? {} : { ownerUserId }),
+  });
+  writeFileSync(
+    join(profile, 'notifications.json'),
+    JSON.stringify([
+      seed('n-legacy', 'sess-legacy'),
+      seed('n-foreign', 'sess-other', 'user-other'),
+      seed('n-own', 'sess-own', 'user-fixture'),
+    ]),
+  );
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  try {
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
+    const list = (await h.notifications()) as { sessionId: string | null }[];
+    expect(list.map((entry) => entry.sessionId)).toEqual(['sess-own']);
+    expect((await state(app)).notifications.unreadCount).toBe(1);
+    const pruned = (await readEvents(logFile)).filter((e) => e.event === 'notifications-pruned');
+    expect(pruned).toHaveLength(1);
+    expect((pruned[0]!.detail as { removed: number; hasOwner: boolean }).removed).toBe(2);
+    expect((pruned[0]!.detail as { removed: number; hasOwner: boolean }).hasOwner).toBe(true);
+    expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
+  } finally {
+    await quit(app, profile);
+  }
+});
+
+test('service-user token prunes leftovers and surfaces an identity notification', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
+  const logFile = join(profile, 'events.jsonl');
+  writeFileSync(
+    join(profile, 'notifications.json'),
+    JSON.stringify([
+      {
+        id: 'n-legacy',
+        kind: 'waiting',
+        sessionId: 'sess-legacy',
+        sessionTitle: 'sess-legacy',
+        title: 'title-n-legacy',
+        body: 'body',
+        createdAt: 1,
+        readAt: null,
+      },
+    ]),
+  );
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  try {
+    fixtures.api.setSelf('service_user');
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.noUserIdentity).toBe(true);
+    await expect.poll(async () => ((await h.notifications()) as { kind: string }[]).length).toBe(1);
+    const list = (await h.notifications()) as {
+      kind: string;
+      sessionId: string | null;
+      ownerUserId?: string | null;
+    }[];
+    expect(list[0]!.kind).toBe('identity');
+    expect(list[0]!.sessionId).toBeNull();
+    expect(list[0]!.ownerUserId).toBeNull();
+    // Identity entries are runtime-only — never persisted to notifications.json.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const stored = JSON.parse(readFileSync(join(profile, 'notifications.json'), 'utf8')) as unknown[];
+    expect(stored).toHaveLength(0);
     expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
   } finally {
     await quit(app, profile);
@@ -653,8 +737,8 @@ test('notification panel: badge, banner, open/read/delete, update entry, restart
 
     // Push two entries that must survive restart, plus one update entry that
     // must not (runtime-only kind). Wait past the 300 ms debounced save.
-    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', sessionTitle: 's1', title: 'Persist me 1', body: 'b' });
-    await h.pushNotification({ kind: 'blocked', sessionId: 'sess-1', sessionTitle: 's1', title: 'Persist me 2', body: 'b' });
+    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', ownerUserId: 'user-fixture', sessionTitle: 's1', title: 'Persist me 1', body: 'b' });
+    await h.pushNotification({ kind: 'blocked', sessionId: 'sess-1', ownerUserId: 'user-fixture', sessionTitle: 's1', title: 'Persist me 2', body: 'b' });
     await h.simulateUpdate('9.9.8');
     await new Promise((resolve) => setTimeout(resolve, 600));
     await app.evaluate(({ app: electronApp }) => electronApp.quit());

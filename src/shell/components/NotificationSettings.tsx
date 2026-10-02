@@ -94,13 +94,15 @@ export function NotificationSettings() {
   if (!notifications) return null;
   const status = !hasToken
     ? 'No token stored.'
-    : notifications.authError
-      ? `Token rejected by the API (${notifications.lastError ?? 'unauthorized'}).`
-      : notifications.lastPollAt
-        ? `Token stored (encrypted). Last poll ${new Date(notifications.lastPollAt).toLocaleTimeString()}${
-            notifications.lastError ? ` — ${notifications.lastError}` : ''
-          }.`
-        : 'Token stored (encrypted). Waiting for first poll…';
+    : notifications.noUserIdentity
+      ? 'Token has no user identity (service user) — sessions and notifications are disabled'
+      : notifications.authError
+        ? `Token rejected by the API (${notifications.lastError ?? 'unauthorized'}).`
+        : notifications.lastPollAt
+          ? `Token stored (encrypted). Last poll ${new Date(notifications.lastPollAt).toLocaleTimeString()}${
+              notifications.lastError ? ` — ${notifications.lastError}` : ''
+            }.`
+          : 'Token stored (encrypted). Waiting for first poll…';
 
   return (
     <section id="notificationSettings" className="flex flex-col gap-4 mt-8 pt-6 border-t border-[#243040]">

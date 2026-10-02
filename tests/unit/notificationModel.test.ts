@@ -7,6 +7,7 @@ import {
   markAllRead,
   markRead,
   MAX_NOTIFICATIONS,
+  pruneForeign,
   removeNotification,
   unreadCount,
   type AppNotification,
@@ -22,10 +23,12 @@ const ENABLED: Record<NotificationKind, boolean> = {
   'pr-opened': true,
   'pr-completed': true,
   update: true,
+  identity: true,
 };
 const ctx = (over: Partial<DeriveContext> = {}): DeriveContext => ({
   enabled: ENABLED,
   now: 1000,
+  ownerUserId: 'user-1',
   ...over,
 });
 
@@ -161,5 +164,40 @@ describe('deriveNotifications', () => {
         ctx(),
       ),
     ).toEqual([]);
+  });
+});
+
+describe('pruneForeign', () => {
+  it('drops legacy entries (no ownerUserId) with a sessionId', () => {
+    const legacy = note('legacy', 'waiting', 'sess-legacy');
+    expect('ownerUserId' in legacy).toBe(false);
+    expect(pruneForeign([legacy], 'user-1')).toEqual([]);
+  });
+  it('drops entries owned by another user, keeps same-owner entries', () => {
+    const foreign = { ...note('f', 'waiting', 'sess-other'), ownerUserId: 'user-other' };
+    const own = { ...note('o', 'waiting', 'sess-own'), ownerUserId: 'user-1' };
+    expect(pruneForeign([foreign, own], 'user-1')).toEqual([own]);
+  });
+  it('keeps sessionId:null entries for a user owner and a null owner', () => {
+    const update = { ...note('u', 'update', 'x'), sessionId: null, ownerUserId: null };
+    expect(pruneForeign([update], 'user-1')).toEqual([update]);
+    expect(pruneForeign([update], null)).toEqual([update]);
+  });
+  it('with a null owner, drops every session-scoped entry', () => {
+    const own = { ...note('o', 'waiting', 'sess-own'), ownerUserId: 'user-1' };
+    const legacy = note('l', 'waiting', 'sess-legacy');
+    const update = { ...note('u', 'update', 'x'), sessionId: null, ownerUserId: null };
+    expect(pruneForeign([own, legacy, update], null)).toEqual([update]);
+  });
+});
+
+describe('deriveNotifications ownerUserId', () => {
+  it('stamps every entry with ctx.ownerUserId', () => {
+    const prev = [session('a', 'running', 'working')];
+    const next = [session('a', 'running', 'waiting_for_user')];
+    const out = deriveNotifications(prev, next, ctx({ ownerUserId: 'user-9' }));
+    expect(out).toHaveLength(1);
+    expect(out[0]!.ownerUserId).toBe('user-9');
+    expect(deriveNotifications(prev, next, ctx({ ownerUserId: null }))[0]!.ownerUserId).toBeNull();
   });
 });

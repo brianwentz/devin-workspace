@@ -11,12 +11,16 @@ export type NotificationKind =
   | 'finished'
   | 'pr-opened'
   | 'pr-completed'
-  | 'update';
+  | 'update'
+  | 'identity';
 
 export interface AppNotification {
   id: string;
   kind: NotificationKind;
   sessionId: string | null;
+  // The token user the entry was derived for. `undefined` = legacy entry
+  // (pre-owner build); `null` = not session-scoped ('update', 'identity').
+  ownerUserId?: string | null | undefined;
   sessionTitle: string;
   prUrl?: string | undefined;
   prState?: string | undefined;
@@ -75,9 +79,17 @@ export function unreadCount(list: readonly AppNotification[]): number {
   return list.filter((item) => item.readAt === null).length;
 }
 
+// Drop session-scoped entries that were derived for a different token user
+// (or by a build that recorded no owner). `ownerUserId === null` means the
+// token has no user identity, so every session-scoped entry goes.
+export function pruneForeign(list: readonly AppNotification[], ownerUserId: string | null): AppNotification[] {
+  return list.filter((item) => item.sessionId === null || (ownerUserId !== null && item.ownerUserId === ownerUserId));
+}
+
 export interface DeriveContext {
   enabled: Record<NotificationKind, boolean>;
   now: number;
+  ownerUserId: string | null;
 }
 
 const STATUS_KIND: Record<string, NotificationKind> = {
@@ -96,6 +108,7 @@ const STATUS_BODY: Record<NotificationKind, string> = {
   'pr-opened': '',
   'pr-completed': '',
   update: '',
+  identity: '',
 };
 
 const sessionTitleOf = (s: DevinSession) => s.title?.trim() || s.session_id;
@@ -129,6 +142,7 @@ export function deriveNotifications(
       title: sessionTitleOf(after),
       body: STATUS_BODY[kind],
       createdAt: ctx.now,
+      ownerUserId: ctx.ownerUserId,
     });
   }
 
@@ -144,6 +158,7 @@ export function deriveNotifications(
         title: `Opened ${prTitle(pr.url)}`,
         body: sessionTitleOf(session),
         createdAt: ctx.now,
+        ownerUserId: ctx.ownerUserId,
       });
     }
   }
@@ -166,6 +181,7 @@ export function deriveNotifications(
           title: `PR ${prTitle(pr.pr_url)} ${pr.pr_state}`,
           body: sessionTitleOf(after),
           createdAt: ctx.now,
+          ownerUserId: ctx.ownerUserId,
         });
       }
     }
