@@ -40,6 +40,7 @@ const session = (
   status,
   status_detail: detail,
   updated_at: 0,
+  user_id: null,
   pull_requests: prs,
 });
 

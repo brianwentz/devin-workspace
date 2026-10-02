@@ -7,7 +7,7 @@ import { fromShell } from './ipcGuard';
 import { terminalHost } from './local/terminalHost';
 import type { Surface } from '../shared/ipc';
 import { notificationStore } from './notifications';
-import { currentSessionPrs, notifier, openNotification } from './notifier';
+import { notifier, openNotification, openPrs, openSessionPr } from './notifier';
 import { updateDownloaded } from './updater';
 import { handleLink } from './routing';
 import { copyTabAddress, reloadCurrentScope } from './ipc';
@@ -142,7 +142,8 @@ export function registerTestHooks(): void {
       },
       hasPat: () => state.secrets?.hasPat() ?? false,
       pollNow: () => notifier.pollNow(),
-      listPrs: () => currentSessionPrs(),
+      listPrs: () => openPrs(),
+      openSessionPr: (sessionId: string, url: string) => openSessionPr(sessionId, url),
       // P6 notification center
       notifications: () => notificationStore().entries(),
       pushNotification: (partial: Record<string, unknown>) =>

@@ -17,6 +17,7 @@ export interface FixtureServers {
   // P5: in-memory v3 API fixture. http://127.0.0.1:<p>
   apiUrl: string;
   api: FixtureApi;
+  github: { setPrTitle(n: number, title: string): void };
   close: () => Promise<void>;
 }
 
@@ -29,6 +30,7 @@ export interface FixtureSession {
   status: string;
   status_detail?: string | null;
   updated_at?: number;
+  user_id?: string | null;
   pull_requests?: Array<{ pr_url: string; pr_state: string | null }>;
 }
 
@@ -46,6 +48,7 @@ export type FixtureApiMode =
 export interface FixtureApi {
   orgId: string;
   setSessions(sessions: FixtureSession[]): void;
+  setSelf(kind: 'pat_user' | 'service_user'): void;
   getSessions(): FixtureSession[];
   setMode(mode: FixtureApiMode): void;
   requests(): FixtureApiRequest[];
@@ -56,6 +59,7 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
   const orgId = 'org-fixture';
   let sessions: FixtureSession[] = [];
   let mode: FixtureApiMode = { kind: 'ok' };
+  let selfKind: 'pat_user' | 'service_user' = 'pat_user';
   const requests: FixtureApiRequest[] = [];
   const json = (response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
     response.writeHead(status, {
@@ -82,6 +86,14 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
       return;
     }
     if (url.pathname === '/v3/self') {
+      if (selfKind === 'service_user') {
+        json(response, 200, {
+          principal_type: 'service_user',
+          service_user_id: 'svc-fixture',
+          org_id: orgId,
+        });
+        return;
+      }
       json(response, 200, {
         principal_type: 'pat_user',
         user_id: 'user-fixture',
@@ -95,7 +107,11 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
     if (url.pathname === `/v3/organizations/${orgId}/sessions`) {
       const first = Math.min(200, Math.max(1, Number(url.searchParams.get('first') ?? '100') || 100));
       const after = Number(url.searchParams.get('after') ?? '0') || 0;
-      const sorted = [...sessions].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
+      const userIds = url.searchParams.getAll('user_ids');
+      const effective = (session: FixtureSession) => session.user_id ?? 'user-fixture';
+      const sorted = [...sessions]
+        .filter((session) => userIds.length === 0 || userIds.includes(effective(session) ?? ''))
+        .sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
       const items = sorted.slice(after, after + first).map((session) => ({
         session_id: session.session_id,
         url: `https://app.devin.ai/sessions/${session.session_id}`,
@@ -107,6 +123,7 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
         created_at: 1,
         updated_at: session.updated_at ?? 1,
         acus_consumed: 0,
+        user_id: effective(session),
         pull_requests: session.pull_requests ?? [],
       }));
       const hasNext = after + first < sorted.length;
@@ -124,6 +141,9 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
     orgId,
     setSessions: (next) => {
       sessions = next.map((session) => ({ ...session }));
+    },
+    setSelf: (kind) => {
+      selfKind = kind;
     },
     getSessions: () => sessions.map((session) => ({ ...session })),
     setMode: (next) => {
@@ -182,6 +202,7 @@ export async function startFixtureServers(): Promise<FixtureServers> {
   let githubUrl = '';
   let githubAltUrl = '';
   let idpUrl = '';
+  const prTitles = new Map<number, string>();
 
   const devin = createServer((request, response) => {
     const url = new URL(request.url ?? '/', devinUrl);
@@ -267,6 +288,19 @@ export async function startFixtureServers(): Promise<FixtureServers> {
       const self = selfRef();
       const other = self === githubUrl ? githubAltUrl : githubUrl;
       const url = new URL(request.url ?? '/', self);
+      // PR pages render a GitHub-shaped <title> so the app's PR-title fetch
+      // (parsePrTitle) exercises the real suffix-stripping path.
+      const prMatch = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)$/.exec(url.pathname);
+      if (prMatch) {
+        const [, owner, repo, num] = prMatch;
+        // Default keeps the path in the title: routing specs match tab titles on it.
+        const title = prTitles.get(Number(num)) ?? `GitHub fixture: ${owner}/${repo}/pull/${num}`;
+        html(
+          response,
+          `<title>${title} by devin-ai-integration[bot] · Pull Request #${num} · ${owner}/${repo}</title><main>PR ${num}</main>`,
+        );
+        return;
+      }
       if (url.pathname === '/redirect') {
         redirect(response, `${self}/page/redirected`);
         return;
@@ -378,6 +412,11 @@ export async function startFixtureServers(): Promise<FixtureServers> {
     githubOrigins: `${new URL(githubUrl).origin},${new URL(githubAltUrl).origin}`,
     apiUrl,
     api: fixtureApi.api,
+    github: {
+      setPrTitle: (n: number, title: string) => {
+        prTitles.set(n, title);
+      },
+    },
     close: async () => {
       await Promise.all(
         [devin, github, githubAlt, idp, api].map(

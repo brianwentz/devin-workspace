@@ -49,7 +49,7 @@ describe('DevinApiClient', () => {
     }));
     const client = new DevinApiClient({ apiBase: 'https://api.devin.ai/', token: 'tok-123456789', fetch });
     const self = await client.getSelf();
-    expect(self).toEqual({ principalType: 'pat_user', orgId: 'org-abc' });
+    expect(self).toEqual({ principalType: 'pat_user', orgId: 'org-abc', userId: 'u' });
     expect(calls[0]?.url).toBe('https://api.devin.ai/v3/self');
     expect(calls[0]?.headers.authorization).toBe('Bearer tok-123456789');
   });
@@ -75,6 +75,25 @@ describe('DevinApiClient', () => {
     expect(page2.nextCursor).toBeNull();
     expect(page2.hasNextPage).toBe(false);
     expect(calls[1]?.url).toContain('after=cur-1');
+  });
+
+  it('serializes userIds as repeated user_ids params and maps service-user self without a userId', async () => {
+    const { fetch, calls } = stubFetch((url) => {
+      if (url.endsWith('/v3/self')) {
+        return {
+          status: 200,
+          body: { principal_type: 'service_user', service_user_id: 'svc-1', org_id: 'org-1' },
+        };
+      }
+      return { status: 200, body: { items: [] } };
+    });
+    const client = new DevinApiClient({ apiBase: 'https://api.devin.ai', token: 't', fetch });
+    const self = await client.getSelf();
+    expect(self.userId).toBeNull();
+    await client.listSessions({ orgId: 'org-1', userIds: ['u1', 'u2'] });
+    const params = new URL(calls[1]!.url).searchParams;
+    expect(params.getAll('user_ids')).toEqual(['u1', 'u2']);
+    expect(calls[1]!.url).toContain('user_ids=u1');
   });
 
   it('clamps first to the documented 1..200 range', async () => {
@@ -142,10 +161,15 @@ describe('normalizeSession', () => {
       status_detail: null,
       updated_at: 2,
       url: 'https://app.devin.ai/sessions/s1',
+      user_id: null,
       pull_requests: [{ pr_url: 'https://github.com/o/r/pull/1', pr_state: 'open' }],
     });
     expect(normalizeSession({ status: 'running' })).toBeNull();
     expect(normalizeSession('nope')).toBeNull();
+  });
+
+  it('keeps user_id when present', () => {
+    expect(normalizeSession(session('s2', { user_id: 'user-9' }))?.user_id).toBe('user-9');
   });
 });
 

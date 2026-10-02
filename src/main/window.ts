@@ -8,7 +8,7 @@ import {
   type LayoutState,
   type Rect,
 } from '../core/layout';
-import { prsForSession } from '../core/notifyModel';
+import { openPullRequests } from '../core/notifyModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 import { currentFillTarget } from './credentials';
 import { terminalHost } from './local/terminalHost';
@@ -58,7 +58,7 @@ export function publicState(): ShellState {
       collect: state.settings?.current.notifications.collect ?? true,
       banner: state.settings?.current.notifications.banner ?? true,
       hasToken: state.secrets?.hasPat() ?? false,
-      currentSessionPrCount: prsForSession(state.apiSessions, state.currentSessionId).length,
+      openPrCount: openPullRequests(state.apiSessions).length,
       unreadCount: notificationsUnread(),
       panelOpen: state.notificationsPanelOpen,
     },

@@ -25,7 +25,7 @@ import {
 } from '../shared/ipc';
 import { log } from './log';
 import { notificationStore } from './notifications';
-import { currentSessionPrs, notifier, openNotification, popupPrMenu } from './notifier';
+import { notifier, openNotification, openPrs, popupPrMenu } from './notifier';
 import { handleLink } from './routing';
 import { historyAction, navigationTarget } from './shortcuts';
 import { NotificationIdArg, NotificationPanelArg } from '../shared/ipc';
@@ -257,7 +257,7 @@ function setupExtrasIpc(): void {
     notifier.restart('pat-cleared');
     return { ok: true };
   });
-  guardedHandle(IpcChannels.prsList, () => currentSessionPrs());
+  guardedHandle(IpcChannels.prsList, () => openPrs());
   guardedOn(IpcChannels.prsPopup, () => {
     popupPrMenu();
   });

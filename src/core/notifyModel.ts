@@ -65,8 +65,10 @@ export function backoffMs(failures: number, baseMs: number): number {
 
 export interface SessionPrLink {
   sessionId: string;
-  title: string;
+  sessionTitle: string;
+  ref: string;
   url: string;
+  state: string | null;
 }
 
 // "owner/repo#123" for GitHub PR URLs, otherwise the URL host+path.
@@ -81,15 +83,34 @@ export function prTitle(url: string): string {
   }
 }
 
-export function prsForSession(sessions: DevinSession[], sessionId: string | null): SessionPrLink[] {
-  if (!sessionId) return [];
-  const session = sessions.find((item) => item.session_id === sessionId);
-  if (!session) return [];
-  return session.pull_requests.map((pr) => ({
-    sessionId,
-    title: prTitle(pr.pr_url) + (pr.pr_state ? ` (${pr.pr_state})` : ''),
-    url: pr.pr_url,
-  }));
+export function truncateTitle(title: string, max = 64): string {
+  return title.length <= max ? title : `${title.slice(0, max - 1)}…`;
+}
+
+export function prMenuLabel(ref: string, title: string | null): string {
+  return title ? `${ref}  ${truncateTitle(title)}` : ref;
+}
+
+// Open PRs across all sessions, sessions sorted by updated_at desc (archived
+// excluded). A PR counts as open when pr_state is 'open' or null.
+export function openPullRequests(sessions: readonly DevinSession[]): SessionPrLink[] {
+  const sorted = [...sessions]
+    .filter((session) => session.status !== 'archived')
+    .sort((a, b) => b.updated_at - a.updated_at);
+  const out: SessionPrLink[] = [];
+  for (const session of sorted) {
+    for (const pr of session.pull_requests) {
+      if (pr.pr_state !== 'open' && pr.pr_state !== null) continue;
+      out.push({
+        sessionId: session.session_id,
+        sessionTitle: session.title?.trim() || session.session_id,
+        ref: prTitle(pr.pr_url),
+        url: pr.pr_url,
+        state: pr.pr_state,
+      });
+    }
+  }
+  return out;
 }
 
 export interface NewPullRequest {
