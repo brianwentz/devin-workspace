@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, 'build', 'icon.ico');
+const outputPng = resolve(root, 'build', 'icon.png');
 const sizes = [256, 128, 64, 48, 32, 16];
 
 const BG = [0x11, 0x18, 0x27]; // #111827 (matches the shell background)
@@ -171,3 +172,9 @@ for (const image of images) {
 mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, Buffer.concat([header, ...entries, ...images.map((image) => image.data)]));
 console.log(`wrote ${output} (${offset} bytes, sizes ${sizes.join('/')})`);
+
+// build/icon.png — 1024x1024 source for the macOS icon (electron-builder
+// derives the .icns); same render()/PNG encoder as the 256 px ICO entry.
+const png = encodePng(1024, render(1024));
+writeFileSync(outputPng, png);
+console.log(`wrote ${outputPng} (${png.length} bytes, 1024x1024)`);

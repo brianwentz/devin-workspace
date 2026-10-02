@@ -61,3 +61,41 @@ jobs:
           name: test-results-${{ github.sha }}
           if-no-files-found: ignore
           path: test-results/
+
+  # macOS: build + package only — e2e and smoke:install stay Windows-only.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+
+      - run: npm run dist:mac
+
+      - name: Check artifacts
+        run: |
+          ls dist/latest-mac.yml
+          ls dist/DevinWorkspaces-*-arm64.dmg
+          ls dist/DevinWorkspaces-*-arm64.zip
+          ls dist/DevinWorkspaces-*-arm64.zip.blockmap
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: devin-workspaces-macos-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            dist/latest-mac.yml
+            dist/*-arm64.dmg
+            dist/*-arm64.zip
+            dist/*-arm64.zip.blockmap

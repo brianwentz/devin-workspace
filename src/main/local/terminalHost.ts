@@ -213,6 +213,17 @@ export class TerminalHost {
         return { error: `profile not launchable: ${profile.name}` } as ResolvedCommand & { error: string };
       }
     }
+    if (process.platform !== 'win32') {
+      const file =
+        (process.env.SHELL && existsSync(process.env.SHELL) ? process.env.SHELL : null) ??
+        (existsSync('/bin/zsh') ? '/bin/zsh' : null) ??
+        (existsSync('/bin/bash') ? '/bin/bash' : null);
+      if (!file) return null;
+      log('local', 'terminal-shell-resolved', {
+        detail: { source: 'fallback', profile: null, file: basename(file) },
+      });
+      return { file, args: ['-l'], label: null, appendCwd: false };
+    }
     const found = resolveOnPath('pwsh.exe') ?? resolveOnPath('powershell.exe');
     const file = found ?? (process.env.COMSPEC && existsSync(process.env.COMSPEC) ? process.env.COMSPEC : null);
     if (!file) return null;
