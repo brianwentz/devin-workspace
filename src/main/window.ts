@@ -123,6 +123,10 @@ export function ensureAttached(view: View | null): void {
 // Raise the shell DOM over every hosted view (transparent bg so they still
 // paint beneath) — used by the splitter drag and the notifications panel.
 export function raiseShell(): void {
+  // Overlay restacking during teardown re-adds views whose webContents are
+  // being destroyed — a synchronous native call that isn't bounded by any
+  // shutdown await.
+  if (state.shuttingDown) return;
   const { windowRef, shellView } = state;
   if (!windowRef || !shellView) return;
   shellView.setBackgroundColor('#00000000');
@@ -139,6 +143,8 @@ export function overlayOpen(): boolean {
 
 // Restore the normal stacking order (shell bottom, hosted views above).
 export function lowerShell(): void {
+  // See raiseShell — never restack during shutdown.
+  if (state.shuttingDown) return;
   const { windowRef, shellView, devinView, tabManager } = state;
   if (!windowRef || !shellView) return;
   shellView.setBackgroundColor('#111827');

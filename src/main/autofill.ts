@@ -42,6 +42,7 @@ function armSenderClose(sender: Electron.WebContents): void {
 export function closeAutofillPicker(): void {
   if (!state.autofillPicker) return;
   state.autofillPicker = null;
+  if (state.shuttingDown) return;
   if (!overlayOpen()) lowerShell();
   applyLayout();
 }
@@ -64,6 +65,7 @@ export function closeAutofillPrompt(): void {
   if (!prompt) return;
   clearTimeout(prompt.dismissTimer);
   state.autofillPrompt = null;
+  if (state.shuttingDown) return;
   if (!overlayOpen()) lowerShell();
   applyLayout();
 }
@@ -72,6 +74,15 @@ export function closeAutofillPrompt(): void {
 export function closeAutofillOverlays(): void {
   closeAutofillPicker();
   closeAutofillPrompt();
+}
+
+// Called once shutdown starts: clears every overlay/pending timer and
+// listener so nothing restacks views while webContents are being destroyed.
+export function disposeAutofill(): void {
+  if (state.autofillPrompt) clearTimeout(state.autofillPrompt.dismissTimer);
+  state.autofillPrompt = null;
+  state.autofillPicker = null;
+  dropPending();
 }
 
 // Tab activate/close/scope switch: dismiss only overlays anchored to a tab

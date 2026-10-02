@@ -340,3 +340,35 @@ test('the prompt auto-dismisses', async () => {
     await close(app, profile);
   }
 });
+
+test('quitting while the save prompt is shown exits cleanly', async () => {
+  const { app, profile } = await launch();
+  let exited = false;
+  try {
+    await openTab(app, loginUrl());
+    await waitForTabTitle(app, 'Fixture login');
+    await type(app, loginUrl(), 'user', 'ivy');
+    await type(app, loginUrl(), 'pass', 'pw-i');
+    await clickInView(app, loginUrl(), 'submit');
+    await expect.poll(async () => (await state(app)).autofill.prompt).not.toBe(null);
+    // Quit with the prompt (raised shell) still shown: teardown must not
+    // restack views over dying webContents — the process must exit.
+    await Promise.race([
+      app.evaluate(({ app: electronApp }) => electronApp.quit()),
+      new Promise((resolve) => setTimeout(resolve, 10_000)),
+    ]);
+    exited = await Promise.race([
+      new Promise<boolean>((resolve) => {
+        const proc = app.process();
+        if (!proc) return resolve(false);
+        if (proc.exitCode !== null) return resolve(true);
+        proc.once('exit', () => resolve(true));
+      }),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 15_000)),
+    ]);
+    expect(exited).toBe(true);
+  } finally {
+    if (!exited) await closeApp(app);
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  }
+});

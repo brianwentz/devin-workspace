@@ -4,7 +4,7 @@ import { app, BaseWindow, dialog, Menu, screen, session, webContents, WebContent
 import { clampFraction01 } from '../core/layout';
 import { auditCookies, startCookieAudit } from './cookieAudit';
 import { CredentialStore } from './credentials';
-import { closeAutofillOverlaysForInactiveTabs, setupAutofillIpc } from './autofill';
+import { closeAutofillOverlaysForInactiveTabs, disposeAutofill, setupAutofillIpc } from './autofill';
 import { setupDownloads } from './downloads';
 import { setupIpc } from './ipc';
 import { setupLocal, localHost } from './local/ipc';
@@ -70,6 +70,7 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
   if (state.shutdownPromise) return state.shutdownPromise;
   state.shuttingDown = true;
   state.shutdownPromise = (async () => {
+    disposeAutofill();
     // F8 stage 1 — probe: close live GitHub tabs honouring beforeunload; a veto
     // is recorded (no per-tab prompt) and resolved by one consolidated dialog.
     const probe = (await state.tabManager?.probe().catch(() => undefined)) ?? {
