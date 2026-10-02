@@ -1,22 +1,45 @@
 name: release
 
-# Tag `vX.Y.Z` (matching package.json "version") -> build the NSIS installer and
-# publish it, latest.yml and the blockmap to a GitHub Release draft. The
-# in-app updater (electron-updater, build.publish in package.json) picks up
-# the release once it is published.
+# Publish a GitHub Release with tag `vX.Y.Z` (targeting main) in the GitHub UI.
+# This workflow then sets package.json to X.Y.Z, builds the NSIS installer,
+# uploads the installer, blockmap and latest.yml to that release (the feed read
+# by src/main/updater.ts), and commits the version bump to main. Mark the
+# release as a pre-release to ship a build that existing clients will NOT
+# auto-update to (electron-updater ignores prereleases by default).
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate tag
+        id: tag
+        shell: pwsh
+        run: |
+          if ($env:TAG -notmatch '^v(\d+)\.(\d+)\.(\d+)$') { throw "tag '$env:TAG' must match vX.Y.Z" }
+          $ver = $env:TAG.Substring(1)
+          git merge-base --is-ancestor $env:TAG main
+          if ($LASTEXITCODE -ne 0) { throw "tag $env:TAG is not an ancestor of main" }
+          $cur = (Get-Content package.json | ConvertFrom-Json).version
+          if ([version]$ver -le [version]$cur) { throw "tag version $ver must be greater than package.json version $cur" }
+          "version=$ver" >> $env:GITHUB_OUTPUT
 
       - uses: actions/setup-node@v4
         with:
@@ -25,25 +48,57 @@ jobs:
 
       - run: npm ci
 
-      - name: Check tag matches package.json version
-        shell: pwsh
-        run: |
-          $pkg = (Get-Content package.json | ConvertFrom-Json).version
-          $tag = '${{ github.ref_name }}'.TrimStart('v')
-          if ($pkg -ne $tag) { throw "package.json version $pkg != tag $tag" }
+      - name: Set package version from tag
+        run: npm version ${{ steps.tag.outputs.version }} --no-git-tag-version
 
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run build
 
-      - name: Build and publish installer
+      # NSIS installer (unsigned; fuses flipped in afterPack). build.publish in
+      # package.json still bakes resources/app-update.yml; upload is done below
+      # with gh so an already-published release is never skipped.
+      - run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Check artifacts
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.tag.outputs.version }}'
+          foreach ($f in "dist/DevinWorkspaces-Setup-$ver.exe", "dist/DevinWorkspaces-Setup-$ver.exe.blockmap", "dist/latest.yml") {
+            if (-not (Test-Path $f)) { throw "missing $f" }
+          }
+          $yml = Get-Content dist/latest.yml -Raw
+          if ($yml -notmatch "(?m)^version:\s*$([regex]::Escape($ver))\s*$") { throw "dist/latest.yml does not declare version $ver`n$yml" }
+
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis --x64 --publish always
+        shell: pwsh
+        run: gh release upload $env:TAG dist/DevinWorkspaces-Setup-*.exe dist/DevinWorkspaces-Setup-*.exe.blockmap dist/latest.yml --clobber
+
+      - name: Verify release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $names = gh release view $env:TAG --json assets --jq '.assets[].name'
+          if ($names -notcontains 'latest.yml') { throw "latest.yml not attached to $env:TAG; assets: $names" }
+
+      # Only after the release has its assets: record the bump on main.
+      - name: Commit version bump to main
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          git commit -m "chore: release $env:TAG [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: devin-workspaces-${{ github.ref_name }}
+          name: devin-workspaces-${{ github.event.release.tag_name }}
           if-no-files-found: error
           path: |
             dist/*.exe
