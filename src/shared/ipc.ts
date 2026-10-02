@@ -52,6 +52,8 @@ export const IpcChannels = {
   notificationsOpen: 'notifications:open',
   notificationsPanel: 'notifications:panel',
   notificationBanner: 'notifications:banner',
+  // App version / auto-update status
+  updateInstall: 'update:install',
   localState: 'local:state',
   localUpdate: 'local:update',
   localWorkspaceAdd: 'local:workspace:add',
@@ -264,6 +266,13 @@ export const NotificationPanelArg = z.object({ open: z.boolean() });
 
 export type NotificationsState = z.infer<typeof NotificationsStateSchema>;
 
+export const UpdateStateSchema = z.object({
+  version: z.string(),
+  available: z.string().nullable(),
+  downloaded: z.string().nullable(),
+});
+export type UpdateState = z.infer<typeof UpdateStateSchema>;
+
 export const TerminalSummarySchema = z.object({
   id: z.string(),
   kind: z.enum(['devin', 'shell']),
@@ -343,6 +352,7 @@ export const ShellStateSchema = z.object({
       .nullable(),
   }),
   notifications: NotificationsStateSchema,
+  update: UpdateStateSchema,
   // F5 terminal dock
   terminalOpen: z.boolean(),
   terminalHeight: z.number(),

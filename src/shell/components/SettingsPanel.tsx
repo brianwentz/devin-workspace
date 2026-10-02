@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type FormEvent } from 'react';
 import type { CredentialEntry } from '../../core/credentials';
 import { isAllowedAppUrl } from '../../core/sessions';
 import type { Settings } from '../../shared/ipc';
+import { useShellState } from '../store';
 import { NotificationSettings } from './NotificationSettings';
 import { PasswordsSection } from './PasswordsSection';
 
@@ -32,6 +33,8 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
   const [maxLiveTabs, setMaxLiveTabs] = useState(String(settings.tabs.maxLiveTabs));
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const shell = useShellState();
+  const update = shell?.update ?? null;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -72,6 +75,23 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
   return (
     <main id="settingsPanel" className="shell-chrome p-9 bg-[#111925] overflow-auto" style={style}>
       <h1 className="text-2xl mb-6">Settings</h1>
+      {update && (
+        <section id="aboutSection" className="flex flex-col gap-2 mb-6 text-sm">
+          <p className="text-[#aeb9c8]">
+            Version <span id="appVersion" className="font-mono text-[#e8edf5]">{update.version}</span>
+          </p>
+          {update.downloaded ? (
+            <div id="updateStatus" data-update-state="ready" className="flex items-center gap-3 px-3 py-2 rounded-md border border-[#39475a] bg-[#1a2330]">
+              <span>Update v{update.downloaded} is ready to install.</span>
+              <button id="updateNow" type="button" className={saveClass} onClick={() => window.devinworkspaces.updateInstall()}>Update now</button>
+            </div>
+          ) : update.available ? (
+            <p id="updateStatus" data-update-state="downloading" className="text-xs text-[#7f8ca0]">Update v{update.available} available — downloading…</p>
+          ) : (
+            <p id="updateStatus" data-update-state="none" className="text-xs text-[#7f8ca0]">You&apos;re up to date.</p>
+          )}
+        </section>
+      )}
       <form onSubmit={submit} className="flex flex-col gap-5">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[#aeb9c8]">Tenant URL</span>
