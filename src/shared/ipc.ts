@@ -60,6 +60,7 @@ export const IpcChannels = {
   terminalToggle: 'terminal:toggle',
   terminalActivate: 'terminal:activate',
   terminalCwdOptions: 'terminal:cwdOptions',
+  terminalProfiles: 'terminal:profiles',
 } as const;
 
 export const SurfaceSchema = z.enum(['cloud', 'local', 'settings']);
@@ -98,7 +99,12 @@ const LayoutFields = {
   terminalOpen: z.boolean(),
   terminalHeight: z.number().min(MIN_TERMINAL_HEIGHT),
 };
-const TerminalFields = { allSurfaces: z.boolean() };
+const TerminalFields = {
+  allSurfaces: z.boolean(),
+  // Optional command line override for dock shells ('' = Windows Terminal
+  // default profile, else PowerShell).
+  shell: z.string().max(1024),
+};
 // F3: tenant/api URLs must be https (http allowed for localhost only).
 const AppUrl = z.url().refine(isAllowedAppUrl, 'must be https (http allowed for localhost only)');
 const SettingsFields = {
@@ -152,8 +158,11 @@ export const SettingsObject = z.object({
     })
     .default({ terminalOpen: false, terminalHeight: DEFAULT_TERMINAL_HEIGHT }),
   terminal: z
-    .object({ allSurfaces: TerminalFields.allSurfaces.default(false) })
-    .default({ allSurfaces: false }),
+    .object({
+      allSurfaces: TerminalFields.allSurfaces.default(false),
+      shell: TerminalFields.shell.default(''),
+    })
+    .default({ allSurfaces: false, shell: '' }),
 });
 
 // Every field has a default or is optional, so parse({}) yields valid Settings.
@@ -203,6 +212,8 @@ export const TerminalSummarySchema = z.object({
   cwd: z.string(),
   title: z.string(),
   exitCode: z.number().int().nullable(),
+  // Windows Terminal profile name when one launched this pty.
+  profile: z.string().nullable().default(null),
 });
 export type TerminalSummary = z.infer<typeof TerminalSummarySchema>;
 
@@ -255,7 +266,11 @@ export interface ScopeSummary {
 // P4b terminal channels.
 export const TerminalOpenArg = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('devin'), workspace: z.string().min(1) }),
-  z.object({ kind: z.literal('shell'), cwd: z.string().min(1).max(4096).optional() }),
+  z.object({
+    kind: z.literal('shell'),
+    cwd: z.string().min(1).max(4096).optional(),
+    profile: z.string().max(128).optional(),
+  }),
 ]);
 export type TerminalOpenArgType = z.infer<typeof TerminalOpenArg>;
 export const TerminalTitleArg = z.object({ id: z.string().min(1), title: z.string().max(256) });

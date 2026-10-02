@@ -40,6 +40,7 @@ export function setupTerminalIpc(): void {
   });
   guardedHandle(IpcChannels.terminalList, () => terminalHost.list());
   guardedHandle(IpcChannels.terminalCwdOptions, () => terminalCwdOptions());
+  guardedHandle(IpcChannels.terminalProfiles, () => terminalHost.profiles());
   guardedOn(IpcChannels.terminalTitle, (_event, payload: unknown) => {
     const parsed = TerminalTitleArg.safeParse(payload);
     if (!parsed.success) return;

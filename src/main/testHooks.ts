@@ -1,4 +1,5 @@
-import { webContents } from 'electron';
+import { webContents, WebContentsView } from 'electron';
+import { computeBounds } from '../core/layout';
 import { clampFraction01, clampTerminalHeight } from '../core/layout';
 import { auditCookies } from './cookieAudit';
 import { currentFillTarget } from './credentials';
@@ -71,6 +72,19 @@ export function registerTestHooks(): void {
       },
       getTabBounds: (id: string) => state.tabManager?.getView(id)?.getBounds() ?? null,
       getDevinBounds: () => state.devinView?.getBounds() ?? null,
+      // Native view layering check: every contentView child with its bounds.
+      childViews: () =>
+        state.windowRef?.contentView.children.map((view) => ({
+          bounds: view.getBounds(),
+          url: view instanceof WebContentsView ? view.webContents.getURL() : null,
+        })) ?? [],
+      layoutRects: () =>
+        computeBounds(state.windowRef?.getContentBounds() ?? { x: 0, y: 0, width: 0, height: 0 }, {
+          paneOpen: state.paneOpen,
+          paneFraction: state.paneFraction,
+          terminalOpen: state.terminalOpen,
+          terminalHeight: state.terminalHeight,
+        }),
       saveCredential: (credential: { origin: string; username: string; password: string }) =>
         state.credentials?.save(credential).then(() => true),
       getFillTargetUrl: () => currentFillTarget()?.getURL() ?? null,

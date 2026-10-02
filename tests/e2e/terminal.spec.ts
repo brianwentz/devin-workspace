@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { launchApp, shellPage, state } from './helpers';
+import { evaluateInShell, launchApp, readEvents, shellPage, state, waitForEvent } from './helpers';
 
 type Hooks = {
   terminalOpen(
@@ -23,6 +23,8 @@ type Hooks = {
   setTerminalOpen(value: boolean): void;
   setTerminalHeight(value: number): void;
   getDevinBounds(): { y: number; height: number } | null;
+  childViews(): Array<{ bounds: { x: number; y: number; width: number; height: number }; url: string | null }>;
+  layoutRects(): { terminal: { x: number; y: number; width: number; height: number } };
   setPaneOpen(value: boolean): void;
 };
 
@@ -205,14 +207,81 @@ test('terminal dock: rail toggle, shell tabs, surface gating, persisted height',
     const after = await app.evaluate(() => (globalThis as G).__devinworkspaces.getDevinBounds());
     expect(after?.height).toBe(before!.height - 280 - 6);
 
-    // Open two shell tabs through the + menu (workspaces are empty → homedir).
+    // Native layering: no WebContentsView may cover the dock rect — a stray
+    // native view over the strip swallows real clicks before they reach the
+    // shell DOM (CDP input bypasses native hit-testing, so DOM assertions miss it).
+    const [rects, views] = await app.evaluate(() => [
+      (globalThis as G).__devinworkspaces.layoutRects(),
+      (globalThis as G).__devinworkspaces.childViews(),
+    ]);
+    const term = rects.terminal;
+    const overlaps = (b: { x: number; y: number; width: number; height: number }) =>
+      b.x < term.x + term.width && b.x + b.width > term.x && b.y < term.y + term.height && b.y + b.height > term.y;
+    for (const view of views) {
+      const isShell = view.url?.startsWith('app://shell');
+      if (!isShell) expect(overlaps(view.bounds), `view over dock: ${view.url}`).toBe(false);
+    }
+
+    // + opens a shell immediately in the default cwd (workspaces empty → homedir).
     await page.click('#terminalNew');
+    await expect.poll(async () => (await state(app)).terminals.length).toBe(1);
+    await waitForEvent(logFile, 'terminal-open');
+    const openEvents = (await readEvents(logFile)).filter(
+      (e) => e.event === 'terminal-open' && (e.detail as { kind?: string }).kind === 'shell',
+    );
+    expect(openEvents.length).toBe(1);
+    const firstId = (await state(app)).terminals[0]!.id;
+
+    // Focus lands in the new terminal (xterm helper textarea), not the button —
+    // typed input goes to the pty and Space/Enter cannot re-trigger +.
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          (id) =>
+            document.activeElement?.closest(`[data-terminal-id="${id}"]`) !== null &&
+            document.activeElement?.classList.contains('xterm-helper-textarea'),
+          firstId,
+        ),
+      )
+      .toBe(true);
+    await page.keyboard.type('ping\r');
+    await expect
+      .poll(async () =>
+        app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), firstId),
+      )
+      .toContain('ping');
+    await page.keyboard.press('Space');
+    await page.keyboard.press('Enter');
+    expect((await state(app)).terminals.length).toBe(1);
+    // Tab label is the cwd basename (short), not the raw OSC title.
+    const firstCwd = (await state(app)).terminals[0]!.cwd;
+    await expect(page.locator(`[data-terminal-tab="${firstId}"] .tabTitle`)).toHaveText(
+      firstCwd.split(/[\\/]/).filter(Boolean).at(-1)!,
+    );
+
+    // The chevron opens the cwd menu — it must be a real, unclipped overlay:
+    // rect inside the dock and the first item hit-tests to itself.
+    const profiles = (await evaluateInShell(app, `window.devinworkspaces.terminalProfiles()`)) as unknown[];
+    expect(Array.isArray(profiles)).toBe(true);
+    await page.click('#terminalNewCwd');
     await page.waitForSelector('#terminalNewMenu button');
+    await expect(page.locator('#terminalNewMenu >> text=Open in…')).toHaveCount(1);
     const options = await page.locator('#terminalNewMenu button').allTextContents();
     expect(options.length).toBeGreaterThan(0);
-    await page.locator('#terminalNewMenu button').first().click();
-    await page.click('#terminalNew');
-    await page.locator('#terminalNewMenu button').first().click();
+    const menuBox = await page.locator('#terminalNewMenu').boundingBox();
+    const dockBox = await page.locator('#terminalDock').boundingBox();
+    expect(menuBox).toBeTruthy();
+    expect(dockBox).toBeTruthy();
+    expect(menuBox!.y).toBeGreaterThanOrEqual(dockBox!.y);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(dockBox!.y + dockBox!.height + 1);
+    const firstItem = page.locator('#terminalNewMenu button').first();
+    const hitId = await firstItem.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return hit === el || el.contains(hit) ? (el.closest('#terminalNewMenu')?.id ?? 'menu') : (hit?.id ?? hit?.tagName ?? 'none');
+    });
+    expect(hitId).toBe('terminalNewMenu');
+    await firstItem.click();
     await expect.poll(async () => (await state(app)).terminals.length).toBe(2);
     const tabs = (await state(app)).terminals;
     expect(tabs.every((t) => t.kind === 'shell')).toBe(true);

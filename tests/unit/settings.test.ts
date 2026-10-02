@@ -219,14 +219,14 @@ describe('terminal dock settings (F5)', () => {
   it('defaults layout/terminal and merges shallowly', () => {
     const base = SettingsSchema.parse({});
     expect(base.layout).toEqual({ terminalOpen: false, terminalHeight: 280 });
-    expect(base.terminal).toEqual({ allSurfaces: false });
+    expect(base.terminal).toEqual({ allSurfaces: false, shell: '' });
 
     const merged = mergeSettings(base, {
       layout: { terminalOpen: true },
-      terminal: { allSurfaces: true },
+      terminal: { allSurfaces: true, shell: 'pwsh.exe -NoLogo' },
     });
     expect(merged.layout).toEqual({ terminalOpen: true, terminalHeight: 280 });
-    expect(merged.terminal).toEqual({ allSurfaces: true });
+    expect(merged.terminal).toEqual({ allSurfaces: true, shell: 'pwsh.exe -NoLogo' });
     const resized = mergeSettings(merged, { layout: { terminalHeight: 400 } });
     expect(resized.layout).toEqual({ terminalOpen: true, terminalHeight: 400 });
   });

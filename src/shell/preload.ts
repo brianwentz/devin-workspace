@@ -56,7 +56,9 @@ const localApi = {
 // P4b embedded terminal + F5 dock.
 const terminalApi = {
   terminalOpen: (
-    options: { kind: 'devin'; workspace: string } | { kind: 'shell'; cwd?: string },
+    options:
+      | { kind: 'devin'; workspace: string }
+      | { kind: 'shell'; cwd?: string; profile?: string },
   ) =>
     ipcRenderer.invoke(IpcChannels.terminalOpen, options) as Promise<
       { ok: true; id: string } | { ok: false; error: string }
@@ -64,6 +66,10 @@ const terminalApi = {
   terminalList: () => ipcRenderer.invoke(IpcChannels.terminalList) as Promise<TerminalSummary[]>,
   terminalCwdOptions: () =>
     ipcRenderer.invoke(IpcChannels.terminalCwdOptions) as Promise<string[]>,
+  terminalProfiles: () =>
+    ipcRenderer.invoke(IpcChannels.terminalProfiles) as Promise<
+      { guid: string; name: string; default: boolean; available: boolean }[]
+    >,
   terminalToggle: () => ipcRenderer.send(IpcChannels.terminalToggle),
   terminalActivate: (id: string) => {
     if (isString(id)) ipcRenderer.send(IpcChannels.terminalActivate, { id });

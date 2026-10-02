@@ -296,6 +296,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
                 <TerminalView
                   key={terminalId}
                   id={terminalId}
+                  active={view === 'terminal'}
                   onRestart={() => {
                     window.devinworkspaces.terminalClose(terminalId);
                     setTerminalId(null);

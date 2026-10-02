@@ -1,11 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import type * as pty from 'node-pty';
 import { app } from 'electron';
 import { INSTALL_GUIDANCE } from '../../core/localModel';
+import {
+  parseJsonc,
+  readProfiles,
+  resolveProfileCommand,
+  settingsCandidates,
+  splitCommandline,
+  expandEnvVars,
+  type ResolvedShell,
+  type WtProfile,
+} from '../../core/windowsTerminal';
 import { IpcChannels, type TerminalSummary } from '../../shared/ipc';
 import { log } from '../log';
 import { state } from '../state';
@@ -14,7 +24,16 @@ import { resolveDevinPath } from './acpHost';
 export type TerminalKind = 'devin' | 'shell';
 export type TerminalOpenOptions =
   | { kind: 'devin'; workspace: string }
-  | { kind: 'shell'; cwd?: string | undefined };
+  | { kind: 'shell'; cwd?: string | undefined; profile?: string | undefined };
+
+export interface ShellProfileInfo {
+  guid: string;
+  name: string;
+  default: boolean;
+  available: boolean;
+}
+
+type ResolvedCommand = { file: string; args: string[]; label: string | null; appendCwd: boolean };
 
 export type { TerminalSummary };
 
@@ -23,6 +42,7 @@ interface TerminalEntry {
   kind: TerminalKind;
   cwd: string;
   title: string;
+  profile: string | null;
   proc: pty.IPty;
   exitCode: number | null;
   pending: string;
@@ -64,7 +84,8 @@ export class TerminalHost {
 
   constructor(private readonly testMode: boolean) {}
 
-  private resolveCommand(kind: TerminalKind): { file: string; args: string[] } | { error: string } {
+  private resolveCommand(options: TerminalOpenOptions): ResolvedCommand | { error: string } {
+    const kind = options.kind;
     if (this.testMode) {
       const testCommand = process.env.DEVIN_WORKSPACES_TEST_TERMINAL_CMD;
       if (testCommand) {
@@ -79,17 +100,152 @@ export class TerminalHost {
           const candidate = resolve(app.getAppPath(), arg);
           return existsSync(candidate) ? candidate : arg;
         });
-        return { file: resolvedFile, args: resolvedArgs };
+        return { file: resolvedFile, args: resolvedArgs, label: null, appendCwd: false };
       }
     }
     if (kind === 'devin') {
       const devinPath = resolveDevinPath(state.settings?.current.local.devinPath);
       if (!devinPath) return { error: INSTALL_GUIDANCE };
-      return { file: devinPath, args: [] };
+      return { file: devinPath, args: [], label: null, appendCwd: false };
     }
-    const shell = resolveShell();
-    if (!shell) return { error: 'no shell found on PATH' };
-    return { file: shell, args: [] };
+    const shell = this.resolveShellCommand(
+      options.kind === 'shell' ? options.profile : undefined,
+    );
+    if (!shell) return { error: 'no shell found' };
+    return shell;
+  }
+
+  // `wsl.exe -l -q` prints UTF-16LE; cache for the process lifetime.
+  private wslDistrosCache: string[] | null = null;
+  private wslDistros(): string[] {
+    if (this.wslDistrosCache) return this.wslDistrosCache;
+    try {
+      const result = spawnSync('wsl.exe', ['-l', '-q'], { encoding: 'utf16le', windowsHide: true });
+      const raw = result.stdout ?? '';
+      this.wslDistrosCache = raw
+        .split(/[\r\n]+/)
+        .map((line) => line.replace(/[^\x20-\x7E]/g, '').trim())
+        .filter((line) => line.length > 0 && !line.startsWith('('));
+    } catch {
+      this.wslDistrosCache = [];
+    }
+    return this.wslDistrosCache;
+  }
+
+  private pwshPathCache: string | null | undefined;
+  private pwshPath(): string | null {
+    if (this.pwshPathCache !== undefined) return this.pwshPathCache;
+    const seven = process.env['ProgramFiles']
+      ? join(process.env['ProgramFiles'], 'PowerShell', '7', 'pwsh.exe')
+      : null;
+    this.pwshPathCache =
+      resolveOnPath('pwsh.exe') ?? (seven && existsSync(seven) ? seven : null);
+    return this.pwshPathCache;
+  }
+
+  private wtFile(): { file: import('../../core/windowsTerminal').WtProfile[] | { profiles: WtProfile[]; defaultProfile: string | null } | null } | null {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) return null;
+    for (const candidate of settingsCandidates(localAppData)) {
+      if (!existsSync(candidate)) continue;
+      try {
+        return { file: readProfiles(parseJsonc(readFileSync(candidate, 'utf8'))) };
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  private wtCtx() {
+    return {
+      env: process.env as Record<string, string | undefined>,
+      distros: this.wslDistros(),
+      pwshPath: this.pwshPath(),
+      windowsAppsDir: process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Microsoft\WindowsApps') : null,
+      existsSync,
+    };
+  }
+
+  // WT profile list for the picker — re-read each call so edits apply.
+  profiles(): ShellProfileInfo[] {
+    if (process.platform !== 'win32') return [];
+    const wt = this.wtFile();
+    if (!wt?.file) return [];
+    const ctx = this.wtCtx();
+    const list = wt.file as { profiles: WtProfile[]; defaultProfile: string | null };
+    return list.profiles.map((p) => ({
+      guid: p.guid,
+      name: p.name,
+      default: p.guid === list.defaultProfile,
+      available: resolveProfileCommand(p, ctx) !== null,
+    }));
+  }
+
+  // Shell resolution order: settings.terminal.shell command line → the picked
+  // or default Windows Terminal profile → pwsh → powershell → COMSPEC.
+  private resolveShellCommand(profileGuid?: string): ResolvedCommand | null {
+    const setting = state.settings?.current.terminal.shell?.trim();
+    if (setting) {
+      const [file, ...args] = splitCommandline(expandEnvVars(setting, process.env as Record<string, string | undefined>));
+      if (file) {
+        log('local', 'terminal-shell-resolved', {
+          detail: { source: 'setting', profile: null, file: basename(file) },
+        });
+        return { file, args, label: null, appendCwd: false };
+      }
+    }
+    const wt = this.wtFile();
+    if (wt?.file) {
+      const ctx = this.wtCtx();
+      const list = wt.file as { profiles: WtProfile[]; defaultProfile: string | null };
+      const profile = profileGuid
+        ? list.profiles.find((p) => p.guid === profileGuid)
+        : list.profiles.find((p) => p.guid === list.defaultProfile);
+      const resolved = profile ? resolveProfileCommand(profile, ctx) : null;
+      if (profile && resolved) {
+        log('local', 'terminal-shell-resolved', {
+          detail: { source: 'windows-terminal', profile: profile.name, file: basename(resolved.file) },
+        });
+        return { file: resolved.file, args: resolved.args, label: resolved.label, appendCwd: resolved.file.toLowerCase() === 'wsl.exe' };
+      }
+      if (profileGuid && profile) {
+        return { error: `profile not launchable: ${profile.name}` } as ResolvedCommand & { error: string };
+      }
+    }
+    const found = resolveOnPath('pwsh.exe') ?? resolveOnPath('powershell.exe');
+    const file = found ?? (process.env.COMSPEC && existsSync(process.env.COMSPEC) ? process.env.COMSPEC : null);
+    if (!file) return null;
+    log('local', 'terminal-shell-resolved', {
+      detail: { source: 'fallback', profile: null, file: basename(file) },
+    });
+    return { file, args: [], label: null, appendCwd: false };
+  }
+
+  // Pty env: drop inherited vars that break or redirect child processes —
+  // NODE_OPTIONS/ELECTRON_RUN_AS_NODE re-route node/electron children
+  // (ELECTRON_RUN_AS_NODE in particular turns spawned devin/node binaries into
+  // plain node), NODE_INSPECT_* hijack ports, and JB_*/IDEA_*/WEBSTORM_* leak
+  // IDE debugger hooks when launched from JetBrains. Only names are logged.
+  private ptyEnv(): Record<string, string> {
+    const strip = (name: string) =>
+      name === 'NODE_OPTIONS' ||
+      name.startsWith('NODE_INSPECT_') ||
+      name.startsWith('ELECTRON_') ||
+      name.startsWith('JB_') ||
+      name.startsWith('IDEA_') ||
+      name.startsWith('WEBSTORM_');
+    const env: Record<string, string> = {};
+    const stripped: string[] = [];
+    for (const [name, value] of Object.entries(process.env)) {
+      if (value === undefined) continue;
+      if (strip(name)) stripped.push(name);
+      else env[name] = value;
+    }
+    if (stripped.length > 0) {
+      log('local', 'terminal-env', { detail: { stripped } });
+    }
+    return env;
   }
 
   open(options: TerminalOpenOptions, cols = 120, rows = 30): OpenResult {
@@ -115,7 +271,7 @@ export class TerminalHost {
         if (existing && existing.exitCode === null) return { ok: true, id: existingId };
       }
     }
-    const command = this.resolveCommand(options.kind);
+    const command = this.resolveCommand(options);
     if ('error' in command) {
       log('local', 'terminal-open', { detail: { cwd: normalized, ok: false } });
       return { ok: false, error: command.error };
@@ -124,11 +280,12 @@ export class TerminalHost {
     try {
       // Lazy: a missing/broken native addon must not break app startup.
       const nodePty = require('node-pty') as typeof pty;
-      proc = nodePty.spawn(command.file, command.args, {
+      const args = command.appendCwd ? [...command.args, '--cd', normalized] : command.args;
+      proc = nodePty.spawn(command.file, args, {
         cwd: normalized,
         cols,
         rows,
-        env: process.env as Record<string, string>,
+        env: this.ptyEnv(),
         name: 'xterm-256color',
         useConpty: true,
       });
@@ -143,6 +300,7 @@ export class TerminalHost {
       kind: options.kind,
       cwd: normalized,
       title: basename(normalized) || normalized,
+      profile: command.label,
       proc,
       exitCode: null,
       pending: '',
@@ -186,6 +344,7 @@ export class TerminalHost {
       cwd: entry.cwd,
       title: entry.title,
       exitCode: entry.exitCode,
+      profile: entry.profile,
     }));
   }
 
@@ -293,18 +452,5 @@ export class TerminalHost {
   }
 }
 
-// OS default shell for the generic 'shell' terminal kind.
-function resolveShell(): string | null {
-  if (process.platform === 'win32') {
-    const found = resolveOnPath('pwsh.exe') ?? resolveOnPath('powershell.exe');
-    if (found) return found;
-    const comspec = process.env.COMSPEC;
-    return comspec && existsSync(comspec) ? comspec : null;
-  }
-  for (const candidate of [process.env.SHELL, '/bin/zsh', '/bin/bash']) {
-    if (candidate && existsSync(candidate)) return candidate;
-  }
-  return null;
-}
 
 export const terminalHost = new TerminalHost(process.env.DEVIN_WORKSPACES_TEST === '1');
