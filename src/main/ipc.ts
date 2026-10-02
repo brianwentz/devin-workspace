@@ -1,11 +1,9 @@
 import { Menu } from 'electron';
 import { guardedHandle, guardedOn } from './ipcGuard';
 import { clampFraction01 } from '../core/layout';
-import { currentFillTarget } from './credentials';
 import { closeAutofillOverlays } from './autofill';
 import {
   CredentialDeleteSchema,
-  CredentialFillSchema,
   CredentialRevealSchema,
   CredentialSaveSchema,
   CredentialUpdateSchema,
@@ -218,54 +216,6 @@ export function setupIpc(): void {
     const parsed = CredentialRevealSchema.safeParse(payload);
     if (!parsed.success || !state.credentials) return null;
     return state.credentials.reveal(parsed.data.id);
-  });
-  guardedHandle(IpcChannels.credentialsFill, async (_event, payload: unknown) => {
-    const parsed = CredentialFillSchema.safeParse(payload);
-    const target = currentFillTarget();
-    if (!parsed.success || !state.credentials || !target) return 'unavailable';
-    const result = await state.credentials.fill(
-      target,
-      parsed.data.id,
-      parsed.data.field,
-      parsed.data.pressEnter,
-    );
-    return result;
-  });
-  guardedOn(IpcChannels.credentialsMenu, () => {
-    const target = currentFillTarget();
-    const accounts =
-      target && state.credentials ? state.credentials.matchForUrl(target.getURL()) : [];
-    if (!accounts.length || !state.windowRef) return;
-    const fill = (id: string, field: 'username' | 'password', pressEnter: boolean) => {
-      if (target && state.credentials) {
-        void state.credentials.fill(target, id, field, pressEnter);
-      }
-    };
-    const menu = Menu.buildFromTemplate([
-      ...accounts.flatMap((account): Electron.MenuItemConstructorOptions[] => [
-        {
-          label: `Fill username (${account.username})`,
-          click: () => fill(account.id, 'username', false),
-        },
-        {
-          label: `Fill password (${account.username})`,
-          click: () => fill(account.id, 'password', false),
-        },
-        {
-          label: `Fill password + Enter (${account.username})`,
-          click: () => fill(account.id, 'password', true),
-        },
-      ]),
-      { type: 'separator' },
-      {
-        label: 'Manage credentials…',
-        click: () => {
-          state.surface = 'settings';
-          applyLayout();
-        },
-      },
-    ]);
-    menu.popup({ window: state.windowRef });
   });
   setupExtrasIpc();
 }

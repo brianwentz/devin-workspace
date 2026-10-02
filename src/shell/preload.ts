@@ -195,12 +195,6 @@ const api = {
     ipcRenderer.invoke(IpcChannels.credentialsDelete, { id }) as Promise<boolean>,
   revealCredential: (id: string) =>
     ipcRenderer.invoke(IpcChannels.credentialsReveal, { id }) as Promise<string | null>,
-  fillCredential: (options: {
-    id: string;
-    field: 'username' | 'password';
-    pressEnter: boolean;
-  }) => ipcRenderer.invoke(IpcChannels.credentialsFill, options) as Promise<string>,
-  openCredentialsMenu: () => ipcRenderer.send(IpcChannels.credentialsMenu),
   autofillPick: (id: string) => {
     if (isString(id)) ipcRenderer.send(IpcChannels.autofillPick, { id });
   },

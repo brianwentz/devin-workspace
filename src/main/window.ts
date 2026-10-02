@@ -10,7 +10,7 @@ import {
 } from '../core/layout';
 import { prsForSession } from '../core/notifyModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
-import { currentFillTarget } from './credentials';
+
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
@@ -48,16 +48,6 @@ export function publicState(): ShellState {
     currentSessionId: state.currentSessionId,
     settings: state.settings?.current ?? SettingsSchema.parse({}),
     tabs: state.tabManager?.publicState() ?? { tabs: [], activeId: null, scope: '', hiddenTabCount: 0 },
-    credentialMatch: (() => {
-      const target = currentFillTarget();
-      const accounts =
-        target && state.credentials ? state.credentials.matchForUrl(target.getURL()) : [];
-      if (!accounts.length) return null;
-      return {
-        origin: accounts[0]!.origin,
-        accounts: accounts.map((account) => ({ id: account.id, username: account.username })),
-      };
-    })(),
     credentials: state.credentials?.list() ?? [],
     autofill: {
       picker: state.autofillPicker

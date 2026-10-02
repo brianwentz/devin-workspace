@@ -25,18 +25,6 @@ test.afterAll(async () => {
   await fixtures.close();
 });
 
-async function fillCredential(
-  app: ElectronApplication,
-  id: string,
-  field: 'username' | 'password',
-  pressEnter: boolean,
-): Promise<string> {
-  return evaluateInShell(
-    app,
-    `window.devinworkspaces.fillCredential(${JSON.stringify({ id, field, pressEnter })})`,
-  ) as Promise<string>;
-}
-
 const fieldValues = (app: ElectronApplication) =>
   evaluateInView(
     app,
@@ -44,36 +32,7 @@ const fieldValues = (app: ElectronApplication) =>
     `({ user: document.getElementById('user').value, pass: document.getElementById('pass').value })`,
   ) as Promise<{ user: string; pass: string }>;
 
-// Deterministic variant: fill a specific tab via the test hook. Target
-// selection itself is asserted with getFillTargetUrl; OS focus on a background
-// CI desktop is not reliable enough to drive the IPC path for every fill.
-async function fillInto(
-  app: ElectronApplication,
-  id: string,
-  credentialId: string,
-  field: 'username' | 'password',
-  pressEnter: boolean,
-): Promise<string> {
-  return app.evaluate(
-    (
-      _electron,
-      args: { id: string; credentialId: string; field: 'username' | 'password'; pressEnter: boolean },
-    ) =>
-      (globalThis as typeof globalThis & {
-        __devinworkspaces: {
-          fillInto(
-            id: string,
-            credentialId: string,
-            field: 'username' | 'password',
-            pressEnter: boolean,
-          ): Promise<string>;
-        };
-      }).__devinworkspaces.fillInto(args.id, args.credentialId, args.field, args.pressEnter),
-    { id, credentialId, field, pressEnter },
-  );
-}
-
-test('credential vault saves, fills, denies non-saved origins, and keeps secrets out of logs', async () => {
+test('credential vault saves, autofills, and keeps secrets out of logs', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-'));
   const logFile = join(profile, 'events.jsonl');
   writeFileSync(logFile, '', 'utf8');
@@ -94,7 +53,6 @@ test('credential vault saves, fills, denies non-saved origins, and keeps secrets
       ).__devinworkspaces.saveCredential(credential);
     }, { origin: githubOrigin(), username: 'alice', password: 's3cret' });
     expect(saved?.id).toBeTruthy();
-    const credentialId = saved!.id;
     await expect
       .poll(async () =>
         (await state(app)).credentials.some(
@@ -103,79 +61,20 @@ test('credential vault saves, fills, denies non-saved origins, and keeps secrets
       )
       .toBe(true);
 
-    const loginId = await openTab(app, `${fixtures.githubUrl}/login`);
+    // Autofill fills the saved account into the login tab.
+    await openTab(app, `${fixtures.githubUrl}/login`);
     await waitForTabTitle(app, 'Fixture login');
-    // Autofill (Commit 2) pre-fills the single saved account; clear both fields
-    // so the manual insertText fill below stays deterministic.
     await expect
       .poll(async () => fieldValues(app))
       .toEqual({ user: 'alice', pass: 's3cret' });
     await evaluateInView(
       app,
       `${fixtures.githubUrl}/login`,
-      `document.getElementById('user').value=''; document.getElementById('pass').value='';`,
+      `(() => { document.getElementById('submit').click(); })()`,
     );
-    await app.evaluate((_electron, id: string) => {
-      (globalThis as typeof globalThis & { __devinworkspaces: { focus(id: string): void } })
-        .__devinworkspaces.focus(id);
-    }, loginId);
-    await expect.poll(async () => (await state(app)).credentialMatch?.origin).toBe(githubOrigin());
-
-    await evaluateInView(app, `${fixtures.githubUrl}/login`, `document.getElementById('user').focus()`);
-    // The fill target follows OS focus; confirm it settled on the login tab
-    // before filling (a late 'focus' event elsewhere would flip it mid-test).
-    await expect
-      .poll(async () =>
-        app.evaluate(
-          () =>
-            (globalThis as typeof globalThis & {
-              __devinworkspaces: { getFillTargetUrl(): string | null };
-            }).__devinworkspaces.getFillTargetUrl(),
-        ),
-      )
-      .toBe(`${fixtures.githubUrl}/login`);
-    expect(await fillInto(app, loginId, credentialId, 'username', false)).toBe('filled');
-    await expect
-      .poll(async () =>
-        evaluateInView(app, `${fixtures.githubUrl}/login`, `document.getElementById('user').value`),
-      )
-      .toBe('alice');
-
-    await evaluateInView(app, `${fixtures.githubUrl}/login`, `document.getElementById('pass').focus()`);
-    await app.evaluate((_electron, id: string) => {
-      (globalThis as typeof globalThis & { __devinworkspaces: { focus(id: string): void } })
-        .__devinworkspaces.focus(id);
-    }, loginId);
-    await expect
-      .poll(async () =>
-        app.evaluate(
-          () =>
-            (globalThis as typeof globalThis & {
-              __devinworkspaces: { getFillTargetUrl(): string | null };
-            }).__devinworkspaces.getFillTargetUrl(),
-        ),
-      )
-      .toBe(`${fixtures.githubUrl}/login`);
-    expect(await fillInto(app, loginId, credentialId, 'password', true)).toBe('filled');
     await expect
       .poll(async () => evaluateInView(app, `${fixtures.githubUrl}/login`, `document.title`))
       .toBe('submitted:alice:s3cret');
-
-    // A tab on a non-saved origin is denied.
-    await openTab(app, `${fixtures.devinUrl}/other`);
-    await waitForTabTitle(app, 'Fixture Devin session');
-    const devinTabId = (await state(app)).tabs.activeId;
-    expect(devinTabId).toBeTruthy();
-    await app.evaluate((_electron, id: string) => {
-      (globalThis as typeof globalThis & { __devinworkspaces: { focus(id: string): void } })
-        .__devinworkspaces.focus(id);
-    }, devinTabId!);
-    await expect.poll(async () => (await state(app)).credentialMatch).toBe(null);
-    expect(await fillInto(app, devinTabId!, credentialId, 'username', false)).toBe('no-match');
-    // IPC path still answers (whatever OS focus says, it is one of the three results).
-    expect(['filled', 'no-match', 'unavailable']).toContain(
-      await fillCredential(app, credentialId, 'username', false),
-    );
 
     // Secrets must not reach the log or the vault file.
     const events = await readEvents(logFile);

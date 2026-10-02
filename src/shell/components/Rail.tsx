@@ -8,10 +8,6 @@ interface RailProps {
   surface: Surface;
   paneOpen: boolean;
   paneCollapsed: boolean;
-  credentialMatch: {
-    origin: string;
-    accounts: { id: string; username: string }[];
-  } | null;
   terminalOpen: boolean;
   terminalAllSurfaces: boolean;
 }
@@ -52,7 +48,6 @@ export function Rail({
   surface,
   paneOpen,
   paneCollapsed,
-  credentialMatch,
   terminalOpen,
   terminalAllSurfaces,
 }: RailProps) {
@@ -96,22 +91,6 @@ export function Rail({
       >
         ⚙
       </button>
-      {credentialMatch && (
-        <button
-          id="credentialsButton"
-          type="button"
-          aria-label="Fill credentials"
-          title={`Fill saved credentials for ${credentialMatch.origin}${
-            credentialMatch.accounts.length > 1
-              ? ` (${credentialMatch.accounts.length} accounts)`
-              : ''
-          }`}
-          className={buttonClass}
-          onClick={() => window.devinworkspaces.openCredentialsMenu()}
-        >
-          🔑
-        </button>
-      )}
       <PrQuickOpen buttonClass={buttonClass} />
       <NotificationsButton buttonClass={buttonClass} />
       <span className="flex-1" />

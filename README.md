@@ -59,7 +59,7 @@ Once a token is set the poller runs continuously (10 s while a session is active
 | Show terminal dock on Local and Settings too | Settings | Dock is Cloud-only by default |
 | Shell command | Settings | Blank = Windows Terminal default profile, else PowerShell |
 | Notifications / PR auto-open / token / org id | Settings → Notifications | See above |
-| Credentials | Settings → Credentials | Origin + username + password, DPAPI-encrypted; fill via the 🔑 rail button |
+| Passwords | Settings → Passwords | Origin + username + password, DPAPI-encrypted; autofill fills a single match on load, offers an account picker when several match, and asks to save/update after a sign-in; rows support show/copy/edit/delete |
 
 Pane width, terminal height, window placement and the open tab list are saved automatically.
 

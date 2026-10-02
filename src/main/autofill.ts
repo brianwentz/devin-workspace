@@ -22,17 +22,21 @@ const SHOW_FALLBACK_MS = () => promptMs(1500);
 const PROMPT_DISMISS_MS = () => promptMs(10_000);
 const PENDING_TTL_MS = 60_000;
 
-// Navigation/teardown of the picker's sender must dismiss it; the listeners
-// are armed once per sender and only fire while that sender owns the picker.
+// Navigation of the sender dismisses its picker; teardown dismisses both its
+// picker and its prompt. Listeners are armed once per sender and only fire
+// while that sender owns the overlay.
 const armedSenders = new WeakSet<Electron.WebContents>();
-function armPickerClose(sender: Electron.WebContents): void {
+function armSenderClose(sender: Electron.WebContents): void {
   if (armedSenders.has(sender)) return;
   armedSenders.add(sender);
-  const close = () => {
+  const closePicker = () => {
     if (state.autofillPicker?.sender === sender) closeAutofillPicker();
   };
-  sender.on('did-start-navigation', close);
-  sender.on('destroyed', close);
+  sender.on('did-start-navigation', closePicker);
+  sender.on('destroyed', () => {
+    closePicker();
+    if (state.autofillPrompt?.sender === sender) closeAutofillPrompt();
+  });
 }
 
 export function closeAutofillPicker(): void {
@@ -97,9 +101,7 @@ function showPrompt(pending: NonNullable<typeof state.autofillPending>): void {
   pending.unlisten();
   for (const timer of pending.timers) clearTimeout(timer);
   pending.timers = [];
-  pending.sender.once('destroyed', () => {
-    if (state.autofillPrompt?.sender === pending.sender) closeAutofillPrompt();
-  });
+  armSenderClose(pending.sender);
   const view = senderView(pending.sender)!;
   // The prompt replaces any open picker.
   if (state.autofillPicker) {
@@ -183,7 +185,7 @@ export function setupAutofillIpc(): void {
         height: Math.round(rect.height * zoom),
       },
     };
-    armPickerClose(sender);
+    armSenderClose(sender);
     raiseShell();
     notifyShell();
     log('shell', 'autofill-picker', { detail: { origin, accounts: accounts.length } });

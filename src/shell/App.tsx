@@ -61,7 +61,6 @@ export function App() {
         surface={state.surface}
         paneOpen={state.paneOpen}
         paneCollapsed={bounds.paneCollapsed}
-        credentialMatch={state.credentialMatch}
         terminalOpen={state.terminalOpen}
         terminalAllSurfaces={state.settings.terminal.allSurfaces}
       />

@@ -9,10 +9,6 @@ export type PublicState = {
   paneCollapsed: boolean;
   surface: 'cloud' | 'local' | 'settings';
   currentSessionId: string | null;
-  credentialMatch: {
-    origin: string;
-    accounts: Array<{ id: string; username: string }>;
-  } | null;
   credentials: Array<{
     id: string;
     origin: string;

@@ -2,13 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { safeStorage } from 'electron';
 import {
-  matchOrigin,
   migrateCredentialsFile,
   normalizeOrigin,
   type CredentialEntry,
   type StoredEntry,
 } from '../core/credentials';
-import { state } from './state';
 
 export type CredentialLog = (event: string, detail?: Record<string, unknown>) => void;
 const noopLog: CredentialLog = () => undefined;
@@ -80,12 +78,6 @@ export class CredentialStore {
     return this.sorted()
       .filter((entry) => entry.origin === normalized)
       .map(CredentialStore.publicEntry);
-  }
-
-  matchForUrl(url: string): CredentialEntry[] {
-    const origin = matchOrigin(url, this.origins, this.allowInsecure);
-    if (!origin) return [];
-    return this.forOrigin(origin);
   }
 
   async add(input: { origin: string; username: string; password: string }): Promise<CredentialEntry> {
@@ -173,51 +165,6 @@ export class CredentialStore {
     this.persist();
   }
 
-  async fill(
-    contents: Electron.WebContents,
-    id: string,
-    field: 'username' | 'password',
-    pressEnter: boolean,
-  ): Promise<'filled' | 'no-match' | 'unavailable'> {
-    const entry = this.entries.get(id);
-    if (!entry) return 'no-match';
-    const url = contents.getURL();
-    const origin = matchOrigin(url, [entry.origin], this.allowInsecure);
-    if (!origin) {
-      this.log('credential-fill-denied', { origin: normalizeOrigin(url, this.allowInsecure) });
-      return 'no-match';
-    }
-    const frameUrl = contents.focusedFrame?.url;
-    if (frameUrl && matchOrigin(frameUrl, [origin], this.allowInsecure) !== origin) {
-      this.log('credential-fill-denied', {
-        origin,
-        frameOrigin: normalizeOrigin(frameUrl, this.allowInsecure),
-        reason: 'focused-frame-origin',
-      });
-      return 'no-match';
-    }
-    let value: string;
-    if (field === 'password') {
-      if (!(await this.encryptor.isAvailable())) return 'unavailable';
-      try {
-        value = await this.encryptor.decrypt(Buffer.from(entry.passwordEnc, 'base64'));
-      } catch {
-        return 'unavailable';
-      }
-    } else {
-      value = entry.username;
-    }
-    contents.insertText(value);
-    value = '';
-    if (pressEnter) {
-      contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
-      contents.sendInputEvent({ type: 'char', keyCode: 'Enter' });
-      contents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
-    }
-    this.log('credential-fill', { origin, field, pressEnter });
-    return 'filled';
-  }
-
   private persist(): void {
     const serialized = JSON.stringify({
       version: 2,
@@ -231,27 +178,4 @@ export class CredentialStore {
       this.log('credentials-persist-failed', { error: String(error) });
     }
   }
-}
-
-// The view a fill applies to: the focused hosted view if it is the devin view
-// or the active GitHub tab (never the shell); falls back to devinView on the
-// cloud surface when nothing else is focused.
-export function currentFillTarget(): Electron.WebContents | null {
-  const candidates = [
-    state.devinView?.webContents,
-    state.tabManager?.activeWebContents,
-  ].filter((item): item is Electron.WebContents => Boolean(item && !item.isDestroyed()));
-  if (
-    state.lastFocused &&
-    !state.lastFocused.isDestroyed() &&
-    candidates.includes(state.lastFocused)
-  ) {
-    return state.lastFocused;
-  }
-  const focused = candidates.find((contents) => contents.isFocused());
-  if (focused) return focused;
-  if (state.surface === 'cloud' && state.devinView && !state.devinView.webContents.isDestroyed()) {
-    return state.devinView.webContents;
-  }
-  return null;
 }

@@ -28,8 +28,6 @@ export const IpcChannels = {
   credentialsUpdate: 'credentials:update',
   credentialsDelete: 'credentials:delete',
   credentialsReveal: 'credentials:reveal',
-  credentialsFill: 'credentials:fill',
-  credentialsMenu: 'credentials:menu',
   // Autofill: hosted views ask for accounts/fills; the shell drives the picker.
   autofillQuery: 'autofill:query',
   autofillPicker: 'autofill:picker',
@@ -325,12 +323,6 @@ export const ShellStateSchema = z.object({
     scope: z.string(),
     hiddenTabCount: z.number().int(),
   }),
-  credentialMatch: z
-    .object({
-      origin: z.string(),
-      accounts: z.array(z.object({ id: z.string(), username: z.string() })),
-    })
-    .nullable(),
   credentials: z.array(CredentialEntrySchema),
   autofill: z.object({
     picker: z
@@ -369,11 +361,6 @@ export const CredentialUpdateSchema = z.object({
 });
 export const CredentialDeleteSchema = z.object({ id: z.string().min(1) });
 export const CredentialRevealSchema = z.object({ id: z.string().min(1) });
-export const CredentialFillSchema = z.object({
-  id: z.string().min(1),
-  field: z.enum(['username', 'password']),
-  pressEnter: z.boolean().default(false),
-});
 
 export const TabsCloseScopeArg = z.object({ scope: z.string() });
 export const TabsScopeMenuArg = z.object({ x: z.number(), y: z.number() });

@@ -251,15 +251,6 @@ describe('CredentialStore', () => {
     expect(await store.reveal(first.id)).toBe('p9');
   });
 
-  it('matchForUrl returns all accounts for the url origin', async () => {
-    const dir = makeDir();
-    const store = new CredentialStore(join(dir, 'credentials.json'), stubEncryptor());
-    await store.add({ origin: 'https://github.com', username: 'a', password: 'p1' });
-    await store.add({ origin: 'https://github.com', username: 'b', password: 'p2' });
-    expect(store.matchForUrl('https://github.com/login?x=1')).toHaveLength(2);
-    expect(store.matchForUrl('https://a.github.com/')).toEqual([]);
-  });
-
   it('update patches fields, sets updatedAt, and rejects username collisions', async () => {
     const dir = makeDir();
     const store = new CredentialStore(join(dir, 'credentials.json'), stubEncryptor());
