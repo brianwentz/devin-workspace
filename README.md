@@ -35,10 +35,11 @@ Both features poll the Devin API, so they need an API token:
 3. Leave *Organization ID* blank — it is resolved from `/v3/self`. Only fill it in if the status line reports that no organization could be determined for your token.
 4. *API base* stays `https://api.devin.ai` unless your enterprise tenant uses a different API host.
 
-Two checkboxes control what the poller does; both are on by default and polling runs while either is enabled:
+Once a token is set the poller runs continuously (10 s while a session is active, 60 s when idle). Three things hang off it:
 
-- **Notify me when a session is waiting for me** — toast and badge on `waiting_for_user` / `waiting_for_approval` / `blocked`. *Test notification* sends a sample toast.
-- **Open a tab when a session creates a PR** — a background tab for the PR opens in that session's pane within one poll interval (10 s while a session is active, 60 s when idle). It loads when you click it. PRs that already existed when the token was saved are not opened, and closing an auto-opened tab does not bring it back.
+- **Notification center** — the bell in the rail. New events (a session waiting for your reply, needing approval or blocked; a PR opened or merged/closed; a downloaded app update) land in the panel with unread highlighting, a taskbar overlay count and an optional title-bar banner. Clicking an entry opens its session (or the PR tab, or installs the update). *Collect notifications*, *Show banner* and the per-kind toggles live in Settings → Notifications; "Session finished" is off by default. History persists across restarts (last 50).
+- **Open a tab when a session creates a PR** — a background tab for the PR opens in that session's pane within one poll interval. PRs that already existed when the token was saved are not opened, and closing an auto-opened tab does not bring it back.
+- **PR quick-open** — the `PR` rail button lists the current session's pull requests.
 
 ## Devin Local
 
@@ -77,9 +78,9 @@ Pane width, terminal height, window placement and the open tab list are saved au
 
 ## Where things live
 
-`%APPDATA%\devin-workspaces\` — `settings.json` (plain settings and layout), `secrets.json` (API token, encrypted), `credentials.json` (saved logins, encrypted), `events.jsonl` (the event log), and the two browser profiles (`persist:devin`, `persist:github`). Uninstalling removes the app; delete this folder to remove all data.
+`%APPDATA%\devin-workspaces\` — `settings.json` (plain settings and layout), `secrets.json` (API token, encrypted), `credentials.json` (saved logins, encrypted), `notifications.json` (notification history), `events.jsonl` (the event log), and the two browser profiles (`persist:devin`, `persist:github`). Uninstalling removes the app; delete this folder to remove all data.
 
-The event log records URLs, ids and sizes only — never page content, terminal output, or secrets. It is the first place to look if notifications or PR tabs don't appear (`poll`, `poll-error`, `pr-auto-open` events).
+The event log records URLs, ids and sizes only — never page content, terminal output, or secrets. It is the first place to look if notifications or PR tabs don't appear (`poll`, `poll-error`, `notification-added`, `notification-open`, `pr-auto-open` events).
 
 ## Development
 

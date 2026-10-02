@@ -6,7 +6,6 @@ import {
   archivedScopes,
   scopeLabel,
   backoffMs,
-  diffStatuses,
   effectiveStatus,
   isActive,
   isWaiting,
@@ -14,7 +13,6 @@ import {
   pollInterval,
   prTitle,
   prsForSession,
-  snapshotOf,
 } from '../../src/core/notifyModel';
 import { badgeLabel, encodePng, renderBadgePng } from '../../src/core/badgePng';
 
@@ -45,43 +43,6 @@ describe('effectiveStatus / isWaiting / isActive', () => {
     expect(isActive(make('a', 'running', 'finished'))).toBe(false);
     expect(isActive(make('a', 'suspended'))).toBe(false);
     expect(isActive(make('a', 'exit'))).toBe(false);
-  });
-});
-
-describe('diffStatuses', () => {
-  it('never reports newly waiting on the first poll but still counts waiting sessions', () => {
-    const next = snapshotOf([make('a', 'running', 'waiting_for_user'), make('b', 'running', 'working')]);
-    expect(diffStatuses(null, next)).toEqual({ newlyWaiting: [], waitingCount: 1 });
-  });
-
-  it('reports transitions into waiting and new sessions that appear waiting', () => {
-    const prev = snapshotOf([
-      make('a', 'running', 'working'),
-      make('b', 'running', 'waiting_for_user'),
-      make('c', 'suspended'),
-    ]);
-    const next = snapshotOf([
-      make('a', 'running', 'waiting_for_approval'),
-      make('b', 'running', 'waiting_for_user'),
-      make('c', 'running', 'working'),
-      make('d', 'blocked'),
-    ]);
-    expect(diffStatuses(prev, next)).toEqual({ newlyWaiting: ['a', 'd'], waitingCount: 3 });
-  });
-
-  it('does not re-notify when a waiting session switches between waiting kinds', () => {
-    const prev = snapshotOf([make('a', 'running', 'waiting_for_user')]);
-    const next = snapshotOf([make('a', 'running', 'waiting_for_approval')]);
-    expect(diffStatuses(prev, next)).toEqual({ newlyWaiting: [], waitingCount: 1 });
-  });
-
-  it('drops the count when sessions resume or disappear', () => {
-    const prev = snapshotOf([make('a', 'running', 'waiting_for_user')]);
-    expect(diffStatuses(prev, snapshotOf([make('a', 'running', 'working')]))).toEqual({
-      newlyWaiting: [],
-      waitingCount: 0,
-    });
-    expect(diffStatuses(prev, snapshotOf([]))).toEqual({ newlyWaiting: [], waitingCount: 0 });
   });
 });
 

@@ -3,7 +3,7 @@ import { log } from './log';
 import { fixtureOrigins, originOf, state } from './state';
 
 // F1: GitHub tab views get sanitized clipboard writes (PR copy buttons); the
-// Devin view also gets notifications. Everything else is denied. In test mode
+// Devin view gets clipboard-write only (OS notifications go through the in-app center). In test mode
 // the fixture Git origins count as GitHub hosts.
 function isGitOrigin(origin: string): boolean {
   try {
@@ -24,7 +24,7 @@ export function setPermissions(
     if (viewName === 'devin') {
       return (
         originOf(origin) === originOf(state.tenantUrl) &&
-        (permission === 'notifications' || permission === 'clipboard-sanitized-write')
+        permission === 'clipboard-sanitized-write'
       );
     }
     if (isGhTab) return permission === 'clipboard-sanitized-write' && isGitOrigin(origin);

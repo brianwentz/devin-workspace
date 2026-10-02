@@ -39,10 +39,17 @@ function hooks(app: ElectronApplication) {
     pollNow: () => app.evaluate(() => (globalThis as any).__devinworkspaces.pollNow() as Promise<void>),
     listPrs: () =>
       app.evaluate(() => (globalThis as any).__devinworkspaces.listPrs() as PrLink[]),
-    clickNotification: (id: string) =>
-      app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.clickNotification(value), id),
     newSession: () => app.evaluate(() => (globalThis as any).__devinworkspaces.newSession()),
-    testNotification: () => app.evaluate(() => (globalThis as any).__devinworkspaces.testNotification()),
+    // P6 notification center
+    notifications: () => app.evaluate(() => (globalThis as any).__devinworkspaces.notifications()),
+    openNotification: (id: string) =>
+      app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.notificationsOpen(value), id),
+    pushNotification: (partial: Record<string, unknown>) =>
+      app.evaluate((_e, value: Record<string, unknown>) => (globalThis as any).__devinworkspaces.pushNotification(value), partial),
+    simulateUpdate: (version: string) =>
+      app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.simulateUpdateDownloaded(value), version),
+    panelOpen: () => app.evaluate(() => (globalThis as any).__devinworkspaces.panelOpen()),
+    childViews: () => app.evaluate(() => (globalThis as any).__devinworkspaces.childViews()),
     loadDevinUrl: (url: string) =>
       app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.loadDevinUrl(value), url),
     closeTab: (id: string) =>
@@ -78,6 +85,7 @@ async function launch(profile: string, logFile: string) {
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
     DEVIN_WORKSPACES_API_BASE: fixtures.apiUrl,
     DEVIN_WORKSPACES_POLL_MS: String(POLL_MS),
+    DEVIN_WORKSPACES_TEST_BANNER_MS: '1500',
   });
   await expect.poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
   return app;
@@ -95,7 +103,7 @@ test.beforeEach(() => {
   fixtures.api.clearRequests();
 });
 
-test('stores the PAT encrypted, polls with it, toasts on waiting_for_user and badges', async () => {
+test('stores the PAT encrypted, polls with it, notifies in-app on waiting_for_user', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
   const logFile = join(profile, 'events.jsonl');
   const app = await launch(profile, logFile);
@@ -122,47 +130,54 @@ test('stores the PAT encrypted, polls with it, toasts on waiting_for_user and ba
     expect(requests[0]?.path).toBe('/v3/self');
     expect(requests.find((r) => r.path.includes('/sessions'))?.path).toContain('first=100');
     await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
-    expect((await state(app)).notifications.waitingCount).toBe(0);
+    expect((await state(app)).notifications.unreadCount).toBe(0);
 
-    // Status flips to waiting_for_user -> count + notification-shown within 2s.
+    // Status flips to waiting_for_user -> unread entry + notification-added + badge.
     fixtures.api.setSessions([
       { session_id: 'sess-1', title: 'Fix login bug', status: 'running', status_detail: 'waiting_for_user', updated_at: 11 },
       { session_id: 'sess-2', title: 'Old one', status: 'exit', status_detail: 'finished', updated_at: 5 },
     ]);
     const flippedAt = Date.now();
     await expect
-      .poll(async () => (await state(app)).notifications.waitingCount, { timeout: 2000, intervals: [50, 100] })
+      .poll(async () => (await state(app)).notifications.unreadCount, { timeout: 2000, intervals: [50, 100] })
       .toBe(1);
     const detectedAfterMs = Date.now() - flippedAt;
     expect(detectedAfterMs).toBeLessThan(2000);
-    await waitForEvent(logFile, 'notification-shown');
-    const shown = (await readEvents(logFile)).filter((e) => e.event === 'notification-shown');
+    await waitForEvent(logFile, 'notification-added');
+    const shown = (await readEvents(logFile)).filter((e) => e.event === 'notification-added');
     expect(shown).toHaveLength(1);
     expect((shown[0]?.detail as any).sessionId).toBe('sess-1');
-    expect((shown[0]?.detail as any).status).toBe('waiting_for_user');
+    expect((shown[0]?.detail as any).kind).toBe('waiting');
     const badges = (await readEvents(logFile)).filter((e) => e.event === 'badge');
     expect((badges.at(-1)?.detail as any).count).toBe(1);
+    // The rail badge shows the unread count.
+    await expect
+      .poll(async () => evaluateInShell(app, `document.getElementById('notificationsBadge')?.textContent`))
+      .toBe('1');
 
     // Same waiting state on later polls does not re-notify.
     await h.pollNow();
     await h.pollNow();
-    expect((await readEvents(logFile)).filter((e) => e.event === 'notification-shown')).toHaveLength(1);
+    expect((await readEvents(logFile)).filter((e) => e.event === 'notification-added')).toHaveLength(1);
 
-    // Clicking the toast navigates devinView to the tenant session and shows Cloud.
+    // Opening the notification navigates devinView to the session + reads it.
     await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
     await expect.poll(async () => (await state(app)).surface).toBe('settings');
-    await h.clickNotification('sess-1');
+    const list = (await h.notifications()) as { id: string; sessionId: string | null; readAt: number | null }[];
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ sessionId: 'sess-1', readAt: null });
+    await evaluateInShell(app, `window.devinworkspaces.notificationsOpen('${list[0]!.id}')`);
     await expect.poll(async () => (await state(app)).surface).toBe('cloud');
     await expect.poll(() => h.devinUrl()).toBe(`${fixtures.devinUrl}/sessions/sess-1`);
     await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-1');
+    await expect.poll(async () => (await state(app)).notifications.unreadCount).toBe(0);
 
-    // Session resumes working -> badge cleared.
+    // Session resumes working; unread count unchanged (read entries stay).
     fixtures.api.setSessions([
       { session_id: 'sess-1', title: 'Fix login bug', status: 'running', status_detail: 'working', updated_at: 12 },
     ]);
-    await expect.poll(async () => (await state(app)).notifications.waitingCount).toBe(0);
-    const badgesAfter = (await readEvents(logFile)).filter((e) => e.event === 'badge');
-    expect((badgesAfter.at(-1)?.detail as any).count).toBe(0);
+    await h.pollNow();
+    expect((await state(app)).notifications.unreadCount).toBe(0);
 
     // Secrets at rest: encrypted blob only, no plaintext anywhere on disk or in the log.
     const secretsFile = join(profile, 'secrets.json');
@@ -284,13 +299,6 @@ test('lists the current session PRs for quick-open and Ctrl+N goes to the new-se
     await expect.poll(() => h.devinUrl()).toBe(`${fixtures.devinUrl}/`);
     await waitForEvent(logFile, 'new-session');
 
-    // Test notification logs a shown event (toast suppressed under test mode).
-    await h.testNotification();
-    const shown = (await readEvents(logFile)).filter(
-      (e) => e.event === 'notification-shown' && (e.detail as any).status === 'test',
-    );
-    expect(shown).toHaveLength(1);
-    expect((shown[0]?.detail as any).toast).toBe(false);
   } finally {
     await quit(app, profile);
   }
@@ -394,13 +402,10 @@ test('auto-opens a lazy background tab in the session scope when a session gains
     expect((await state(app)).tabs.tabs).toHaveLength(0);
     expect(await h.tabInfo(prTabId)).toBeNull();
 
-    // (4) Toggle off via the settings IPC (restarts the poller -> fresh baseline),
-    // then a new PR appears: nothing opens.
-    const restartsBefore = (await events('notifier-start')).length;
+    // (4) Toggle off via the settings IPC. The flag is read per poll — no
+    // restart, polls keep running, and a new PR still opens nothing.
     await evaluateInShell(app, `window.devinworkspaces.setSettings({ prs: { autoOpenTabs: false } })`);
     await expect.poll(async () => (await state(app)).settings.prs).toEqual({ autoOpenTabs: false });
-    await expect.poll(async () => (await events('notifier-start')).length).toBeGreaterThan(restartsBefore);
-    await pollOnce();
     fixtures.api.setSessions([session([existingPr, newPr, laterPr])]);
     await pollOnce();
     await pollOnce();
@@ -409,11 +414,10 @@ test('auto-opens a lazy background tab in the session scope when a session gains
     expect((await state(app)).tabs.hiddenTabCount).toBe(1); // only the GLOBAL tab
     expect(await h.listScopes()).not.toContainEqual(expect.objectContaining({ scope: 'sess-pr' }));
 
-    // Toggle back on: the restart baseline includes laterPr, so still nothing opens
-    // until a genuinely new PR arrives.
+    // Toggle back on: the poller kept running, so laterPr is already in the
+    // baseline — still nothing opens until a genuinely new PR arrives.
     await evaluateInShell(app, `window.devinworkspaces.setSettings({ prs: { autoOpenTabs: true } })`);
     await expect.poll(async () => (await state(app)).settings.prs).toEqual({ autoOpenTabs: true });
-    await pollOnce();
     await pollOnce();
     expect(await events('pr-auto-open')).toHaveLength(1);
     const fourthPr = `${fixtures.githubUrl}/acme/widgets/pull/4`;
@@ -438,5 +442,119 @@ test('auto-opens a lazy background tab in the session scope when a session gains
     expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
   } finally {
     await quit(app, profile);
+  }
+});
+
+test('notification panel: badge, banner, open/read/delete, update entry, restart persistence', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notifcenter-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  const shell = async (expr: string) => evaluateInShell(app, expr);
+  try {
+    // Waiting notification via the poller.
+    fixtures.api.setSessions([
+      { session_id: 'sess-1', title: 'Fix login bug', status: 'running', status_detail: 'working', updated_at: 1 },
+    ]);
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
+    fixtures.api.setSessions([
+      { session_id: 'sess-1', title: 'Fix login bug', status: 'running', status_detail: 'waiting_for_user', updated_at: 2 },
+    ]);
+    await waitForEvent(logFile, 'notification-added');
+    await expect
+      .poll(async () => shell(`document.getElementById('notificationsBadge')?.textContent`))
+      .toBe('1');
+
+    // Banner appears in the title bar, then auto-hides (test-shortened).
+    await expect
+      .poll(async () => shell(`document.getElementById('notificationBanner')?.textContent`))
+      .toContain('Fix login bug');
+    await expect
+      .poll(async () => shell(`Boolean(document.getElementById('notificationBanner'))`), { timeout: 6000 })
+      .toBe(false);
+
+    // Panel open: unread entry bold; the shell view is raised over hosted views.
+    await evaluateInShell(app, `window.devinworkspaces.notificationsPanel(true)`);
+    await expect.poll(async () => shell(`Boolean(document.getElementById('notificationsPanel'))`)).toBe(true);
+    expect(await h.panelOpen()).toBe(true);
+    const views = (await h.childViews()) as { url: string }[];
+    expect(views.at(-1)?.url).toContain('app://shell/');
+    await expect
+      .poll(async () => shell(`document.querySelector('[data-notification-id]')?.hasAttribute('data-unread')`))
+      .toBe(true);
+
+    // Checkbox marks read without navigating; badge drops to hidden.
+    await shell(
+      `document.querySelector('[data-notification-id] input[aria-label="Mark as read"]').click()`,
+    );
+    await expect.poll(async () => (await state(app)).notifications.unreadCount).toBe(0);
+    await expect
+      .poll(async () => shell(`Boolean(document.getElementById('notificationsBadge'))`))
+      .toBe(false);
+    await expect.poll(async () => shell(`Boolean(document.getElementById('notificationsPanel'))`)).toBe(true); // still open
+
+    // Push a second + update entries; body click opens the session notification.
+    await h.pushNotification({ kind: 'blocked', sessionId: 'sess-1', sessionTitle: 'Fix login bug', title: 'Fix login bug', body: 'Blocked — needs your input' });
+    await h.simulateUpdate('9.9.9');
+    await expect.poll(async () => (await h.notifications()).then ? 0 : ((await h.notifications()) as any[]).length).toBe(3);
+    const entries = (await h.notifications()) as { id: string; kind: string; title: string }[];
+    expect(entries.find((e) => e.kind === 'update')?.title).toBe('Update v9.9.9 ready');
+    const blocked = entries.find((e) => e.kind === 'blocked')!;
+    // Click the blocked item body → devin navigates to the session, panel closes.
+    await shell(`document.querySelector('[data-notification-id="${blocked.id}"] > button').click()`);
+    await expect.poll(async () => (await state(app)).notifications.panelOpen).toBe(false);
+    await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-1');
+    await expect.poll(async () => (await h.tabInfo?.(blocked.id) ?? null)).toBeDefined();
+    // hosted views get input again — shell back at index 0
+    const viewsAfter = (await h.childViews()) as { url: string }[];
+    expect(viewsAfter[0]?.url).toContain('app://shell/');
+
+    // Update entry: clicking logs update-install (test mode, no quit).
+    await evaluateInShell(app, `window.devinworkspaces.notificationsPanel(true)`);
+    const upd = ((await h.notifications()) as { id: string; kind: string }[]).find((e) => e.kind === 'update')!;
+    await evaluateInShell(app, `window.devinworkspaces.notificationsOpen('${upd.id}')`);
+    await waitForEvent(logFile, 'update-install');
+    await expect.poll(async () => ((await h.notifications()) as any[]).filter((e) => e.kind === 'update').length).toBe(0);
+
+    // Mark all read / clear all via panel buttons.
+    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', sessionTitle: 's', title: 'w1', body: 'b' });
+    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', sessionTitle: 's', title: 'w2', body: 'b2' });
+    await evaluateInShell(app, `window.devinworkspaces.notificationsPanel(true)`);
+    await expect.poll(async () => shell(`document.querySelectorAll('[data-notification-id]').length`)).toBe(3);
+    await shell(`document.getElementById('markAllRead').click()`);
+    await expect.poll(async () => (await state(app)).notifications.unreadCount).toBe(0);
+    // Trash one entry; clear-all empties the rest.
+    const rest = (await h.notifications()) as { id: string }[];
+    await shell(`document.querySelector('[data-notification-id="${rest[0]!.id}"] [aria-label="Delete"]').click()`);
+    await expect.poll(async () => ((await h.notifications()) as any[]).length).toBe(2);
+    await shell(`document.getElementById('clearAll').click()`);
+    await expect.poll(async () => ((await h.notifications()) as any[]).length).toBe(0);
+    await expect.poll(async () => shell(`document.getElementById('markAllRead').disabled`)).toBe(true);
+
+    // Push two entries that must survive restart, plus one update entry that
+    // must not (runtime-only kind). Wait past the 300 ms debounced save.
+    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', sessionTitle: 's1', title: 'Persist me 1', body: 'b' });
+    await h.pushNotification({ kind: 'blocked', sessionId: 'sess-1', sessionTitle: 's1', title: 'Persist me 2', body: 'b' });
+    await h.simulateUpdate('9.9.8');
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await app.close().catch(() => undefined);
+    const app2 = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+      DEVIN_WORKSPACES_API_BASE: fixtures.apiUrl,
+      DEVIN_WORKSPACES_POLL_MS: String(POLL_MS),
+      DEVIN_WORKSPACES_TEST_BANNER_MS: '1500',
+    });
+    try {
+      await expect.poll(async () => app2.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
+      const restored = (await app2.evaluate(() => (globalThis as any).__devinworkspaces.notifications())) as { kind: string; title: string }[];
+      expect(restored.map((e) => e.title)).toEqual(['Persist me 2', 'Persist me 1']);
+      expect(restored.some((e) => e.kind === 'update')).toBe(false);
+    } finally {
+      await quit(app2, profile);
+    }
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
   }
 });

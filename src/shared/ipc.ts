@@ -34,7 +34,15 @@ export const IpcChannels = {
   secretsClearPat: 'secrets:clearPat',
   prsList: 'prs:list',
   prsPopup: 'prs:popup',
-  notifyTest: 'notify:test',
+  // P6 notification center
+  notificationsList: 'notifications:list',
+  notificationsMarkRead: 'notifications:markRead',
+  notificationsMarkAllRead: 'notifications:markAllRead',
+  notificationsRemove: 'notifications:remove',
+  notificationsClear: 'notifications:clear',
+  notificationsOpen: 'notifications:open',
+  notificationsPanel: 'notifications:panel',
+  notificationBanner: 'notifications:banner',
   localState: 'local:state',
   localUpdate: 'local:update',
   localWorkspaceAdd: 'local:workspace:add',
@@ -83,7 +91,31 @@ export const PlacementSchema = z.object({
 });
 const WindowPlacementsSchema = z.record(z.string(), PlacementSchema);
 // P5: orgId overrides the org resolved from GET /v3/self (empty = auto).
-const NotificationsFields = { enabled: z.boolean(), orgId: z.string().max(128) };
+// P6: notification center settings. `collect` gates derive+store, `banner` the
+// title-bar toast; `kinds` per-kind toggles (finished off by default).
+const NotificationKindFields = {
+  waiting: z.boolean(),
+  approval: z.boolean(),
+  blocked: z.boolean(),
+  finished: z.boolean(),
+  prOpened: z.boolean(),
+  prCompleted: z.boolean(),
+  update: z.boolean(),
+};
+const NotificationsFields = {
+  orgId: z.string().max(128),
+  collect: z.boolean(),
+  banner: z.boolean(),
+  kinds: z.object({
+    waiting: NotificationKindFields.waiting.default(true),
+    approval: NotificationKindFields.approval.default(true),
+    blocked: NotificationKindFields.blocked.default(true),
+    finished: NotificationKindFields.finished.default(false),
+    prOpened: NotificationKindFields.prOpened.default(true),
+    prCompleted: NotificationKindFields.prCompleted.default(true),
+    update: NotificationKindFields.update.default(true),
+  }),
+};
 // F1: open a background tab (in the session's scope) when the poller sees a new PR.
 const PrsFields = { autoOpenTabs: z.boolean() };
 const LocalFields = { devinPath: z.string().nullable() };
@@ -144,10 +176,18 @@ export const SettingsObject = z.object({
     .default({ keepAliveHours: 24, maxLiveTabs: 8 }),
   notifications: z
     .object({
-      enabled: NotificationsFields.enabled.default(true),
       orgId: NotificationsFields.orgId.default(''),
+      collect: NotificationsFields.collect.default(true),
+      banner: NotificationsFields.banner.default(true),
+      kinds: NotificationsFields.kinds.default({
+        waiting: true, approval: true, blocked: true, finished: false,
+        prOpened: true, prCompleted: true, update: true,
+      }),
     })
-    .default({ enabled: true, orgId: '' }),
+    .default({
+      orgId: '', collect: true, banner: true,
+      kinds: { waiting: true, approval: true, blocked: true, finished: false, prOpened: true, prCompleted: true, update: true },
+    }),
   prs: z
     .object({ autoOpenTabs: PrsFields.autoOpenTabs.default(true) })
     .default({ autoOpenTabs: true }),
@@ -175,7 +215,10 @@ export const SettingsPatchSchema = z.object({
   routing: z.object(RoutingFields).partial().optional(),
   pane: z.object(PaneFields).partial().optional(),
   tabs: z.object(TabsFields).partial().optional(),
-  notifications: z.object(NotificationsFields).partial().optional(),
+  notifications: z
+    .object({ ...NotificationsFields, kinds: z.object(NotificationKindFields).partial() })
+    .partial()
+    .optional(),
   prs: z.object(PrsFields).partial().optional(),
   local: z.object(LocalFields).partial().optional(),
   layout: z.object(LayoutFields).partial().optional(),
@@ -196,14 +239,19 @@ const TabSchema = z.object({
 
 // P5: poller/notifier status exposed to the shell. Never contains the PAT.
 export const NotificationsStateSchema = z.object({
-  enabled: z.boolean(),
+  collect: z.boolean(),
+  banner: z.boolean(),
   hasToken: z.boolean(),
-  waitingCount: z.number().int(),
   lastPollAt: z.string().nullable(),
   authError: z.boolean(),
   lastError: z.string().nullable(),
   currentSessionPrCount: z.number().int(),
+  unreadCount: z.number().int(),
+  panelOpen: z.boolean(),
 });
+export const NotificationIdArg = z.object({ id: z.string() });
+export const NotificationPanelArg = z.object({ open: z.boolean() });
+
 export type NotificationsState = z.infer<typeof NotificationsStateSchema>;
 
 export const TerminalSummarySchema = z.object({

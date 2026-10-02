@@ -42,6 +42,15 @@ export function migrateSettingsRaw(raw: unknown): unknown {
       // settings.tabs object — already current shape (or invalid; repair drops it)
     }
   }
+  // notifications.enabled (pre-P6) → collect
+  if (out.notifications && typeof out.notifications === 'object') {
+    const n = { ...(out.notifications as Record<string, unknown>) };
+    if (n.enabled !== undefined) {
+      if (n.collect === undefined) n.collect = n.enabled;
+      delete n.enabled;
+    }
+    out.notifications = n;
+  }
   const discardMinutes = out.discardIdleMinutes;
   if (discardMinutes !== undefined) {
     const tabsOut =
@@ -110,7 +119,12 @@ export function mergeSettings(current: Settings, patch: unknown): Settings {
     routing: mergeDefined(current.routing, routing),
     pane: mergeDefined(current.pane, pane),
     tabs: mergeDefined(current.tabs, tabs),
-    notifications: mergeDefined(current.notifications, notifications),
+    notifications: notifications
+      ? {
+          ...mergeDefined(current.notifications, { ...notifications, kinds: undefined }),
+          kinds: mergeDefined(current.notifications.kinds, notifications.kinds),
+        }
+      : current.notifications,
     prs: mergeDefined(current.prs, prs),
     local: mergeDefined(current.local, local),
     layout: mergeDefined(current.layout, layout),

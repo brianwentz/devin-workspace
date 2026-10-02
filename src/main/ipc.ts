@@ -26,9 +26,11 @@ import { GLOBAL } from '../core/tabModel';
 import { sessionUrl } from '../core/sessions';
 import { log } from './log';
 import { scopeLabel } from '../core/notifyModel';
-import { currentSessionPrs, notifier, popupPrMenu } from './notifier';
+import { notificationStore } from './notifications';
+import { currentSessionPrs, notifier, openNotification, popupPrMenu } from './notifier';
 import { handleLink, loadInDevinView } from './routing';
 import { historyAction, navigationTarget } from './shortcuts';
+import { NotificationIdArg, NotificationPanelArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import {
@@ -39,6 +41,7 @@ import {
   moveDrag,
   notifyShell,
   publicState,
+  setNotificationsPanel,
 } from './window';
 
 export function setupIpc(): void {
@@ -145,6 +148,7 @@ export function setupIpc(): void {
     const parsed = SurfaceArg.safeParse(next);
     if (!parsed.success) return;
     state.surface = parsed.data;
+    setNotificationsPanel(false);
     log('shell', 'surface-set', { detail: { surface: state.surface } });
     applyLayout();
   });
@@ -258,7 +262,24 @@ function setupExtrasIpc(): void {
   guardedOn(IpcChannels.prsPopup, () => {
     popupPrMenu();
   });
-  guardedOn(IpcChannels.notifyTest, () => {
-    notifier.showTestNotification();
+  // P6 notification center
+  guardedHandle(IpcChannels.notificationsList, () => notificationStore().entries());
+  guardedOn(IpcChannels.notificationsMarkRead, (_e, arg: unknown) => {
+    const parsed = NotificationIdArg.safeParse(arg);
+    if (parsed.success) notificationStore().markRead(parsed.data.id);
+  });
+  guardedOn(IpcChannels.notificationsMarkAllRead, () => notificationStore().markAllRead());
+  guardedOn(IpcChannels.notificationsRemove, (_e, arg: unknown) => {
+    const parsed = NotificationIdArg.safeParse(arg);
+    if (parsed.success) notificationStore().remove(parsed.data.id);
+  });
+  guardedOn(IpcChannels.notificationsClear, () => notificationStore().clear());
+  guardedOn(IpcChannels.notificationsOpen, (_e, arg: unknown) => {
+    const parsed = NotificationIdArg.safeParse(arg);
+    if (parsed.success) openNotification(parsed.data.id);
+  });
+  guardedOn(IpcChannels.notificationsPanel, (_e, arg: unknown) => {
+    const parsed = NotificationPanelArg.safeParse(arg);
+    if (parsed.success) setNotificationsPanel(parsed.data.open);
   });
 }

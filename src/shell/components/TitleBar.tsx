@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RAIL_WIDTH, TITLE_BAR_HEIGHT } from '../../core/layout';
 import type { ShellState } from '../../shared/ipc';
+import { NotificationBanner } from './NotificationBanner';
 import { TabStrip } from './TabStrip';
 
 type Tab = ShellState['tabs']['tabs'][number];
@@ -99,6 +100,12 @@ export function TitleBar({
         className="absolute top-0 h-full"
         style={{ left: RAIL_WIDTH, width: Math.max(0, dragRight - RAIL_WIDTH) }}
       />
+      <div
+        className="pointer-events-none absolute top-0 h-full flex items-center justify-center [&>*]:pointer-events-auto"
+        style={{ left: RAIL_WIDTH, width: Math.max(0, dragRight - RAIL_WIDTH) }}
+      >
+        <NotificationBanner />
+      </div>
       {paneVisible && (
         <div
           className="app-no-drag absolute top-0 h-full flex items-stretch gap-1.5 pr-1.5"

@@ -9,8 +9,6 @@ const ACTIVE_STATUSES = new Set(['new', 'claimed', 'running', 'resuming', 'worki
 // Status / status_detail values that mean the user must act.
 const WAITING_DETAILS = new Set(['waiting_for_user', 'waiting_for_approval', 'blocked']);
 
-export type StatusSnapshot = Record<string, string>; // session_id -> effective status key
-
 export function effectiveStatus(session: Pick<DevinSession, 'status' | 'status_detail'>): string {
   const detail = (session.status_detail ?? '').toLowerCase();
   const status = (session.status ?? '').toLowerCase();
@@ -28,34 +26,6 @@ export function isWaiting(session: Pick<DevinSession, 'status' | 'status_detail'
 export function isActive(session: Pick<DevinSession, 'status' | 'status_detail'>): boolean {
   const key = effectiveStatus(session);
   return ACTIVE_STATUSES.has(key) && !WAITING_DETAILS.has(key);
-}
-
-export function snapshotOf(sessions: DevinSession[]): StatusSnapshot {
-  const out: StatusSnapshot = {};
-  for (const session of sessions) out[session.session_id] = effectiveStatus(session);
-  return out;
-}
-
-export interface StatusDiff {
-  newlyWaiting: string[];
-  waitingCount: number;
-}
-
-// Sessions that transitioned into a waiting state since `prev`. A session
-// first seen already waiting is counted but not reported as newly waiting
-// unless prev is empty (first poll) — first poll never toasts.
-export function diffStatuses(prev: StatusSnapshot | null, next: StatusSnapshot): StatusDiff {
-  const newlyWaiting: string[] = [];
-  let waitingCount = 0;
-  for (const [id, status] of Object.entries(next)) {
-    const waiting = WAITING_DETAILS.has(status);
-    if (!waiting) continue;
-    waitingCount += 1;
-    if (prev === null) continue;
-    const before = prev[id];
-    if (before === undefined || !WAITING_DETAILS.has(before)) newlyWaiting.push(id);
-  }
-  return { newlyWaiting, waitingCount };
 }
 
 // P8/Q3: which previously-seen session scopes should have their tabs closed.
@@ -152,17 +122,3 @@ export function newPullRequests(
   return out;
 }
 
-export function sessionTitle(session: Pick<DevinSession, 'title' | 'session_id'>): string {
-  return session.title?.trim() || session.session_id;
-}
-
-export function waitingBody(status: string): string {
-  switch (status) {
-    case 'waiting_for_approval':
-      return 'Devin is waiting for your approval.';
-    case 'blocked':
-      return 'Devin is blocked and needs your input.';
-    default:
-      return 'Devin is waiting for your reply.';
-  }
-}

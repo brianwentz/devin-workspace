@@ -6,7 +6,9 @@ import { currentFillTarget } from './credentials';
 import { fromShell } from './ipcGuard';
 import { terminalHost } from './local/terminalHost';
 import type { Surface } from '../shared/ipc';
-import { currentSessionPrs, notifier } from './notifier';
+import { notificationStore } from './notifications';
+import { currentSessionPrs, notifier, openNotification } from './notifier';
+import { updateDownloaded } from './updater';
 import { handleLink } from './routing';
 import { historyAction, navigationTarget, openNewSession } from './shortcuts';
 import { state, testMode } from './state';
@@ -138,9 +140,22 @@ export function registerTestHooks(): void {
       hasPat: () => state.secrets?.hasPat() ?? false,
       pollNow: () => notifier.pollNow(),
       listPrs: () => currentSessionPrs(),
-      clickNotification: (sessionId: string) => notifier.openSession(sessionId, 'test-click'),
+      // P6 notification center
+      notifications: () => notificationStore().entries(),
+      pushNotification: (partial: Record<string, unknown>) =>
+        notificationStore().add({
+          kind: 'waiting',
+          sessionId: null,
+          sessionTitle: 'Devin Workspaces',
+          title: 'Test',
+          body: 'Test notification',
+          createdAt: Date.now(),
+          ...(partial as object),
+        }).id,
+      simulateUpdateDownloaded: (version: string) => updateDownloaded(version),
+      panelOpen: () => state.notificationsPanelOpen,
+      notificationsOpen: (id: string) => openNotification(id),
       newSession: () => openNewSession(),
-      testNotification: () => notifier.showTestNotification(),
       // Devin Local (P4)
       localState: () => publicLocalState(),
       localAddWorkspace: (path: string) => localHost()?.addWorkspace(path) ?? null,

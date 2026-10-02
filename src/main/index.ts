@@ -16,6 +16,8 @@ import { SettingsStore } from './settings';
 import { fixtureOrigins, state, testMode } from './state';
 import { registerTestHooks } from './testHooks';
 import { keepAliveMs, TabManager } from './tabs';
+import { notificationStore, notificationsFlush } from './notifications';
+import { hasDownloadedUpdate, quitAndInstall, restoreUpdateEntry } from './updater';
 import { applyLayout, cancelDrag, detachView, notifyShell } from './window';
 import {
   attachPlacementTracking,
@@ -63,7 +65,7 @@ function onBeforeUnload(tabId: string, event: Electron.Event): boolean {
   return leave;
 }
 
-export async function shutdown(): Promise<void> {
+export async function shutdown(options: { installUpdate?: boolean } = {}): Promise<void> {
   if (state.shutdownPromise) return state.shutdownPromise;
   state.shuttingDown = true;
   state.shutdownPromise = (async () => {
@@ -91,6 +93,8 @@ export async function shutdown(): Promise<void> {
         // The probe may have discarded the active tab — restore a tab in the
         // visible scope only (never pull a hidden-scope tab into the strip).
         state.tabManager?.restoreAfterProbeCancel(probe.vetoed);
+        // Vetoed quit: the update entry must survive the cancelled shutdown.
+        restoreUpdateEntry();
         applyLayout();
         return;
       }
@@ -103,6 +107,7 @@ export async function shutdown(): Promise<void> {
       // best effort at shutdown
     }
     localHost()?.dispose();
+    notificationsFlush();
     savePlacementNow();
     state.settings?.syncFromState();
     await terminalHost.dispose();
@@ -139,14 +144,18 @@ export async function shutdown(): Promise<void> {
     state.windowRef?.destroy();
     state.windowRef = null;
     // app.quit() can be dropped while a quit is already in flight (the window
-    // close was vetoed to run this cleanup); exit() is unconditional.
-    app.exit(0);
+    // close was vetoed to run this cleanup); exit() is unconditional. When an
+    // update is downloaded, quitAndInstall is the exit — app.exit() would skip
+    // the quit lifecycle and autoInstallOnAppQuit would never run.
+    if (options.installUpdate || hasDownloadedUpdate()) quitAndInstall();
+    else app.exit(0);
   })();
   return state.shutdownPromise;
 }
 
 async function createWindow(): Promise<void> {
   state.settings = new SettingsStore(userData);
+  notificationStore(userData);
   state.secrets = new SecretStore(userData);
   await state.secrets.load();
   setupLocal();

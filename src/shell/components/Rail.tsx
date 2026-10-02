@@ -1,4 +1,6 @@
+import { Bell } from 'lucide-react';
 import { RAIL_WIDTH, TITLE_BAR_HEIGHT } from '../../core/layout';
+import { useShellState } from '../store';
 import type { Surface } from '../../shared/ipc';
 import { PrQuickOpen } from './PrQuickOpen';
 
@@ -13,6 +15,35 @@ interface RailProps {
 
 const buttonClass =
   'w-10 h-10 text-xl rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] aria-pressed:bg-[#31455f] aria-pressed:border-[#54749c]';
+
+// P6: bell toggles the notification panel (a shell-DOM modal; main raises the
+// shell view while it's open). Unread badge mirrors the taskbar overlay count.
+function NotificationsButton({ buttonClass }: { buttonClass: string }) {
+  const state = useShellState();
+  const unread = state?.notifications.unreadCount ?? 0;
+  const open = state?.notifications.panelOpen ?? false;
+  return (
+    <button
+      id="notificationsButton"
+      type="button"
+      aria-label="Notifications"
+      aria-pressed={open}
+      title="Notifications"
+      className={`${buttonClass} relative flex items-center justify-center`}
+      onClick={() => window.devinworkspaces.notificationsPanel(!open)}
+    >
+      <Bell size={18} strokeWidth={1.8} />
+      {unread > 0 && (
+        <span
+          id="notificationsBadge"
+          className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-[#d93a2f] text-[10px] leading-4 text-center"
+        >
+          {unread > 9 ? '9+' : unread}
+        </span>
+      )}
+    </button>
+  );
+}
 
 export function Rail({
   surface,
@@ -75,6 +106,7 @@ export function Rail({
         </button>
       )}
       <PrQuickOpen buttonClass={buttonClass} />
+      <NotificationsButton buttonClass={buttonClass} />
       <span className="flex-1" />
       <button
         id="terminalToggle"
