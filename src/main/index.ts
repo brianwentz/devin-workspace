@@ -184,6 +184,7 @@ async function createWindow(): Promise<void> {
     show: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#101722', symbolColor: '#e8edf5', height: 36 },
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 12, y: 10 } } : {}),
   });
   if (restored?.maximized) state.windowRef.maximize();
   attachPlacementTracking(state.windowRef);

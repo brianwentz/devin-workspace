@@ -306,7 +306,11 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
             className="w-full max-w-md px-2 py-1.5 rounded-md border border-[#39475a] bg-[#0d141d] text-sm text-[#e8edf5]"
             value={terminalShell}
             onChange={(event) => setTerminalShell(event.target.value)}
-            placeholder="e.g. pwsh.exe or wsl.exe -d Ubuntu"
+            placeholder={
+              window.devinworkspaces.platform === 'darwin'
+                ? 'e.g. /bin/zsh -l'
+                : 'e.g. pwsh.exe or wsl.exe -d Ubuntu'
+            }
           />
           <span className="text-xs text-[#7f8ca0]">
             Blank = Windows Terminal default profile, else PowerShell.

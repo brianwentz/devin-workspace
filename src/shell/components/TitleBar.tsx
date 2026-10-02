@@ -29,11 +29,15 @@ function windowControlsOverlay(): WindowControlsOverlayLike | null {
   return candidate ?? null;
 }
 
+const isMac = window.devinworkspaces.platform === 'darwin';
+
 // Width of the strip the OS caption buttons cover on the right. Measured from the
 // overlay's titlebar rect when available; 138px is the standard win32 caption width.
+// macOS has no caption buttons on the right (traffic lights are on the left).
 const OVERLAY_FALLBACK = 138;
 
 function measureOverlayReserve(): number {
+  if (isMac) return 0;
   const overlay = windowControlsOverlay();
   if (!overlay) return OVERLAY_FALLBACK;
   const rect = overlay.getTitlebarAreaRect();
@@ -87,7 +91,8 @@ export function TitleBar({
         style={{ width: RAIL_WIDTH, height: '100%' }}
         title="Devin Workspaces"
       >
-        DW
+        {/* the macOS traffic lights cover the left rail */}
+        {!isMac && 'DW'}
       </div>
       {/* drag space over the main column (extends to the overlay gap when the pane is hidden) */}
       <div

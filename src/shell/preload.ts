@@ -110,6 +110,7 @@ const terminalApi = {
 };
 
 const api = {
+  platform: process.platform,
   ...localApi,
   ...terminalApi,
   getState: () => ipcRenderer.invoke(IpcChannels.stateGet) as Promise<ShellState>,

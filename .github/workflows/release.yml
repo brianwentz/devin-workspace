@@ -1,11 +1,15 @@
 name: release
 
 # Publish a GitHub Release with tag `vX.Y.Z` (targeting main) in the GitHub UI.
-# This workflow then sets package.json to X.Y.Z, builds the NSIS installer,
-# uploads the installer, blockmap and latest.yml to that release (the feed read
-# by src/main/updater.ts), and commits the version bump to main. Mark the
-# release as a pre-release to ship a build that existing clients will NOT
-# auto-update to (electron-updater ignores prereleases by default).
+# This workflow then sets package.json to X.Y.Z, builds the Windows NSIS
+# installer and the macOS (arm64) dmg/zip, uploads the installers, blockmaps
+# and latest.yml/latest-mac.yml to that release (the feed read by
+# src/main/updater.ts), and commits the version bump to main. macOS code
+# signing + notarization run only when the CSC_LINK / CSC_KEY_PASSWORD /
+# APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID secrets are set;
+# unsigned Mac builds ship with the updater disabled. Mark the release as a
+# pre-release to ship a build that existing clients will NOT auto-update to
+# (electron-updater ignores prereleases by default).
 on:
   release:
     types: [published]
@@ -17,29 +21,50 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  TAG: ${{ github.event.release.tag_name }}
+
 jobs:
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 45
-    env:
-      TAG: ${{ github.event.release.tag_name }}
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Validate tag
         id: tag
-        shell: pwsh
         run: |
-          if ($env:TAG -notmatch '^v(\d+)\.(\d+)\.(\d+)$') { throw "tag '$env:TAG' must match vX.Y.Z" }
-          $ver = $env:TAG.Substring(1)
-          git merge-base --is-ancestor $env:TAG main
-          if ($LASTEXITCODE -ne 0) { throw "tag $env:TAG is not an ancestor of main" }
-          $cur = (Get-Content package.json | ConvertFrom-Json).version
-          if ([version]$ver -le [version]$cur) { throw "tag version $ver must be greater than package.json version $cur" }
-          "version=$ver" >> $env:GITHUB_OUTPUT
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "tag '$TAG' must match vX.Y.Z"; exit 1; fi
+          ver="${TAG#v}"
+          git merge-base --is-ancestor "$TAG" main || { echo "tag $TAG is not an ancestor of main"; exit 1; }
+          node -e '
+            const [tag, cur] = [process.argv[1], require("./package.json").version].map(v => v.split(".").map(Number));
+            const i = tag.findIndex((n, idx) => n !== cur[idx]);
+            if (i === -1 || tag[i] < cur[i]) {
+              console.error(`tag version ${process.argv[1]} must be greater than package.json version ${cur.join(".")}`);
+              process.exit(1);
+            }
+          ' "$ver"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -49,7 +74,7 @@ jobs:
       - run: npm ci
 
       - name: Set package version from tag
-        run: npm version ${{ steps.tag.outputs.version }} --no-git-tag-version
+        run: npm version ${{ needs.prepare.outputs.version }} --no-git-tag-version
 
       - run: npm run typecheck
       - run: npm run test:unit
@@ -63,7 +88,7 @@ jobs:
       - name: Check artifacts
         shell: pwsh
         run: |
-          $ver = '${{ steps.tag.outputs.version }}'
+          $ver = '${{ needs.prepare.outputs.version }}'
           foreach ($f in "dist/DevinWorkspaces-Setup-$ver.exe", "dist/DevinWorkspaces-Setup-$ver.exe.blockmap", "dist/latest.yml") {
             if (-not (Test-Path $f)) { throw "missing $f" }
           }
@@ -76,25 +101,6 @@ jobs:
         shell: pwsh
         run: gh release upload $env:TAG dist/DevinWorkspaces-Setup-*.exe dist/DevinWorkspaces-Setup-*.exe.blockmap dist/latest.yml --clobber
 
-      - name: Verify release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
-        run: |
-          $names = gh release view $env:TAG --json assets --jq '.assets[].name'
-          if ($names -notcontains 'latest.yml') { throw "latest.yml not attached to $env:TAG; assets: $names" }
-
-      # Only after the release has its assets: record the bump on main.
-      - name: Commit version bump to main
-        shell: pwsh
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package.json package-lock.json
-          git commit -m "chore: release $env:TAG [skip ci]"
-          git pull --rebase origin main
-          git push origin HEAD:main
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -104,3 +110,105 @@ jobs:
             dist/*.exe
             dist/*.blockmap
             dist/latest.yml
+
+  macos:
+    needs: prepare
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Set package version from tag
+        run: npm version ${{ needs.prepare.outputs.version }} --no-git-tag-version
+
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+
+      # dmg + zip (arm64). Signs and notarizes only when the CSC_* / APPLE_*
+      # secrets exist; otherwise an unsigned build with the updater disabled
+      # (resources/signing.json written by afterPack inside the bundle).
+      - name: Build installer
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CSC_LINK" ]; then
+            echo "signing: Developer ID + notarization"
+            npx electron-builder --mac --arm64 --publish never -c.mac.notarize=true
+          else
+            echo "signing: none (CSC_LINK secret not set) — Mac auto-update disabled in this build"
+            CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --arm64 --publish never
+          fi
+
+      - name: Check artifacts
+        run: |
+          ver='${{ needs.prepare.outputs.version }}'
+          for f in "dist/DevinWorkspaces-$ver-arm64.dmg" "dist/DevinWorkspaces-$ver-arm64.zip" "dist/DevinWorkspaces-$ver-arm64.zip.blockmap" "dist/latest-mac.yml"; do
+            [ -f "$f" ] || { echo "missing $f"; exit 1; }
+          done
+          grep -Eq "^version:[[:space:]]*$ver[[:space:]]*$" dist/latest-mac.yml || { echo "dist/latest-mac.yml does not declare version $ver"; cat dist/latest-mac.yml; exit 1; }
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" "dist/DevinWorkspaces-${{ needs.prepare.outputs.version }}-arm64.dmg" "dist/DevinWorkspaces-${{ needs.prepare.outputs.version }}-arm64.zip" "dist/DevinWorkspaces-${{ needs.prepare.outputs.version }}-arm64.zip.blockmap" dist/latest-mac.yml --clobber
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: devin-workspaces-macos-${{ github.event.release.tag_name }}
+          if-no-files-found: error
+          path: |
+            dist/*-arm64.dmg
+            dist/*-arm64.zip
+            dist/*-arm64.zip.blockmap
+            dist/latest-mac.yml
+
+  finalize:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          names=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          echo "$names"
+          for f in latest.yml latest-mac.yml; do
+            grep -qx "$f" <<< "$names" || { echo "$f not attached to $TAG"; exit 1; }
+          done
+
+      # Only after the release has its assets: record the bump on main.
+      - name: Commit version bump to main
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          npm version "${TAG#v}" --no-git-tag-version
+          git add package.json package-lock.json
+          git commit -m "chore: release $TAG [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main

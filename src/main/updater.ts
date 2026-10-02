@@ -1,5 +1,7 @@
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { log } from './log';
 import { testMode } from './state';
 
@@ -14,6 +16,26 @@ export function setupUpdater(): void {
   if (!app.isPackaged || testMode) {
     log('shell', 'updater-disabled', { detail: { isPackaged: app.isPackaged, testMode } });
     return;
+  }
+  // electron-updater on darwin throws for unsigned apps; scripts/after-pack.cjs
+  // records whether the build was signed so unsigned Mac builds skip the
+  // updater instead of erroring on every check.
+  if (process.platform === 'darwin') {
+    let signed = false;
+    try {
+      const marker = JSON.parse(
+        readFileSync(join(process.resourcesPath, 'signing.json'), 'utf8'),
+      ) as { signed?: unknown };
+      signed = marker.signed === true;
+    } catch {
+      signed = false;
+    }
+    if (!signed) {
+      log('shell', 'updater-disabled', {
+        detail: { isPackaged: app.isPackaged, testMode, reason: 'unsigned-mac' },
+      });
+      return;
+    }
   }
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;

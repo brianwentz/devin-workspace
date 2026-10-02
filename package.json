@@ -16,6 +16,7 @@
     "os:input": "npm run build && node out/scripts/os-input.cjs",
     "icon": "node scripts/make-icon.mjs",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
     "smoke:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-install.ps1",
     "test:smoke": "playwright test --config playwright.smoke.config.ts",
     "measure:tabs": "npm run build && node out/scripts/measure-tabs.cjs",
@@ -75,6 +76,19 @@
       ],
       "icon": "build/icon.ico",
       "signExecutable": false
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "DevinWorkspaces-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
