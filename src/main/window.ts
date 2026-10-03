@@ -12,12 +12,14 @@ import {
   type Rect,
 } from '../core/layout';
 import { openPullRequests } from '../core/notifyModel';
+import { unreadPrCount, visiblePrs } from '../core/prPanelModel';
 import { effectiveScope } from '../core/tabModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
+import { prStore } from './prs';
 import { state } from './state';
 import { updateState } from './updater';
 
@@ -134,7 +136,9 @@ export function publicState(): ShellState {
       collect: state.settings?.current.notifications.collect ?? true,
       banner: state.settings?.current.notifications.banner ?? true,
       hasToken: state.secrets?.hasPat() ?? false,
-      openPrCount: openPullRequests(state.apiSessions).length,
+      openPrCount: visiblePrs(prStore().records(), openPullRequests(state.apiSessions)).length,
+      unreadPrCount: unreadPrCount(prStore().records(), openPullRequests(state.apiSessions)),
+      prsPanelOpen: state.prsPanelOpen,
       unreadCount: notificationsUnread(),
       panelOpen: state.notificationsPanelOpen,
     },
@@ -202,7 +206,10 @@ export function raiseShell(): void {
 // autofill picker, autofill save/update prompt).
 export function overlayOpen(): boolean {
   return (
-    state.notificationsPanelOpen || !!state.autofillPicker || !!state.autofillPrompt
+    state.notificationsPanelOpen ||
+    state.prsPanelOpen ||
+    !!state.autofillPicker ||
+    !!state.autofillPrompt
   );
 }
 
@@ -343,11 +350,23 @@ export function moveDrag(pos: number): void {
 // it but get no input. No timeout (unlike the drag raise).
 export function setNotificationsPanel(open: boolean): void {
   if (state.notificationsPanelOpen === open) return;
+  if (open) state.prsPanelOpen = false;
   state.notificationsPanelOpen = open;
   if (open) raiseShell();
   else if (!overlayOpen()) lowerShell();
   applyLayout();
   log('shell', 'notifications-panel', { detail: { open } });
+}
+
+// Same raise for the PR panel; opening it closes the notifications panel.
+export function setPrsPanel(open: boolean): void {
+  if (state.prsPanelOpen === open) return;
+  if (open) state.notificationsPanelOpen = false;
+  state.prsPanelOpen = open;
+  if (open) raiseShell();
+  else if (!overlayOpen()) lowerShell();
+  applyLayout();
+  log('shell', 'prs-panel', { detail: { open } });
 }
 
 export function endDrag(pos: number): void {

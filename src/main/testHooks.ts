@@ -7,7 +7,8 @@ import { terminalHost } from './local/terminalHost';
 import type { Surface } from '../shared/ipc';
 import { identityResolver } from './identity';
 import { notificationStore } from './notifications';
-import { notifier, openNotification, openPrs, openSessionPr } from './notifier';
+import { notifier, openNotification, openPr, openPrs, openSessionPr } from './notifier';
+import { prStore } from './prs';
 import { updateAvailable, updateDownloaded } from './updater';
 import { handleLink } from './routing';
 import { copyTabAddress, reloadCurrentScope } from './ipc';
@@ -139,6 +140,9 @@ export function registerTestHooks(): void {
       pollNow: () => notifier.pollNow(),
       listPrs: () => openPrs(),
       openSessionPr: (sessionId: string, url: string) => openSessionPr(sessionId, url),
+      prsPanelOpen: () => state.prsPanelOpen,
+      prRecords: () => prStore().records(),
+      prsOpen: (sessionId: string, url: string) => openPr(sessionId, url),
       // P6 notification center
       notifications: () => notificationStore().entries(),
       pushNotification: (partial: Record<string, unknown>) =>

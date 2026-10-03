@@ -73,6 +73,8 @@ export type PublicState = {
     noUserIdentity: boolean;
     identity: { source: 'self' | 'cli' | 'inferred' | 'manual' | null; resolved: boolean };
     openPrCount: number;
+    unreadPrCount: number;
+    prsPanelOpen: boolean;
     unreadCount: number;
     panelOpen: boolean;
   };

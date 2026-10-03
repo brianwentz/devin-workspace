@@ -52,6 +52,17 @@ function hooks(app: ElectronApplication) {
           (globalThis as any).__devinworkspaces.openSessionPr(args.sessionId, args.url),
         { sessionId, url },
       ),
+    prsPanelOpen: () => app.evaluate(() => (globalThis as any).__devinworkspaces.prsPanelOpen()),
+    prRecords: () =>
+      app.evaluate(
+        () =>
+          (globalThis as any).__devinworkspaces.prRecords() as {
+            url: string;
+            firstSeenAt: number;
+            readAt: number | null;
+            dismissedAt: number | null;
+          }[],
+      ),
     newSession: () => app.evaluate(() => (globalThis as any).__devinworkspaces.newSession()),
     // P6 notification center
     notifications: () => app.evaluate(() => (globalThis as any).__devinworkspaces.notifications()),
@@ -381,6 +392,115 @@ test('lists open PRs across my sessions with GitHub titles and opens them in the
     const prOpen = (await readEvents(logFile)).filter((e) => e.event === 'pr-open');
     expect(prOpen.at(-1)?.url).toBe(pr7);
     expect((prOpen.at(-1)?.detail as any).sessionId).toBe('sess-two');
+
+    // PR panel: every PR is unread from first observation; the badge counts
+    // unread, the panel lists the same rows.
+    await expect.poll(async () => (await state(app)).notifications.unreadPrCount).toBe(3);
+    // Opening one panel closes the other.
+    await evaluateInShell(app, `window.devinworkspaces.notificationsPanel(true)`);
+    await expect.poll(() => h.panelOpen()).toBe(true);
+    await evaluateInShell(app, `window.devinworkspaces.prsPanel(true)`);
+    await expect.poll(() => h.prsPanelOpen()).toBe(true);
+    await expect.poll(() => h.panelOpen()).toBe(false);
+    await expect
+      .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('prsPanel'))`))
+      .toBe(true);
+    await expect
+      .poll(
+        async () =>
+          evaluateInShell(
+            app,
+            `document.querySelectorAll('#prsPanel [data-pr-url][data-unread]').length`,
+          ),
+      )
+      .toBe(3);
+
+    // Per-row mark-read: pr42 loses data-unread, unread count drops, pr-read logged.
+    await evaluateInShell(
+      app,
+      `document.querySelector('[data-pr-url="${pr42}"] input[type="checkbox"]').click()`,
+    );
+    await expect
+      .poll(async () =>
+        evaluateInShell(
+          app,
+          `document.querySelector('[data-pr-url="${pr42}"]')?.hasAttribute('data-unread')`,
+        ),
+      )
+      .toBe(false);
+    await expect.poll(async () => (await state(app)).notifications.unreadPrCount).toBe(2);
+    await waitForEvent(logFile, 'pr-read');
+
+    // Per-row dismiss: pr43 leaves the list but stays remembered in prs.json
+    // (dismissedAt) so it never comes back while open.
+    await evaluateInShell(
+      app,
+      `document.querySelector('[data-pr-url="${pr43}"] button[aria-label="Delete"]').click()`,
+    );
+    await expect.poll(async () => (await state(app)).notifications.openPrCount).toBe(2);
+    await waitForEvent(logFile, 'pr-dismiss');
+    await expect
+      .poll(() => {
+        if (!existsSync(join(profile, 'prs.json'))) return null;
+        const stored = JSON.parse(readFileSync(join(profile, 'prs.json'), 'utf8')) as {
+          url: string;
+          dismissedAt: number | null;
+        }[];
+        return stored.find((record) => record.url === pr43)?.dismissedAt ?? null;
+      })
+      .not.toBeNull();
+    await h.pollNow();
+    await expect
+      .poll(async () =>
+        evaluateInShell(
+          app,
+          `Boolean(document.querySelector('[data-pr-url="${pr43}"]'))`,
+        ),
+      )
+      .toBe(false);
+
+    // Mark all read: no badge, but the rail button stays while PRs remain.
+    await evaluateInShell(app, `document.getElementById('prsMarkAllRead').click()`);
+    await expect.poll(async () => (await state(app)).notifications.unreadPrCount).toBe(0);
+    await expect
+      .poll(async () =>
+        evaluateInShell(
+          app,
+          `document.querySelector('#prQuickOpen span') === null`,
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('prQuickOpen'))`))
+      .toBe(true);
+
+    // Clear all dismisses everything: the rail button disappears.
+    await evaluateInShell(app, `document.getElementById('prsClearAll').click()`);
+    await expect.poll(async () => (await state(app)).notifications.openPrCount).toBe(0);
+    await expect
+      .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('prQuickOpen'))`))
+      .toBe(false);
+
+    // Once a dismissed PR leaves the open list its record is dropped.
+    fixtures.api.setSessions([
+      {
+        session_id: 'sess-pr',
+        title: 'PR session',
+        status: 'running',
+        status_detail: 'working',
+        updated_at: 3,
+        pull_requests: [
+          { pr_url: pr42, pr_state: 'open' },
+          { pr_url: pr43, pr_state: 'merged' },
+        ],
+      },
+    ]);
+    await h.pollNow();
+    await expect
+      .poll(async () => (await h.prRecords()).some((record) => record.url === pr43))
+      .toBe(false);
+    await evaluateInShell(app, `window.devinworkspaces.prsPanel(false)`);
+    await expect.poll(() => h.prsPanelOpen()).toBe(false);
 
     // Ctrl+N: back to the tenant's create surface (root) on the Cloud surface.
     await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
