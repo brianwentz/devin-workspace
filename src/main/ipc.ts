@@ -13,6 +13,7 @@ import {
   IpcChannels,
   LinkOpenArg,
   NavActionArg,
+  SettingsFlushDoneArg,
   SettingsPatchSchema,
   SettingsSchema,
   SetPatArg,
@@ -23,13 +24,18 @@ import {
   TabsReloadMenuArg,
   TabsTabMenuArg,
   type Settings,
+  type SettingsCommitResult,
+  type SettingsPatch,
 } from '../shared/ipc';
+import { fieldErrorsFromIssues } from '../core/settingsDraft';
+import { sanitizeMessage } from '../core/devinApi';
+import { settingsFlushDone } from './settingsFlush';
 import { identityResolver } from './identity';
 import { log } from './log';
 import { notificationStore } from './notifications';
 import { notifier, openNotification, openPrs, popupPrMenu } from './notifier';
 import { handleLink } from './routing';
-import { hasDownloadedUpdate, installUpdate } from './updater';
+import { hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
 import { NotificationIdArg, NotificationPanelArg } from '../shared/ipc';
 import { state } from './state';
@@ -60,31 +66,68 @@ export function copyTabAddress(tabId: string): boolean {
   return true;
 }
 
+export function applySettingsPatch(patch: SettingsPatch): Settings {
+  const previousTenant = state.settings!.current.tenantUrl;
+  const previousSettings = state.settings!.current;
+  const next: Settings = state.settings!.merge(patch);
+  notifier.onSettingsChanged(previousSettings, next);
+  if (next.pane.open !== state.paneOpen) setPaneOpen(next.pane.open, 'settings');
+  // Raw 0..1 preference; the px guards are applied when laying out.
+  state.paneFraction = clampFraction01(next.pane.fraction);
+  state.surface = next.surface;
+  state.tabManager?.setKeepAliveMs(keepAliveMs(next.tabs.keepAliveHours));
+  state.tabManager?.setMaxLiveTabs(next.tabs.maxLiveTabs);
+  if (next.tenantUrl !== previousTenant) {
+    state.tenantUrl = next.tenantUrl;
+    log('shell', 'tenant-changed', { url: next.tenantUrl });
+    state.devinView?.webContents.loadURL(next.tenantUrl).catch((error: unknown) => {
+      log('devin', 'load-error', { url: next.tenantUrl, detail: { message: String(error) } });
+    });
+  }
+  applyLayout();
+  return next;
+}
+
 export function setupIpc(): void {
   guardedHandle(IpcChannels.stateGet, () => publicState());
   guardedHandle(IpcChannels.settingsGet, () => state.settings?.current ?? SettingsSchema.parse({}));
   guardedHandle(IpcChannels.settingsSet, (_event, patch: unknown) => {
     const parsed = SettingsPatchSchema.safeParse(patch);
     if (!parsed.success || !state.settings) return state.settings?.current;
-    const previousTenant = state.settings.current.tenantUrl;
-    const previousSettings = state.settings.current;
-    const next: Settings = state.settings.merge(parsed.data);
-    notifier.onSettingsChanged(previousSettings, next);
-    if (next.pane.open !== state.paneOpen) setPaneOpen(next.pane.open, 'settings');
-    // Raw 0..1 preference; the px guards are applied when laying out.
-    state.paneFraction = clampFraction01(next.pane.fraction);
-    state.surface = next.surface;
-    state.tabManager?.setKeepAliveMs(keepAliveMs(next.tabs.keepAliveHours));
-    state.tabManager?.setMaxLiveTabs(next.tabs.maxLiveTabs);
-    if (next.tenantUrl !== previousTenant) {
-      state.tenantUrl = next.tenantUrl;
-      log('shell', 'tenant-changed', { url: next.tenantUrl });
-      state.devinView?.webContents.loadURL(next.tenantUrl).catch((error: unknown) => {
-        log('devin', 'load-error', { url: next.tenantUrl, detail: { message: String(error) } });
+    return applySettingsPatch(parsed.data);
+  });
+  // Implicit-save path: same patch shape as settings:set, but reports
+  // field-level validation errors and persist failures back to the draft UI.
+  guardedHandle(IpcChannels.settingsCommit, (_event, patch: unknown): SettingsCommitResult => {
+    const parsed = SettingsPatchSchema.safeParse(patch);
+    if (!parsed.success) {
+      const { errors, other } = fieldErrorsFromIssues(parsed.error.issues);
+      log('shell', 'settings-commit', {
+        detail: { ok: false, fields: 0, errorFields: Object.keys(errors), persistError: false },
       });
+      return { ok: false, errors, message: other.length > 0 ? other.join('; ') : null };
     }
-    applyLayout();
-    return next;
+    if (!state.settings) return { ok: false, errors: {}, message: 'Settings unavailable' };
+    try {
+      const next = applySettingsPatch(parsed.data);
+      log('shell', 'settings-commit', {
+        detail: { ok: true, fields: Object.keys(parsed.data).length, errorFields: [], persistError: false },
+      });
+      return { ok: true, settings: next };
+    } catch (error) {
+      log('shell', 'settings-commit', {
+        detail: { ok: false, fields: Object.keys(parsed.data).length, errorFields: [], persistError: true },
+      });
+      return {
+        ok: false,
+        errors: {},
+        message: sanitizeMessage(String(error), state.secrets?.getPat() ?? ''),
+      };
+    }
+  });
+  guardedOn(IpcChannels.settingsFlushDone, (_event, payload: unknown) => {
+    const parsed = SettingsFlushDoneArg.safeParse(payload);
+    if (parsed.success) settingsFlushDone(parsed.data);
   });
   guardedOn(IpcChannels.paneToggle, () => {
     setPaneOpen(!state.paneOpen, 'rail');
@@ -280,4 +323,5 @@ function setupExtrasIpc(): void {
   guardedOn(IpcChannels.updateInstall, () => {
     if (hasDownloadedUpdate()) installUpdate();
   });
+  guardedHandle(IpcChannels.updateReleaseNotes, () => releaseNotesReply());
 }

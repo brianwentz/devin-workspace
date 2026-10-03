@@ -7,6 +7,9 @@ export const IpcChannels = {
   stateUpdate: 'state:update',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsCommit: 'settings:commit',
+  settingsFlush: 'settings:flush',
+  settingsFlushDone: 'settings:flushDone',
   paneToggle: 'pane:toggle',
   tabActivate: 'tab:activate',
   tabClose: 'tab:close',
@@ -57,6 +60,7 @@ export const IpcChannels = {
   notificationsIdentityReset: 'notifications:identityReset',
   // App version / auto-update status
   updateInstall: 'update:install',
+  updateReleaseNotes: 'update:releaseNotes',
   localState: 'local:state',
   localUpdate: 'local:update',
   localWorkspaceAdd: 'local:workspace:add',
@@ -243,6 +247,19 @@ export const SettingsPatchSchema = z.object({
   layout: z.object(LayoutFields).partial().optional(),
   terminal: z.object(TerminalFields).partial().optional(),
 });
+export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
+
+// settings:commit — field keys are DraftField names from core/settingsDraft.
+export const SettingsCommitResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), settings: SettingsSchema }),
+  z.object({
+    ok: z.literal(false),
+    errors: z.record(z.string(), z.string()),
+    message: z.string().nullable(),
+  }),
+]);
+export type SettingsCommitResult = z.infer<typeof SettingsCommitResultSchema>;
+export const SettingsFlushDoneArg = z.object({ pending: z.boolean(), ok: z.boolean() });
 
 const TabSchema = z.object({
   id: z.string(),
@@ -290,8 +307,24 @@ export const UpdateStateSchema = z.object({
   version: z.string(),
   available: z.string().nullable(),
   downloaded: z.string().nullable(),
+  releasesUrl: z.string(),
 });
 export type UpdateState = z.infer<typeof UpdateStateSchema>;
+
+// update:releaseNotes — lazy GitHub release-notes lookup for the Updates tab.
+export const ReleaseNotesSchema = z.object({
+  version: z.string(),
+  name: z.string().nullable(),
+  publishedAt: z.string().nullable(),
+  body: z.string(),
+  htmlUrl: z.string(),
+});
+export type ReleaseNotes = z.infer<typeof ReleaseNotesSchema>;
+export const ReleaseNotesReplySchema = z.object({
+  current: ReleaseNotesSchema.nullable(),
+  available: ReleaseNotesSchema.nullable(),
+});
+export type ReleaseNotesReply = z.infer<typeof ReleaseNotesReplySchema>;
 
 export const TerminalSummarySchema = z.object({
   id: z.string(),

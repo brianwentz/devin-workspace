@@ -433,6 +433,7 @@ test('shows nothing for a service-user token when no identity resolves', async (
     // The Settings surface explains the empty state.
     await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
     await expect.poll(async () => (await state(app)).surface).toBe('settings');
+    await evaluateInShell(app, `document.querySelector('[data-settings-tab="notifications"]').click()`);
     await expect
       .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('patNoUser'))`))
       .toBe(true);
@@ -791,10 +792,16 @@ test('settings shows the app version and an Update now button', async () => {
   const shell = async (expr: string) => evaluateInShell(app, expr);
   const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string };
   try {
-    expect((await state(app)).update).toEqual({ version: pkg.version, available: null, downloaded: null });
+    expect((await state(app)).update).toEqual({
+      version: pkg.version,
+      available: null,
+      downloaded: null,
+      releasesUrl: 'https://github.com/brianwentz/devin-workspace/releases',
+    });
 
     // Switch to the settings surface; the About block renders the version.
     await app.evaluate(() => (globalThis as any).__devinworkspaces.setSurface('settings'));
+    await shell(`document.querySelector('[data-settings-tab="updates"]').click()`);
     await expect
       .poll(async () => shell(`document.getElementById('appVersion')?.textContent`))
       .toBe(pkg.version);
@@ -872,6 +879,7 @@ test('service-user token resolves the user from the Devin CLI sign-in', async ()
     // Settings shows the resolved (masked) identity.
     await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
     await expect.poll(async () => (await state(app)).surface).toBe('settings');
+    await evaluateInShell(app, `document.querySelector('[data-settings-tab="notifications"]').click()`);
     await expect
       .poll(async () =>
         evaluateInShell(app, `document.getElementById('identityStatus')?.getAttribute('data-identity-source')`),

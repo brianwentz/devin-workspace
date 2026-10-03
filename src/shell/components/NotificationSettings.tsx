@@ -1,42 +1,34 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { IdentityInfo } from '../../shared/ipc';
+import { updateDraft, useSettingsDraft } from '../settingsDraft';
 import { useShellState } from '../store';
-
-const inputClass =
-  'w-full max-w-md px-2 py-1.5 rounded-md border border-[#39475a] bg-[#0d141d] text-sm text-[#e8edf5]';
-const buttonClass =
-  'px-3 py-1.5 rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] text-sm disabled:opacity-50 disabled:hover:bg-[#1a2330]';
+import { buttonClass, errorTextClass, inputClass, inputErrorClass } from './settings/styles';
 
 // P5: Devin API token (stored encrypted in main; never read back), the
 // notifications toggle, optional org override and a test-toast button.
+// The user/org id overrides are draft fields — they persist via the
+// implicit-save commit on tab/surface switch or quit.
 export function NotificationSettings() {
   const shell = useShellState();
+  const { draft, errors } = useSettingsDraft();
   const [token, setToken] = useState('');
   const [hasToken, setHasToken] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const [orgId, setOrgId] = useState('');
-  const [userId, setUserId] = useState('');
   const [identity, setIdentity] = useState<IdentityInfo | null>(null);
   const notifications = shell?.notifications;
   const collect = shell?.settings.notifications.collect ?? true;
   const banner = shell?.settings.notifications.banner ?? true;
   const kinds = shell?.settings.notifications.kinds;
   const notificationsHasToken = notifications?.hasToken ?? false;
-  const savedOrgId = shell?.settings.notifications.orgId ?? '';
-  const savedUserId = shell?.settings.notifications.userId ?? '';
+  const orgId = draft?.orgId ?? '';
+  const userId = draft?.userId ?? '';
   const autoOpenTabs = shell?.settings.prs.autoOpenTabs ?? true;
   const identityState = notifications?.identity;
 
   useEffect(() => {
     setHasToken(notificationsHasToken);
   }, [notificationsHasToken]);
-  useEffect(() => {
-    setOrgId(savedOrgId);
-  }, [savedOrgId]);
-  useEffect(() => {
-    setUserId(savedUserId);
-  }, [savedUserId]);
   // Re-fetch the identity info when the resolved source flips (and on mount).
   useEffect(() => {
     let alive = true;
@@ -108,14 +100,6 @@ export function NotificationSettings() {
     void window.devinworkspaces.setSettings({ prs: { autoOpenTabs: enabled } });
   };
 
-  const saveOrgId = () => {
-    void window.devinworkspaces.setSettings({ notifications: { orgId: orgId.trim() } });
-  };
-
-  const saveUserId = () => {
-    void window.devinworkspaces.setSettings({ notifications: { userId: userId.trim() } });
-  };
-
   const identityLabel = (info: IdentityInfo | null): string => {
     const masked = info?.maskedUserId ? ` (${info.maskedUserId})` : '';
     switch (info?.source) {
@@ -146,8 +130,7 @@ export function NotificationSettings() {
           : 'Token stored (encrypted). Waiting for first poll…';
 
   return (
-    <section id="notificationSettings" className="flex flex-col gap-4 mt-8 pt-6 border-t border-[#243040]">
-      <h2 className="text-lg">Notifications</h2>
+    <section id="notificationSettings" className="flex flex-col gap-4">
       <form onSubmit={saveToken} className="flex flex-col gap-1 text-sm">
         <span className="text-[#aeb9c8]">Devin API token</span>
         <div className="flex gap-2 max-w-md">
@@ -275,33 +258,35 @@ export function NotificationSettings() {
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-[#aeb9c8]">User ID override (optional)</span>
-        <div className="flex gap-2 max-w-md">
-          <input
-            id="userIdInput"
-            className={inputClass}
-            value={userId}
-            onChange={(event) => setUserId(event.target.value)}
-            placeholder="user-… (blank = detect automatically)"
-          />
-          <button type="button" className={buttonClass} onClick={saveUserId}>
-            Save
-          </button>
-        </div>
+        <input
+          id="userIdInput"
+          className={`${inputClass}${errors.userId ? ` ${inputErrorClass}` : ''}`}
+          value={userId}
+          aria-invalid={errors.userId ? 'true' : undefined}
+          onChange={(event) => updateDraft({ userId: event.target.value })}
+          placeholder="user-… (blank = detect automatically)"
+        />
+        {errors.userId && (
+          <span id="userIdInputError" className={errorTextClass}>
+            {errors.userId}
+          </span>
+        )}
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-[#aeb9c8]">Organization ID (optional override)</span>
-        <div className="flex gap-2 max-w-md">
-          <input
-            id="orgIdInput"
-            className={inputClass}
-            value={orgId}
-            onChange={(event) => setOrgId(event.target.value)}
-            placeholder="org-… (blank = resolve from /v3/self)"
-          />
-          <button type="button" className={buttonClass} onClick={saveOrgId}>
-            Save
-          </button>
-        </div>
+        <input
+          id="orgIdInput"
+          className={`${inputClass}${errors.orgId ? ` ${inputErrorClass}` : ''}`}
+          value={orgId}
+          aria-invalid={errors.orgId ? 'true' : undefined}
+          onChange={(event) => updateDraft({ orgId: event.target.value })}
+          placeholder="org-… (blank = resolve from /v3/self)"
+        />
+        {errors.orgId && (
+          <span id="orgIdInputError" className={errorTextClass}>
+            {errors.orgId}
+          </span>
+        )}
       </label>
     </section>
   );

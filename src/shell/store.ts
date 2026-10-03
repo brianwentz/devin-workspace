@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import type { SettingsTabId } from '../core/settingsDraft';
 import type { ShellState } from '../shared/ipc';
 import type { DevinWorkspacesApi } from './preload';
 
@@ -30,4 +31,22 @@ function subscribe(callback: () => void): () => void {
 
 export function useShellState(): ShellState | null {
   return useSyncExternalStore(subscribe, () => current);
+}
+
+export function getShellState(): ShellState | null {
+  return current;
+}
+
+// Shell-only (never persisted): the active Settings tab survives surface
+// switches but resets to 'general' on restart.
+let settingsTab: SettingsTabId = 'general';
+
+export function setSettingsTab(next: SettingsTabId): void {
+  if (settingsTab === next) return;
+  settingsTab = next;
+  listeners.forEach((listener) => listener());
+}
+
+export function useSettingsTab(): SettingsTabId {
+  return useSyncExternalStore(subscribe, () => settingsTab);
 }

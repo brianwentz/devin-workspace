@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { computeBounds, DEFAULT_TERMINAL_HEIGHT, RAIL_WIDTH } from '../core/layout';
+import { handleSettingsFlush } from './settingsDraft';
 import { useShellState } from './store';
 import { Rail } from './components/Rail';
 import { NotificationPanel } from './components/NotificationPanel';
@@ -42,6 +43,9 @@ export function App() {
     document.addEventListener('click', onClick);
     return () => document.removeEventListener('click', onClick);
   }, []);
+
+  // Quit-time implicit save: main sends settings:flush inside shutdown().
+  useEffect(() => window.devinworkspaces.onSettingsFlush(handleSettingsFlush), []);
 
   if (!state) return null;
   const terminalVisible =

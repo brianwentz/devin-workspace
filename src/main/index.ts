@@ -40,6 +40,7 @@ import { attachRouting } from './routing';
 import { setupUpdater } from './updater';
 import { notifier } from './notifier';
 import { SecretStore } from './secrets';
+import { requestSettingsFlush } from './settingsFlush';
 
 // Windows toasts require an AppUserModelID; match electron-builder's appId.
 if (process.platform === 'win32') app.setAppUserModelId('ai.devin.workspaces');
@@ -82,6 +83,7 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
   state.shuttingDown = true;
   state.shutdownPromise = (async () => {
     disposeAutofill();
+    await requestSettingsFlush();
     // F8 stage 1 — probe: close live GitHub tabs honouring beforeunload; a veto
     // is recorded (no per-tab prompt) and resolved by one consolidated dialog.
     const probe = (await state.tabManager?.probe().catch(() => undefined)) ?? {

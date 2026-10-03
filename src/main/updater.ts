@@ -5,8 +5,15 @@ import { join } from 'node:path';
 import { shutdown } from './index';
 import { log } from './log';
 import { notificationStore } from './notifications';
+import {
+  RELEASE_REPO,
+  getAvailableReleaseNotes,
+  releaseNotesCache,
+  setAvailableReleaseNotes,
+} from './releases';
+import { releaseNotesFromUpdateInfo, releasesPageUrl } from '../core/releaseNotes';
 import { testMode } from './state';
-import type { UpdateState } from '../shared/ipc';
+import type { ReleaseNotesReply, UpdateState } from '../shared/ipc';
 import { notifyShell } from './window';
 
 const INITIAL_DELAY_MS = 30_000;
@@ -16,12 +23,31 @@ let downloadedVersion: string | null = null;
 let availableVersion: string | null = null;
 
 export function updateState(): UpdateState {
-  return { version: app.getVersion(), available: availableVersion, downloaded: downloadedVersion };
+  return {
+    version: app.getVersion(),
+    available: availableVersion,
+    downloaded: downloadedVersion,
+    releasesUrl: releasesPageUrl(RELEASE_REPO.owner, RELEASE_REPO.repo),
+  };
 }
 
 export function updateAvailable(version: string): void {
   availableVersion = version;
   notifyShell();
+}
+
+export function availableUpdateVersion(): string | null {
+  return availableVersion;
+}
+
+// Lazy release-notes lookup for the Updates tab — fetches on demand so a
+// settings view that is never opened never touches the network.
+export async function releaseNotesReply(): Promise<ReleaseNotesReply> {
+  const current = await releaseNotesCache.get(app.getVersion());
+  const available = availableVersion
+    ? (getAvailableReleaseNotes() ?? (await releaseNotesCache.get(availableVersion)))
+    : null;
+  return { current, available };
 }
 
 export function hasDownloadedUpdate(): boolean {
@@ -123,6 +149,9 @@ export function setupUpdater(): void {
   autoUpdater.on('checking-for-update', () => log('shell', 'update-check'));
   autoUpdater.on('update-available', (info) => {
     log('shell', 'update-available', { detail: { version: info.version } });
+    setAvailableReleaseNotes(
+      releaseNotesFromUpdateInfo(info, RELEASE_REPO.owner, RELEASE_REPO.repo),
+    );
     updateAvailable(info.version);
   });
   autoUpdater.on('update-not-available', (info) =>

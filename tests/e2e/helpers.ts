@@ -99,6 +99,7 @@ export async function launchApp(
       DEVIN_WORKSPACES_LOG: logFile,
       DEVIN_WORKSPACES_DOWNLOAD_DIR: downloadDir,
       DEVIN_WORKSPACES_ALLOW_EXTERNAL: '0',
+      DEVIN_WORKSPACES_TEST_RELEASES_URL: fixtures.apiUrl,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       ...extraEnv,
     },
@@ -239,6 +240,29 @@ export async function evaluateInView(
     },
     { urlPrefix, script },
   );
+}
+
+// React-compatible input fill: the native value setter + a bubbling 'input'
+// event is what React's controlled-input onChange listens for.
+export async function setInputValue(
+  app: ElectronApplication,
+  id: string,
+  value: string,
+): Promise<boolean> {
+  return (await evaluateInShell(
+    app,
+    `(() => {
+      const el = document.getElementById(${JSON.stringify(id)});
+      if (!el) return false;
+      const proto = el instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      setter.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`,
+  )) as boolean;
 }
 
 export async function evaluateInShell(

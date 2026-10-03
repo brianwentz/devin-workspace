@@ -239,8 +239,7 @@ export function PasswordsSection({
   }
 
   return (
-    <section id="credentialsSection" className="flex flex-col gap-3 border-t border-[#39475a] pt-5">
-      <h2 className="text-lg">Passwords</h2>
+    <section id="credentialsSection" className="flex flex-col gap-3">
       <p className="text-xs text-[#7f8ca0] max-w-md">
         Saved passwords are filled automatically in GitHub tabs and the Devin view. Stored
         encrypted with the OS keychain (Windows DPAPI / macOS Keychain).

@@ -1,0 +1,188 @@
+import { describe, expect, it } from 'vitest';
+import {
+  draftFromSettings,
+  DRAFT_TAB,
+  fieldErrorsFromIssues,
+  firstErrorField,
+  isDraftDirty,
+  validateDraft,
+  type DraftField,
+  type SettingsDraft,
+} from '../../src/core/settingsDraft';
+import { mergeSettings } from '../../src/core/settings';
+import { SettingsSchema, type Settings } from '../../src/shared/ipc';
+
+const defaults = SettingsSchema.parse({});
+
+function draft(overrides: Partial<SettingsDraft> = {}): SettingsDraft {
+  return { ...draftFromSettings(defaults), ...overrides };
+}
+
+describe('draftFromSettings', () => {
+  it('round-trips: the patch merges back to equal settings', () => {
+    const result = validateDraft(draftFromSettings(defaults));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const merged = mergeSettings(defaults, result.patch);
+    expect(merged).toEqual(defaults);
+  });
+
+  it('maps every field', () => {
+    const custom = mergeSettings(defaults, {
+      tenantUrl: 'https://tenant.example.com',
+      apiBase: 'https://api.example.com',
+      workspaces: ['C:\\work'],
+      routing: { allowExternal: false },
+      tabs: { keepAliveHours: 48, maxLiveTabs: 3 },
+      terminal: { allSurfaces: true, shell: 'pwsh.exe' },
+      notifications: { userId: 'user-1', orgId: 'org-2' },
+    });
+    expect(draftFromSettings(custom)).toEqual({
+      tenantUrl: 'https://tenant.example.com',
+      apiBase: 'https://api.example.com',
+      workspaces: ['C:\\work'],
+      allowExternal: false,
+      keepAliveHours: '48',
+      maxLiveTabs: '3',
+      terminalAllSurfaces: true,
+      terminalShell: 'pwsh.exe',
+      userId: 'user-1',
+      orgId: 'org-2',
+    });
+  });
+});
+
+describe('isDraftDirty', () => {
+  it('is clean for a fresh draft', () => {
+    expect(isDraftDirty(draftFromSettings(defaults), defaults)).toBe(false);
+  });
+
+  it('is dirty when a field changes', () => {
+    expect(isDraftDirty(draft({ tenantUrl: 'https://other.example.com' }), defaults)).toBe(true);
+    expect(isDraftDirty(draft({ workspaces: ['C:\\x'] }), defaults)).toBe(true);
+    // Element-wise: joined-equal but differently-split lists are dirty.
+    const joined = mergeSettings(defaults, { workspaces: ['ab'] });
+    expect(
+      isDraftDirty(
+        { ...draftFromSettings(joined), workspaces: ['a', 'b'] },
+        joined,
+      ),
+    ).toBe(true);
+    expect(isDraftDirty(draft({ allowExternal: false }), defaults)).toBe(true);
+    expect(isDraftDirty(draft({ maxLiveTabs: '9' }), defaults)).toBe(true);
+    expect(isDraftDirty(draft({ userId: 'user-9' }), defaults)).toBe(true);
+  });
+
+  it('treats whitespace-only changes in trimmed fields as clean', () => {
+    expect(isDraftDirty(draft({ terminalShell: '   ' }), defaults)).toBe(false);
+    expect(isDraftDirty(draft({ userId: '  ', orgId: '\t' }), defaults)).toBe(false);
+  });
+});
+
+describe('validateDraft', () => {
+  it('produces the full patch shape on success', () => {
+    const result = validateDraft(
+      draft({ terminalShell: '  pwsh.exe -l  ', userId: ' u1 ', orgId: ' o1 ' }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.patch).toEqual({
+      tenantUrl: defaults.tenantUrl,
+      apiBase: defaults.apiBase,
+      workspaces: [],
+      routing: { allowExternal: true },
+      tabs: { keepAliveHours: 24, maxLiveTabs: 8 },
+      terminal: { allSurfaces: false, shell: 'pwsh.exe -l' },
+      notifications: { userId: 'u1', orgId: 'o1' },
+    });
+  });
+
+  it('rejects a non-https tenant URL', () => {
+    const result = validateDraft(draft({ tenantUrl: 'ftp://bad' }));
+    expect(result).toEqual({
+      ok: false,
+      errors: {
+        tenantUrl: 'Tenant URL must be an https URL (http allowed for localhost only)',
+      },
+    });
+  });
+
+  it('rejects a non-https API base', () => {
+    const result = validateDraft(draft({ apiBase: 'http://remote.example.com' }));
+    expect(result).toEqual({
+      ok: false,
+      errors: { apiBase: 'API base must be an https URL (http allowed for localhost only)' },
+    });
+  });
+
+  it('rejects an out-of-range keep-alive', () => {
+    for (const value of ['-1', '169', 'abc']) {
+      const result = validateDraft(draft({ keepAliveHours: value }));
+      expect(result).toEqual({
+        ok: false,
+        errors: { keepAliveHours: 'Keep-alive must be between 0 and 168 hours' },
+      });
+    }
+  });
+
+  it('rejects a non-integer or out-of-range max live tabs', () => {
+    for (const value of ['0', '41', '2.5', 'x']) {
+      const result = validateDraft(draft({ maxLiveTabs: value }));
+      expect(result).toEqual({
+        ok: false,
+        errors: { maxLiveTabs: 'Max live tabs must be a whole number between 1 and 40' },
+      });
+    }
+  });
+
+  it('collects multiple field errors at once', () => {
+    const result = validateDraft(draft({ tenantUrl: 'ftp://bad', maxLiveTabs: '0' }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.tenantUrl).toBeTruthy();
+    expect(result.errors.maxLiveTabs).toBeTruthy();
+  });
+});
+
+describe('fieldErrorsFromIssues', () => {
+  it('maps zod issue paths to draft fields', () => {
+    const { errors, other } = fieldErrorsFromIssues([
+      { path: ['tenantUrl'], message: 'bad tenant' },
+      { path: ['tabs', 'keepAliveHours'], message: 'bad keepalive' },
+      { path: ['notifications', 'userId'], message: 'bad user' },
+      { path: ['terminal', 'shell'], message: 'bad shell' },
+    ]);
+    expect(errors).toEqual({
+      tenantUrl: 'bad tenant',
+      keepAliveHours: 'bad keepalive',
+      userId: 'bad user',
+      terminalShell: 'bad shell',
+    });
+    expect(other).toEqual([]);
+  });
+
+  it('sends unmapped paths to other', () => {
+    const { errors, other } = fieldErrorsFromIssues([
+      { path: ['pane', 'fraction'], message: 'bad fraction' },
+      { path: [], message: 'whole-object failure' },
+    ]);
+    expect(errors).toEqual({});
+    expect(other).toEqual(['bad fraction', 'whole-object failure']);
+  });
+});
+
+describe('DRAFT_TAB / firstErrorField', () => {
+  it('covers every draft field', () => {
+    const draftKeys = Object.keys(draftFromSettings(defaults)) as DraftField[];
+    expect(Object.keys(DRAFT_TAB).sort()).toEqual(draftKeys.sort());
+    expect(DRAFT_TAB.userId).toBe('notifications');
+    expect(DRAFT_TAB.orgId).toBe('notifications');
+    expect(DRAFT_TAB.tenantUrl).toBe('general');
+  });
+
+  it('returns the first erroring field in SettingsDraft key order', () => {
+    expect(firstErrorField({})).toBeNull();
+    expect(firstErrorField({ maxLiveTabs: 'x', tenantUrl: 'y' })).toBe('tenantUrl');
+    expect(firstErrorField({ orgId: 'x', userId: 'y' })).toBe('userId');
+  });
+});
