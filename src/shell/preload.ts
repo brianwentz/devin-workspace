@@ -6,10 +6,12 @@ import {
   type IdentityInfo,
   type SessionPr,
   type LocalResult,
+  type ReleaseNotesReply,
   type LocalSessionSummary,
   type LocalStatePublic,
   type ScopeSummary,
   type Settings,
+  type SettingsCommitResult,
   type ShellState,
   type Surface,
   type TerminalSummary,
@@ -143,6 +145,20 @@ const api = {
   getSettings: () => ipcRenderer.invoke(IpcChannels.settingsGet) as Promise<Settings>,
   setSettings: (patch: unknown) =>
     ipcRenderer.invoke(IpcChannels.settingsSet, patch) as Promise<Settings>,
+  commitSettings: (patch: unknown) =>
+    ipcRenderer.invoke(IpcChannels.settingsCommit, patch) as Promise<SettingsCommitResult>,
+  onSettingsFlush: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on(IpcChannels.settingsFlush, listener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.settingsFlush, listener);
+    };
+  },
+  settingsFlushDone: (payload: { pending: boolean; ok: boolean }) => {
+    if (typeof payload?.pending === 'boolean' && typeof payload?.ok === 'boolean') {
+      ipcRenderer.send(IpcChannels.settingsFlushDone, payload);
+    }
+  },
   togglePane: () => ipcRenderer.send(IpcChannels.paneToggle),
   activateTab: (id: string) => {
     if (typeof id === 'string') ipcRenderer.send(IpcChannels.tabActivate, id);
@@ -261,6 +277,8 @@ const api = {
   identity: () => ipcRenderer.invoke(IpcChannels.notificationsIdentity) as Promise<IdentityInfo>,
   identityReset: () => ipcRenderer.send(IpcChannels.notificationsIdentityReset),
   updateInstall: () => ipcRenderer.send(IpcChannels.updateInstall),
+  releaseNotes: () =>
+    ipcRenderer.invoke(IpcChannels.updateReleaseNotes) as Promise<ReleaseNotesReply>,
   // DEVIN_WORKSPACES_TEST_BANNER_MS shortens the banner auto-hide in tests.
   bannerMs: testEnvNumber('DEVIN_WORKSPACES_TEST_BANNER_MS'),
   onNotificationBanner: (callback: (entry: AppNotification) => void) => {

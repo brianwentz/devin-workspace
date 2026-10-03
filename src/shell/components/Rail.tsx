@@ -1,6 +1,7 @@
 import { Bell } from 'lucide-react';
 import { RAIL_WIDTH, TITLE_BAR_HEIGHT } from '../../core/layout';
 import { useShellState } from '../store';
+import { requestSurface } from '../surface';
 import type { Surface } from '../../shared/ipc';
 import { PrQuickOpen } from './PrQuickOpen';
 
@@ -78,7 +79,7 @@ export function Rail({
         aria-pressed={surface === 'cloud'}
         title="Cloud"
         className={buttonClass}
-        onClick={() => window.devinworkspaces.setSurface('cloud')}
+        onClick={() => void requestSurface('cloud')}
       >
         ☁
       </button>
@@ -89,7 +90,7 @@ export function Rail({
         aria-pressed={surface === 'local'}
         title="Local"
         className={buttonClass}
-        onClick={() => window.devinworkspaces.setSurface('local')}
+        onClick={() => void requestSurface('local')}
       >
         ⌘
       </button>
@@ -100,7 +101,7 @@ export function Rail({
         aria-pressed={surface === 'settings'}
         title="Settings"
         className={buttonClass}
-        onClick={() => window.devinworkspaces.setSurface('settings')}
+        onClick={() => void requestSurface('settings')}
       >
         ⚙
       </button>

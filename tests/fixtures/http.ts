@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 
 const faviconUrl =
   'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%3E%3Ccircle%20cx=%228%22%20cy=%228%22%20r=%228%22%20fill=%22%234a90e2%22/%3E%3C/svg%3E';
@@ -78,6 +80,31 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
     const url = new URL(request.url ?? '/', 'http://fixture');
     const authorization = request.headers.authorization ?? null;
     requests.push({ ts: Date.now(), method: request.method ?? 'GET', path: url.pathname + url.search, authorization });
+    // GitHub Releases API stand-in (DEVIN_WORKSPACES_TEST_RELEASES_URL) — no
+    // auth, the app fetches release notes without credentials.
+    const release = /^\/repos\/[^/]+\/[^/]+\/releases\/tags\/(v[^/]+)$/.exec(url.pathname);
+    if (release) {
+      const pkg = JSON.parse(
+        readFileSync(join(process.cwd(), 'package.json'), 'utf8'),
+      ) as { version: string };
+      const notes: Record<string, string> = {
+        [`v${pkg.version}`]: '## Fixed\n- **bold** item\n- see [the docs](https://example.com/docs)',
+        'v9.9.9': '## Added\n- **bold** new thing\n- more [details](https://example.com/v999)',
+      };
+      const body = notes[release[1]!];
+      if (body === undefined) {
+        json(response, 404, { message: 'Not Found' });
+        return;
+      }
+      json(response, 200, {
+        tag_name: release[1],
+        name: `Fixture release ${release[1]}`,
+        published_at: '2025-01-15T12:00:00Z',
+        body,
+        html_url: `https://github.com/brianwentz/devin-workspace/releases/tag/${release[1]}`,
+      });
+      return;
+    }
     if (mode.kind === 'status') {
       const current = mode;
       if (current.once) mode = { kind: 'ok' };
