@@ -6,6 +6,7 @@ import {
   archivedScopes,
   scopeLabel,
   backoffMs,
+  catchUpPullRequests,
   effectiveStatus,
   isActive,
   isWaiting,
@@ -297,5 +298,74 @@ describe('truncateTitle / prMenuLabel', () => {
     expect(prMenuLabel('a/b#1', 'Fix it')).toBe('a/b#1  Fix it');
     expect(prMenuLabel('a/b#1', null)).toBe('a/b#1');
     expect(prMenuLabel('a/b#1', 't'.repeat(70))).toBe(`a/b#1  ${'t'.repeat(63)}…`);
+  });
+});
+
+describe('catchUpPullRequests', () => {
+  const session = (
+    id: string,
+    prs: { pr_url: string; pr_state: string | null }[],
+    updated_at = 0,
+    status = 'running',
+  ): DevinSession => ({ ...make(id, status), pull_requests: prs, updated_at });
+
+  const A = 'https://github.com/a/b/pull/1';
+  const B = 'https://github.com/a/b/pull/2';
+  const opts = (over: Partial<{ lastGoodAt: number; now: number; maxAgeMs: number; limit: number }> = {}) => ({
+    lastGoodAt: 1_000,
+    now: 2_000,
+    ...over,
+  });
+
+  it('returns unseen open PRs and skips ones the ledger already saw', () => {
+    const sessions = [session('s1', [{ pr_url: A, pr_state: 'open' }, { pr_url: B, pr_state: null }])];
+    expect(catchUpPullRequests(sessions, new Set(), opts())).toEqual([
+      { sessionId: 's1', url: A },
+      { sessionId: 's1', url: B },
+    ]);
+    expect(catchUpPullRequests(sessions, new Set([A]), opts())).toEqual([
+      { sessionId: 's1', url: B },
+    ]);
+    expect(catchUpPullRequests(sessions, new Set([A, B]), opts())).toEqual([]);
+  });
+
+  it('skips archived sessions and non-open PR states', () => {
+    const sessions = [
+      session('s1', [{ pr_url: A, pr_state: 'open' }], 0, 'archived'),
+      session('s2', [
+        { pr_url: B, pr_state: 'closed' },
+        { pr_url: 'https://github.com/a/b/pull/3', pr_state: 'merged' },
+      ]),
+    ];
+    expect(catchUpPullRequests(sessions, new Set(), opts())).toEqual([]);
+  });
+
+  it('returns [] when the ledger is empty or too old', () => {
+    const sessions = [session('s1', [{ pr_url: A, pr_state: 'open' }])];
+    expect(catchUpPullRequests(sessions, new Set(), opts({ lastGoodAt: 0 }))).toEqual([]);
+    expect(
+      catchUpPullRequests(sessions, new Set(), opts({ lastGoodAt: 1_000, now: 1_000 + 100, maxAgeMs: 50 })),
+    ).toEqual([]);
+  });
+
+  it('orders by session updated_at desc and respects the limit', () => {
+    const pr = (n: number) => ({ pr_url: `https://github.com/a/b/pull/${n}`, pr_state: 'open' });
+    const sessions = [
+      session('old', [pr(1), pr(2)], 1),
+      session('new', [pr(3), pr(4)], 9),
+    ];
+    expect(catchUpPullRequests(sessions, new Set(), opts({ limit: 3 }))).toEqual([
+      { sessionId: 'new', url: 'https://github.com/a/b/pull/3' },
+      { sessionId: 'new', url: 'https://github.com/a/b/pull/4' },
+      { sessionId: 'old', url: 'https://github.com/a/b/pull/1' },
+    ]);
+  });
+
+  it('dedupes a PR URL listed on two sessions', () => {
+    const sessions = [
+      session('s1', [{ pr_url: A, pr_state: 'open' }], 2),
+      session('s2', [{ pr_url: A, pr_state: null }], 1),
+    ];
+    expect(catchUpPullRequests(sessions, new Set(), opts())).toEqual([{ sessionId: 's1', url: A }]);
   });
 });
