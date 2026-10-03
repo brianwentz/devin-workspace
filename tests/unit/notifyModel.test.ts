@@ -23,8 +23,10 @@ const make = (id: string, status: string, detail: string | null = null): DevinSe
   title: id,
   status,
   status_detail: detail,
+  created_at: 0,
   updated_at: 0,
   user_id: null,
+  service_user_id: null,
   pull_requests: [],
 });
 

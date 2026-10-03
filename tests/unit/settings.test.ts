@@ -196,19 +196,23 @@ describe('notifications settings (P5/P6)', () => {
     prCompleted: true,
     update: true,
   };
-  it('defaults collect/banner on, org blank, kinds with finished off', () => {
+  it('defaults collect/banner on, org/user blank, kinds with finished off', () => {
     const base = SettingsSchema.parse({});
     expect(base.notifications).toEqual({
       collect: true,
       banner: true,
       orgId: '',
+      userId: '',
       kinds: DEFAULT_KINDS,
     });
     const merged = mergeSettings(base, { notifications: { collect: false, banner: false } });
-    expect(merged.notifications).toEqual({ collect: false, banner: false, orgId: '', kinds: DEFAULT_KINDS });
+    expect(merged.notifications).toEqual({ collect: false, banner: false, orgId: '', userId: '', kinds: DEFAULT_KINDS });
     const withOrg = mergeSettings(merged, { notifications: { orgId: 'org-123' } });
     expect(withOrg.notifications.orgId).toBe('org-123');
     expect(withOrg.notifications.collect).toBe(false);
+    const withUser = mergeSettings(withOrg, { notifications: { userId: 'user-123' } });
+    expect(withUser.notifications.userId).toBe('user-123');
+    expect(withUser.notifications.orgId).toBe('org-123');
     // kind patches merge deep (a single kind does not reset the rest)
     const kindsOff = mergeSettings(withOrg, { notifications: { kinds: { finished: true, prOpened: false } } });
     expect(kindsOff.notifications.kinds).toEqual({ ...DEFAULT_KINDS, finished: true, prOpened: false });

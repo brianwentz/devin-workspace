@@ -29,6 +29,7 @@ export interface FixtureSession {
   title?: string | null;
   status: string;
   status_detail?: string | null;
+  created_at?: string | number;
   updated_at?: number;
   user_id?: string | null;
   pull_requests?: Array<{ pr_url: string; pr_state: string | null }>;
@@ -51,6 +52,9 @@ export interface FixtureApi {
   setSelf(kind: 'pat_user' | 'service_user'): void;
   getSessions(): FixtureSession[];
   setMode(mode: FixtureApiMode): void;
+  // When true the sessions list ignores the user_ids filter — exercises the
+  // client-side confirmation path for a wrongly-resolved identity.
+  setIgnoreUserIds(ignore: boolean): void;
   requests(): FixtureApiRequest[];
   clearRequests(): void;
 }
@@ -60,6 +64,7 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
   let sessions: FixtureSession[] = [];
   let mode: FixtureApiMode = { kind: 'ok' };
   let selfKind: 'pat_user' | 'service_user' = 'pat_user';
+  let ignoreUserIds = false;
   const requests: FixtureApiRequest[] = [];
   const json = (response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
     response.writeHead(status, {
@@ -104,28 +109,42 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
       });
       return;
     }
+    const effective = (session: FixtureSession) => session.user_id ?? 'user-fixture';
+    const item = (session: FixtureSession) => ({
+      session_id: session.session_id,
+      url: `https://app.devin.ai/sessions/${session.session_id}`,
+      title: session.title ?? null,
+      status: session.status,
+      status_detail: session.status_detail ?? null,
+      tags: [],
+      org_id: orgId,
+      created_at: session.created_at ?? 1,
+      updated_at: session.updated_at ?? 1,
+      acus_consumed: 0,
+      user_id: effective(session),
+      pull_requests: session.pull_requests ?? [],
+    });
+    const single = /^\/v3\/organizations\/[^/]+\/sessions\/([^/]+)$/.exec(url.pathname);
+    if (single && url.pathname !== `/v3/organizations/${orgId}/sessions`) {
+      const found = sessions.find((session) => session.session_id === single[1]);
+      if (!found) {
+        json(response, 404, { title: 'Not Found', status: 404 });
+        return;
+      }
+      json(response, 200, item(found));
+      return;
+    }
     if (url.pathname === `/v3/organizations/${orgId}/sessions`) {
       const first = Math.min(200, Math.max(1, Number(url.searchParams.get('first') ?? '100') || 100));
       const after = Number(url.searchParams.get('after') ?? '0') || 0;
       const userIds = url.searchParams.getAll('user_ids');
-      const effective = (session: FixtureSession) => session.user_id ?? 'user-fixture';
       const sorted = [...sessions]
-        .filter((session) => userIds.length === 0 || userIds.includes(effective(session) ?? ''))
+        .filter(
+          (session) =>
+            ignoreUserIds || userIds.length === 0 || userIds.includes(effective(session) ?? ''),
+        )
         .sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
-      const items = sorted.slice(after, after + first).map((session) => ({
-        session_id: session.session_id,
-        url: `https://app.devin.ai/sessions/${session.session_id}`,
-        title: session.title ?? null,
-        status: session.status,
-        status_detail: session.status_detail ?? null,
-        tags: [],
-        org_id: orgId,
-        created_at: 1,
-        updated_at: session.updated_at ?? 1,
-        acus_consumed: 0,
-        user_id: effective(session),
-        pull_requests: session.pull_requests ?? [],
-      }));
+      const items = sorted.slice(after, after + first).map(item);
       const hasNext = after + first < sorted.length;
       json(response, 200, {
         items,
@@ -148,6 +167,9 @@ function createFixtureApi(): { api: FixtureApi; handle: (request: IncomingMessag
     getSessions: () => sessions.map((session) => ({ ...session })),
     setMode: (next) => {
       mode = next;
+    },
+    setIgnoreUserIds: (ignore) => {
+      ignoreUserIds = ignore;
     },
     requests: () => [...requests],
     clearRequests: () => {

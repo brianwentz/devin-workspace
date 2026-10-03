@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import type { IdentityInfo } from '../../shared/ipc';
 import { useShellState } from '../store';
 
 const inputClass =
@@ -15,13 +16,17 @@ export function NotificationSettings() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [orgId, setOrgId] = useState('');
+  const [userId, setUserId] = useState('');
+  const [identity, setIdentity] = useState<IdentityInfo | null>(null);
   const notifications = shell?.notifications;
   const collect = shell?.settings.notifications.collect ?? true;
   const banner = shell?.settings.notifications.banner ?? true;
   const kinds = shell?.settings.notifications.kinds;
   const notificationsHasToken = notifications?.hasToken ?? false;
   const savedOrgId = shell?.settings.notifications.orgId ?? '';
+  const savedUserId = shell?.settings.notifications.userId ?? '';
   const autoOpenTabs = shell?.settings.prs.autoOpenTabs ?? true;
+  const identityState = notifications?.identity;
 
   useEffect(() => {
     setHasToken(notificationsHasToken);
@@ -29,6 +34,22 @@ export function NotificationSettings() {
   useEffect(() => {
     setOrgId(savedOrgId);
   }, [savedOrgId]);
+  useEffect(() => {
+    setUserId(savedUserId);
+  }, [savedUserId]);
+  // Re-fetch the identity info when the resolved source flips (and on mount).
+  useEffect(() => {
+    let alive = true;
+    window.devinworkspaces
+      .identity()
+      .then((info) => {
+        if (alive) setIdentity(info);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [identityState?.source, identityState?.resolved]);
 
   const refreshHasToken = () =>
     window.devinworkspaces.hasPat().then(setHasToken).catch(() => undefined);
@@ -91,6 +112,26 @@ export function NotificationSettings() {
     void window.devinworkspaces.setSettings({ notifications: { orgId: orgId.trim() } });
   };
 
+  const saveUserId = () => {
+    void window.devinworkspaces.setSettings({ notifications: { userId: userId.trim() } });
+  };
+
+  const identityLabel = (info: IdentityInfo | null): string => {
+    const masked = info?.maskedUserId ? ` (${info.maskedUserId})` : '';
+    switch (info?.source) {
+      case 'self':
+        return 'personal token';
+      case 'cli':
+        return `from CLI sign-in${masked}`;
+      case 'inferred':
+        return `inferred from your sessions${masked}`;
+      case 'manual':
+        return `manual override${masked}`;
+      default:
+        return 'not resolved';
+    }
+  };
+
   if (!notifications) return null;
   const status = !hasToken
     ? 'No token stored.'
@@ -139,10 +180,34 @@ export function NotificationSettings() {
         >
           {status}
         </p>
+        {hasToken && (
+          <p
+            id="identityStatus"
+            data-identity-source={identity?.source ?? 'none'}
+            className="text-xs text-[#7f8ca0]"
+          >
+            Identity: {identityLabel(identity)}
+            {identity?.cliOrgMismatch
+              ? ' — note: the CLI’s primary org differs from the token’s org'
+              : ''}
+            {'  '}
+            <button
+              id="identityReset"
+              type="button"
+              className={buttonClass}
+              disabled={
+                !identity?.source || identity.source === 'self' || identity.source === 'manual'
+              }
+              onClick={() => window.devinworkspaces.identityReset()}
+            >
+              Reset
+            </button>
+          </p>
+        )}
         {notifications.noUserIdentity && (
           <p id="patNoUser" className="text-xs text-[#ffcc80]">
-            This token has no user identity (service user), so no sessions, notifications or pull
-            requests are shown. Use a personal API token.
+            Could not determine your user — sign in with the Devin CLI (devin auth login) or set
+            your user id in Settings.
           </p>
         )}
         {message && (
@@ -151,9 +216,10 @@ export function NotificationSettings() {
           </p>
         )}
         <p className="text-xs text-[#7f8ca0]">
-          Use a personal Devin API token (not the CLI&apos;s Windsurf token): the app only shows
-          sessions, notifications and pull requests created by the token&apos;s user, so service-user
-          tokens show nothing. Stored with OS encryption; never shown again.
+          Personal access token or service-user token (legacy v1 keys are not supported). With a
+          service-user token the app determines your user from the Devin CLI sign-in (devin auth
+          login) or from the sessions you open; use the User ID override if neither works. Stored
+          with OS encryption; never shown again.
         </p>
       </form>
       <label className="flex items-center gap-2 text-sm">
@@ -206,6 +272,21 @@ export function NotificationSettings() {
           onChange={(event) => toggleAutoOpenTabs(event.target.checked)}
         />
         <span>Open a tab when a session creates a PR</span>
+      </label>
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-[#aeb9c8]">User ID override (optional)</span>
+        <div className="flex gap-2 max-w-md">
+          <input
+            id="userIdInput"
+            className={inputClass}
+            value={userId}
+            onChange={(event) => setUserId(event.target.value)}
+            placeholder="user-… (blank = detect automatically)"
+          />
+          <button type="button" className={buttonClass} onClick={saveUserId}>
+            Save
+          </button>
+        </div>
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-[#aeb9c8]">Organization ID (optional override)</span>
