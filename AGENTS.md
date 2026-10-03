@@ -5,7 +5,7 @@ Electron desktop client for Devin (BaseWindow + WebContentsViews; the React shel
 ## Commands
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run test:unit` — vitest, `tests/unit` (pure logic only)
-- `npm run build` — esbuild (main/preload/scripts → `out/*.cjs`) + `vite build` (shell → `out/shell`)
+- `npm run build` — esbuild (main/preload/scripts → `out/*.cjs`) + `vite build` (shell → `out/shell`); runs a dependency preflight first (`src/core/depPreflight.ts` → `out/scripts/dep-preflight.cjs`) and exits 1 with a `run npm install` message when a package.json dependency is missing from node_modules
 - `npm run test:e2e` — build + Playwright `_electron` (`tests/e2e`, fixture servers in `tests/fixtures/http.ts`)
 - `npm run dist:win` — build + electron-builder NSIS per-user x64 installer → `dist/DevinWorkspaces-Setup-<version>.exe` (unsigned, fuses flipped by electron-builder from `build.electronFuses`; `scripts/after-pack.cjs` only writes `resources/signing.json`; icon from `build/icon.ico` via `npm run icon`)
 - `npm run dist:mac` — build + electron-builder arm64 dmg+zip → `dist/DevinWorkspaces-<version>-arm64.*` + `latest-mac.yml`; ad-hoc signed (`-c.mac.identity=- -c.mac.hardenedRuntime=false` — hardened runtime off because ad-hoc signatures have no team ID), so Gatekeeper requires right-click → Open on first launch (icon from `build/icon.png`, entitlements `build/entitlements.mac.plist`). Never reintroduce fuse-flipping in afterPack — it invalidates the Electron ad-hoc signature → "application is damaged".

@@ -1,10 +1,33 @@
 import { build } from 'esbuild';
-import { mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { build as viteBuild } from 'vite';
 
 await mkdir('out', { recursive: true });
 await mkdir('out/scripts', { recursive: true });
 await mkdir('out/fixtures', { recursive: true });
+
+// Dependency preflight: fail fast when package.json is ahead of node_modules
+// instead of surfacing a cryptic bundler "failed to resolve import" error.
+await build({
+  entryPoints: ['src/core/depPreflight.ts'],
+  bundle: true,
+  platform: 'node',
+  target: 'node20',
+  format: 'cjs',
+  outfile: 'out/scripts/dep-preflight.cjs',
+});
+const { missingDependencies, formatMissingDependencies } = await import(
+  pathToFileURL(resolve('out/scripts/dep-preflight.cjs')).href
+);
+const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+const missing = missingDependencies(pkg, (name) => existsSync(resolve('node_modules', name, 'package.json')));
+if (missing.length > 0) {
+  console.error(formatMissingDependencies(missing));
+  process.exit(1);
+}
 
 await Promise.all([
   build({
