@@ -43,6 +43,7 @@ import {
   notifyShell,
   publicState,
   setNotificationsPanel,
+  setPaneOpen,
 } from './window';
 
 // "Reload all tabs in this session" (strip menu + test hook).
@@ -69,7 +70,7 @@ export function setupIpc(): void {
     const previousSettings = state.settings.current;
     const next: Settings = state.settings.merge(parsed.data);
     notifier.onSettingsChanged(previousSettings, next);
-    state.paneOpen = next.pane.open;
+    if (next.pane.open !== state.paneOpen) setPaneOpen(next.pane.open, 'settings');
     // Raw 0..1 preference; the px guards are applied when laying out.
     state.paneFraction = clampFraction01(next.pane.fraction);
     state.surface = next.surface;
@@ -86,9 +87,7 @@ export function setupIpc(): void {
     return next;
   });
   guardedOn(IpcChannels.paneToggle, () => {
-    state.paneOpen = !state.paneOpen;
-    log('shell', 'pane-toggle', { detail: { paneOpen: state.paneOpen } });
-    applyLayout();
+    setPaneOpen(!state.paneOpen, 'rail');
   });
   guardedOn(IpcChannels.tabActivate, (_event, id: unknown) => {
     const parsed = TabIdArg.safeParse(id);
