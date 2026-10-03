@@ -64,6 +64,8 @@ export const state = {
   },
   // P6: notification panel z-order raise flag (set via notifications:panel IPC).
   notificationsPanelOpen: false,
+  // Same raise flag for the PR panel (set via prs:panel IPC).
+  prsPanelOpen: false,
   // Autofill account picker anchored to a hosted view's field. While set the
   // shell is raised (same mechanism as the notifications panel).
   autofillPicker: null as {

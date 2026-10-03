@@ -45,7 +45,12 @@ export const IpcChannels = {
   secretsSetPat: 'secrets:setPat',
   secretsClearPat: 'secrets:clearPat',
   prsList: 'prs:list',
-  prsPopup: 'prs:popup',
+  prsMarkRead: 'prs:markRead',
+  prsMarkAllRead: 'prs:markAllRead',
+  prsRemove: 'prs:remove',
+  prsClear: 'prs:clear',
+  prsOpen: 'prs:open',
+  prsPanel: 'prs:panel',
   // P6 notification center
   notificationsList: 'notifications:list',
   notificationsMarkRead: 'notifications:markRead',
@@ -288,6 +293,8 @@ export const NotificationsStateSchema = z.object({
   noUserIdentity: z.boolean(),
   identity: z.object({ source: IdentitySourceSchema.nullable(), resolved: z.boolean() }),
   openPrCount: z.number().int(),
+  unreadPrCount: z.number().int(),
+  prsPanelOpen: z.boolean(),
   unreadCount: z.number().int(),
   panelOpen: z.boolean(),
 });
@@ -472,8 +479,13 @@ export const SessionPrSchema = z.object({
   title: z.string().nullable(),
   url: z.string(),
   state: z.string().nullable(),
+  readAt: z.number().nullable(),
 });
 export type SessionPr = z.infer<typeof SessionPrSchema>;
+
+export const PrUrlArg = z.object({ url: z.string().url() });
+export const PrOpenArg = z.object({ sessionId: z.string().min(1), url: z.string().url() });
+export const PrPanelArg = z.object({ open: z.boolean() });
 
 // Arg schemas for ipcMain.on channels (safeParse; invalid payloads ignored).
 export const TabIdArg = z.string();

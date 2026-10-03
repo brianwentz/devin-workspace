@@ -1,4 +1,3 @@
-import { Menu } from 'electron';
 import { notificationStore } from './notifications';
 import { deriveNotifications } from '../core/notificationModel';
 import { DevinApiClient, DevinApiError, sanitizeMessage } from '../core/devinApi';
@@ -11,9 +10,8 @@ import {
   newPullRequests,
   openPullRequests,
   pollInterval,
-  prMenuLabel,
-  scopeLabel,
 } from '../core/notifyModel';
+import { visiblePrs } from '../core/prPanelModel';
 import { sessionUrl } from '../core/sessions';
 import { confirmIdentity, type IdentitySource } from '../core/identityModel';
 import type { SessionPr, Settings } from '../shared/ipc';
@@ -21,11 +19,12 @@ import { identityResolver } from './identity';
 import { prLedger } from './prLedger';
 import { log } from './log';
 import { route } from '../core/linkRouter';
+import { prStore } from './prs';
 import { prTitles } from './prTitles';
 import { handleLink, loadInDevinView, routeContext } from './routing';
 import { state, testMode } from './state';
 import { installUpdate } from './updater';
-import { applyLayout, notifyShell, setNotificationsPanel } from './window';
+import { applyLayout, notifyShell, setNotificationsPanel, setPrsPanel } from './window';
 
 const PAGE_SIZE = 100;
 
@@ -354,6 +353,7 @@ class Notifier {
       // (single-page) list — a partial page can't prove absence.
       const previousSessions = state.apiSessions;
       state.apiSessions = sessions;
+      prStore().reconcile(openPullRequests(sessions), Date.now());
       for (const scope of archivedScopes(previousSessions, sessions, !page.hasNextPage)) {
         void state.tabManager?.closeScope(scope).then(() => {
           log('shell', 'tabs-scope-archived', { detail: { scope } });
@@ -493,36 +493,22 @@ class Notifier {
 
 export const notifier = new Notifier();
 
-// Open PRs across all of the token user's sessions, with GitHub titles when
-// the prTitles cache has resolved them.
+// Visible (open, not dismissed) PRs across the token user's sessions, with
+// GitHub titles when the prTitles cache has resolved them and per-URL read
+// state from the PR store.
 export function openPrs(): SessionPr[] {
-  return openPullRequests(state.apiSessions).map((pr) => ({ ...pr, title: prTitles.get(pr.url) }));
+  return visiblePrs(prStore().records(), openPullRequests(state.apiSessions)).map((pr) => ({
+    ...pr,
+    title: prTitles.get(pr.url),
+  }));
 }
 
-// Native popup listing open PRs grouped by session; clicking one switches the
-// devin view to that session and opens the PR in its pane.
-export function popupPrMenu(): number {
-  const prs = openPrs();
-  if (prs.length === 0 || !state.windowRef) return 0;
-  const template: Electron.MenuItemConstructorOptions[] = [];
-  const sessionIds: string[] = [];
-  let lastSession: string | null = null;
-  for (const pr of prs) {
-    if (pr.sessionId !== lastSession) {
-      if (template.length > 0) template.push({ type: 'separator' });
-      lastSession = pr.sessionId;
-      sessionIds.push(pr.sessionId);
-      template.push({ label: scopeLabel(pr.sessionId, state.apiSessions), enabled: false });
-    }
-    template.push({
-      label: prMenuLabel(pr.ref, pr.title),
-      click: () => openSessionPr(pr.sessionId, pr.url),
-    });
-  }
-  const menu = Menu.buildFromTemplate(template);
-  log('shell', 'pr-menu', { detail: { count: prs.length, sessions: sessionIds } });
-  menu.popup({ window: state.windowRef });
-  return prs.length;
+// PR panel "open" action: mark the row read, close the panel, then switch the
+// devin view to that session and open the PR in its pane.
+export function openPr(sessionId: string, url: string): void {
+  prStore().markRead(url);
+  setPrsPanel(false);
+  openSessionPr(sessionId, url);
 }
 
 // Open a PR for a specific session: navigate the devin view to that session

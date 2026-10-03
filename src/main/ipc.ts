@@ -33,11 +33,12 @@ import { settingsFlushDone } from './settingsFlush';
 import { identityResolver } from './identity';
 import { log } from './log';
 import { notificationStore } from './notifications';
-import { notifier, openNotification, openPrs, popupPrMenu } from './notifier';
+import { notifier, openNotification, openPr, openPrs } from './notifier';
+import { prStore } from './prs';
 import { handleLink } from './routing';
 import { hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
-import { NotificationIdArg, NotificationPanelArg } from '../shared/ipc';
+import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import {
@@ -49,6 +50,7 @@ import {
   notifyShell,
   publicState,
   setNotificationsPanel,
+  setPrsPanel,
   setPaneOpen,
 } from './window';
 
@@ -193,6 +195,7 @@ export function setupIpc(): void {
     if (!parsed.success) return;
     state.surface = parsed.data;
     setNotificationsPanel(false);
+    setPrsPanel(false);
     closeAutofillOverlays();
     log('shell', 'surface-set', { detail: { surface: state.surface } });
     applyLayout();
@@ -290,8 +293,23 @@ function setupExtrasIpc(): void {
     return { ok: true };
   });
   guardedHandle(IpcChannels.prsList, () => openPrs());
-  guardedOn(IpcChannels.prsPopup, () => {
-    popupPrMenu();
+  guardedOn(IpcChannels.prsMarkRead, (_e, arg: unknown) => {
+    const parsed = PrUrlArg.safeParse(arg);
+    if (parsed.success) prStore().markRead(parsed.data.url);
+  });
+  guardedOn(IpcChannels.prsMarkAllRead, () => prStore().markAllRead());
+  guardedOn(IpcChannels.prsRemove, (_e, arg: unknown) => {
+    const parsed = PrUrlArg.safeParse(arg);
+    if (parsed.success) prStore().dismiss(parsed.data.url);
+  });
+  guardedOn(IpcChannels.prsClear, () => prStore().dismissAll());
+  guardedOn(IpcChannels.prsOpen, (_e, arg: unknown) => {
+    const parsed = PrOpenArg.safeParse(arg);
+    if (parsed.success) openPr(parsed.data.sessionId, parsed.data.url);
+  });
+  guardedOn(IpcChannels.prsPanel, (_e, arg: unknown) => {
+    const parsed = PrPanelArg.safeParse(arg);
+    if (parsed.success) setPrsPanel(parsed.data.open);
   });
   // P6 notification center
   guardedHandle(IpcChannels.notificationsList, () => notificationStore().entries());

@@ -4,6 +4,7 @@ import { handleSettingsFlush } from './settingsDraft';
 import { useShellState } from './store';
 import { Rail } from './components/Rail';
 import { NotificationPanel } from './components/NotificationPanel';
+import { PrPanel } from './components/PrPanel';
 import { AccountPicker } from './components/AccountPicker';
 import { SavePasswordBanner } from './components/SavePasswordBanner';
 import { TitleBar } from './components/TitleBar';
@@ -89,6 +90,7 @@ export function App() {
         <Splitter axis="y" rect={bounds.terminalSplitter} enabled={true} />
       )}
       <NotificationPanel />
+      <PrPanel />
       <AccountPicker />
       <SavePasswordBanner />
       {state.surface === 'settings' && (

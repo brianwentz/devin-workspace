@@ -20,6 +20,7 @@ import { registerTestHooks } from './testHooks';
 import { keepAliveMs, TabManager } from './tabs';
 import { identityResolver } from './identity';
 import { notificationStore, notificationsFlush } from './notifications';
+import { prStore, prsFlush } from './prs';
 import { prLedger } from './prLedger';
 import { hasDownloadedUpdate, quitAndInstall, restoreUpdateEntry } from './updater';
 import {
@@ -124,6 +125,7 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
     }
     localHost()?.dispose();
     notificationsFlush();
+    prsFlush();
     savePlacementNow();
     state.settings?.syncFromState();
     try {
@@ -179,6 +181,7 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
 async function createWindow(): Promise<void> {
   state.settings = new SettingsStore(userData);
   notificationStore(userData);
+  prStore(userData);
   prLedger(userData);
   identityResolver(userData, testMode);
   state.secrets = new SecretStore(userData);

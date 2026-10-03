@@ -263,7 +263,13 @@ const api = {
     ipcRenderer.invoke(IpcChannels.secretsSetPat, { pat }) as Promise<SecretResult>,
   clearPat: () => ipcRenderer.invoke(IpcChannels.secretsClearPat) as Promise<SecretResult>,
   listPrs: () => ipcRenderer.invoke(IpcChannels.prsList) as Promise<SessionPr[]>,
-  openPrMenu: () => ipcRenderer.send(IpcChannels.prsPopup),
+  prsMarkRead: (url: string) => ipcRenderer.send(IpcChannels.prsMarkRead, { url }),
+  prsMarkAllRead: () => ipcRenderer.send(IpcChannels.prsMarkAllRead),
+  prsRemove: (url: string) => ipcRenderer.send(IpcChannels.prsRemove, { url }),
+  prsClear: () => ipcRenderer.send(IpcChannels.prsClear),
+  prsOpen: (sessionId: string, url: string) =>
+    ipcRenderer.send(IpcChannels.prsOpen, { sessionId, url }),
+  prsPanel: (open: boolean) => ipcRenderer.send(IpcChannels.prsPanel, { open }),
   // P6 notification center
   notificationsList: () =>
     ipcRenderer.invoke(IpcChannels.notificationsList) as Promise<AppNotification[]>,
