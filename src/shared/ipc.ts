@@ -85,6 +85,9 @@ export const IpcChannels = {
   terminalActivate: 'terminal:activate',
   terminalCwdOptions: 'terminal:cwdOptions',
   terminalProfiles: 'terminal:profiles',
+  // Terminal copy/paste via the main-process Electron clipboard.
+  clipboardReadText: 'clipboard:readText',
+  clipboardWriteText: 'clipboard:writeText',
 } as const;
 
 export const SurfaceSchema = z.enum(['cloud', 'local', 'settings']);
@@ -430,6 +433,7 @@ export const TerminalResizeArg = z.object({
   rows: z.number().int().min(1).max(200),
 });
 export const TerminalCloseArg = z.object({ id: z.string().min(1) });
+export const ClipboardWriteArg = z.object({ text: z.string().max(65536) });
 
 export const SessionPrSchema = z.object({
   sessionId: z.string(),

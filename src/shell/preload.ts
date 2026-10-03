@@ -121,6 +121,12 @@ const terminalApi = {
     ipcRenderer.on(IpcChannels.terminalExit, listener);
     return () => ipcRenderer.removeListener(IpcChannels.terminalExit, listener);
   },
+  clipboardReadText: () => ipcRenderer.invoke(IpcChannels.clipboardReadText) as Promise<string>,
+  clipboardWriteText: (text: string) => {
+    if (isString(text) && text.length <= 65536) {
+      ipcRenderer.send(IpcChannels.clipboardWriteText, { text });
+    }
+  },
 };
 
 const api = {

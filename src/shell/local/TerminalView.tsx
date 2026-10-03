@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { resolveTerminalKey } from '../../core/terminalKeys';
 import { buttonClass } from './Cards';
 
 interface TerminalViewProps {
@@ -51,18 +52,34 @@ export function TerminalView({ id, active = false, onRestart }: TerminalViewProp
       }),
     );
     term.open(container);
+    // Copy/paste go through the main-process clipboard; term.paste() emits the
+    // (bracketed-paste wrapped) text through onData → terminalInput.
+    const copySelection = () => {
+      if (term.hasSelection()) {
+        window.devinworkspaces.clipboardWriteText(term.getSelection());
+        term.clearSelection();
+      }
+    };
+    const pasteClipboard = () => {
+      void window.devinworkspaces.clipboardReadText().then((text) => {
+        if (text) term.paste(text);
+      });
+    };
     term.attachCustomKeyEventHandler((event) => {
-      if (event.type !== 'keydown' || !event.ctrlKey || !event.shiftKey) return true;
-      const key = event.key.toLowerCase();
-      if (key === 'c') {
-        const selection = term.getSelection();
-        if (selection) void navigator.clipboard.writeText(selection);
+      const action = resolveTerminalKey(event, {
+        platform: window.devinworkspaces.platform,
+        hasSelection: term.hasSelection(),
+      });
+      if (action === 'copy') {
+        copySelection();
+        event.preventDefault();
         return false;
       }
-      if (key === 'v') {
-        void navigator.clipboard.readText().then((text) => {
-          if (text) window.devinworkspaces.terminalInput(idRef.current, text);
-        });
+      if (action === 'paste') {
+        pasteClipboard();
+        // Prevent the browser's native textarea paste — xterm would forward
+        // it a second time on top of term.paste().
+        event.preventDefault();
         return false;
       }
       return true;
@@ -136,17 +153,18 @@ export function TerminalView({ id, active = false, onRestart }: TerminalViewProp
         data-terminal-id={id}
         // Windows Terminal convention: right-click copies the xterm selection,
         // otherwise pastes. xterm's selection is not DOM selection, so the
-        // shell context menu never sees it.
+        // shell context menu can't see it — and copy/paste go through the
+        // main-process clipboard, not navigator.clipboard.
         onContextMenu={(event) => {
           event.preventDefault();
           const term = termRef.current;
           if (!term) return;
           if (term.hasSelection()) {
-            void navigator.clipboard.writeText(term.getSelection());
+            window.devinworkspaces.clipboardWriteText(term.getSelection());
             term.clearSelection();
           } else {
-            void navigator.clipboard.readText().then((text) => {
-              if (text) window.devinworkspaces.terminalInput(idRef.current, text);
+            void window.devinworkspaces.clipboardReadText().then((text) => {
+              if (text) term.paste(text);
             });
           }
         }}

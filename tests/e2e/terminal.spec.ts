@@ -400,7 +400,7 @@ test('terminal dock: rail toggle, shell tabs, surface gating, persisted height',
   }
 });
 
-test('terminal clipboard: Ctrl+Shift+V pastes, right-click pastes, context menu suppressed', async () => {
+test('terminal clipboard: Ctrl+V pastes, Ctrl+C copies selection, right-click copy/paste', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-termclip-'));
   const logFile = join(profile, 'events.jsonl');
   writeFileSync(logFile, '', 'utf8');
@@ -430,25 +430,71 @@ test('terminal clipboard: Ctrl+Shift+V pastes, right-click pastes, context menu 
         app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id),
       )
       .toContain('ready');
+    const read = () =>
+      app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id);
     await page.locator(`[data-terminal-id="${id}"]`).click();
 
-    // Ctrl+Shift+V pastes clipboard text into the pty.
-    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), 'clip-v-paste');
-    await page.keyboard.press('Control+Shift+v');
-    await expect
-      .poll(async () =>
-        app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id),
-      )
-      .toContain('clip-v-paste');
+    // Plain Ctrl+V pastes via term.paste. The fake pty enabled bracketed
+    // paste, but on Windows ConPTY strips the \x1b[?2004h mode set and the
+    // 200~/201~ input markers, so the pty observes the raw text. Measured
+    // because the pre-fix path let PSReadLine handle the paste (~500ms).
+    // The child's stdin is line-buffered, so the trailing \r flushes it.
+    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), 'clip-text');
+    const t0 = Date.now();
+    await page.keyboard.press('Control+v');
+    await expect.poll(read).toContain('clip-text');
+    const elapsed = Date.now() - t0;
+    // The ~500ms pre-fix path (PSReadLine paste) is comfortably above this.
+    expect(elapsed).toBeLessThan(400);
+    expect((await read()).split('clip-text').length - 1).toBe(1); // no double paste
+    await page.keyboard.press('Enter');
+    await expect.poll(read).toContain('echo:clip-text\\x0d');
+    expect(await read()).not.toContain('\\x16'); // ^V never reached the pty
 
     // Right-click with no xterm selection pastes (Windows Terminal convention).
     await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), 'right-click-paste');
     await page.locator(`[data-terminal-id="${id}"]`).click({ button: 'right' });
+    await expect.poll(read).toContain('right-click-paste');
+    await page.keyboard.press('Enter'); // flush the pasted line to the child
+
+    // Drag across the first screen row ('ready') to make an xterm selection.
+    const screen = page.locator(`[data-terminal-id="${id}"] .xterm-screen`);
+    const box = await screen.boundingBox();
+    expect(box).toBeTruthy();
+    const selectRow = async () => {
+      await page.mouse.move(box!.x + 2, box!.y + 6);
+      await page.mouse.down();
+      await page.mouse.move(box!.x + 60, box!.y + 6, { steps: 5 });
+      await page.mouse.up();
+    };
+    await selectRow();
+
+    // Right-click with a selection copies it to the OS clipboard.
+    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), '__cleared__');
+    await page.locator(`[data-terminal-id="${id}"]`).click({ button: 'right' });
     await expect
-      .poll(async () =>
-        app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id),
-      )
-      .toContain('right-click-paste');
+      .poll(async () => app.evaluate(() => (globalThis as G).__devinworkspaces.clipboardRead()))
+      .toContain('ready');
+
+    // Ctrl+C with an xterm selection copies it instead of sending ^C.
+    await selectRow();
+    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), '');
+    await page.keyboard.press('Control+c');
+    await expect
+      .poll(async () => app.evaluate(() => (globalThis as G).__devinworkspaces.clipboardRead()))
+      .toContain('ready');
+    await page.keyboard.type('z');
+    await page.keyboard.press('Enter');
+    await expect.poll(read).toContain('echo:z\\x0d'); // no ^C in the flushed line
+    expect(await read()).not.toContain('echo:\\x03');
+
+    // Ctrl+C with no selection sends ^C to the pty — under ConPTY that is a
+    // CTRL_C_EVENT which kills the child, not a readable \x03 byte.
+    await page.locator(`[data-terminal-id="${id}"]`).click(); // click clears the selection
+    await page.keyboard.press('Control+c');
+    await expect
+      .poll(async () => (await state(app)).terminals[0]?.exitCode)
+      .toEqual(expect.any(Number));
 
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
     await app.close();
