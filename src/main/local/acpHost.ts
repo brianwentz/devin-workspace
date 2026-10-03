@@ -703,6 +703,48 @@ export class DevinLocalHost {
     log('local', 'session-delete', { detail: { workspace: session.workspace, sessionId } });
   }
 
+  // Deletes every session of a workspace. Running prompts are cancelled first
+  // (the user confirmed the bulk action in the panel); failures on one session
+  // don't stop the rest. Returns the ids that were deleted.
+  async deleteWorkspaceSessions(
+    workspace: string,
+  ): Promise<{ deleted: string[]; cancelled: number; failed: number }> {
+    const normalized = resolve(workspace);
+    const ids = Object.values(getLocalState().sessions)
+      .filter((session) => session.workspace === normalized)
+      .map((session) => session.id);
+    const deleted: string[] = [];
+    let cancelled = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        if (getLocalState().sessions[id]?.running) {
+          await this.cancel(id);
+          cancelled += 1;
+          // running flips when the cancelled prompt resolves — bounded wait.
+          const deadline = Date.now() + 5_000;
+          while (getLocalState().sessions[id]?.running && Date.now() < deadline) {
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+          }
+        }
+        await this.deleteSession(id);
+        deleted.push(id);
+      } catch {
+        failed += 1;
+      }
+    }
+    log('local', 'session-delete-all', {
+      detail: {
+        workspace: normalized,
+        requested: ids.length,
+        deleted: deleted.length,
+        cancelled,
+        failed,
+      },
+    });
+    return { deleted, cancelled, failed };
+  }
+
   async listSessions(workspace: string): Promise<LocalSessionSummary[]> {
     const normalized = resolve(workspace);
     let handle: AgentHandle | null = null;

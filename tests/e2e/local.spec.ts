@@ -50,6 +50,7 @@ type Hooks = {
     workspace: string,
   ): Promise<Array<{ id: string; title: string; historySource: string }>>;
   localLoadSession(workspace: string, sessionId: string): Promise<void>;
+  localDeleteSession(sessionId: string): Promise<void>;
   localAgentPid(workspace: string): number | null;
   setSurface(value: 'cloud' | 'local' | 'settings'): void;
   clipboardWrite(text: string): void;
@@ -338,8 +339,8 @@ test('Local: fake agent with session/list + session/load — prompt, permission,
       ),
     ).toBe(true);
 
-    // Delete (sessionCapabilities.delete): caps badge, hover trash, inline
-    // confirm/cancel, running-refusal, and the agent's list no longer returns it.
+    // Delete (sessionCapabilities.delete): caps badge, one-click trash (no
+    // confirm), running-refusal, and the agent's list no longer returns it.
     expect(
       ((await evaluateInShell(app, `document.getElementById('agentCaps')?.textContent`)) as string) ?? '',
     ).toContain('delete yes');
@@ -348,35 +349,36 @@ test('Local: fake agent with session/list + session/load — prompt, permission,
     await expect.poll(() => shellCount(app, '.session-delete')).toBe(2);
 
     const deleteButton = `.session-delete[data-session-id="${secondId}"]`;
-    // Click → inline confirm; Cancel keeps the session.
-    expect(await shellClick(app, deleteButton)).toBe(true);
-    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(1);
-    expect(await shellClick(app, '.session-delete-cancel')).toBe(true);
-    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(0);
-    expect(await shellCount(app, `.session-item[data-session-id="${secondId}"]`)).toBe(1);
-
-    // Re-open the confirm, then run a slow prompt on that session: deleting
-    // while running is refused through #localError.
-    expect(await shellClick(app, deleteButton)).toBe(true);
-    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(1);
+    // Deleting while running is refused: the trash is disabled and the
+    // host-level delete throws.
     await promptNoWait(app, secondId, 'please be slow');
     await expect.poll(async () => (await localState(app)).sessions[secondId]?.running).toBe(true);
-    expect(await shellClick(app, '.session-delete-confirm')).toBe(true);
-    await expect
-      .poll(async () =>
-        evaluateInShell(app, `document.getElementById('localError')?.textContent ?? ''`),
-      )
-      .toBe('cancel the running prompt before deleting');
+    expect(
+      await evaluateInShell(
+        app,
+        `document.querySelector(${JSON.stringify(deleteButton)})?.disabled`,
+      ),
+    ).toBe(true);
+    const refusal = await app.evaluate(
+      async (_e, id) => {
+        try {
+          await (globalThis as G).__devinworkspaces.localDeleteSession(id as string);
+          return null;
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      },
+      secondId,
+    );
+    expect(refusal).toBe('cancel the running prompt before deleting');
     await app.evaluate(
       (_e, id) => (globalThis as G).__devinworkspaces.localCancel(id as string),
       secondId,
     );
     await expect.poll(async () => (await localState(app)).sessions[secondId]?.running).toBe(false);
 
-    // Confirm → row and state drop; the agent no longer lists it.
+    // One click on the trash → row and state drop; the agent no longer lists it.
     expect(await shellClick(app, deleteButton)).toBe(true);
-    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(1);
-    expect(await shellClick(app, '.session-delete-confirm')).toBe(true);
     await expect.poll(() => shellCount(app, `.session-item[data-session-id="${secondId}"]`)).toBe(0);
     await expect.poll(async () => (await localState(app)).sessions[secondId]).toBeUndefined();
     const deleteEvents = (await readEvents(logFile)).filter(
@@ -385,6 +387,46 @@ test('Local: fake agent with session/list + session/load — prompt, permission,
     expect(deleteEvents.some((entry) => (entry.detail as any)?.sessionId === secondId)).toBe(true);
     const afterDelete = await listSessions(app, ws);
     expect(afterDelete.map((entry) => entry.id)).not.toContain(secondId);
+
+    // Delete all: header trash → inline confirm with the count; running
+    // prompts are cancelled first. The first session is still around, so two
+    // new sessions make three.
+    const bulkA = await newSession(app, ws);
+    await newSession(app, ws);
+    await expect.poll(() => shellCount(app, '#sessionList .session-item')).toBe(3);
+    await promptNoWait(app, bulkA, 'please be slow');
+    await expect.poll(async () => (await localState(app)).sessions[bulkA]?.running).toBe(true);
+    await expect.poll(() => shellCount(app, '#sessionDeleteAll')).toBe(1);
+    expect(await shellClick(app, '#sessionDeleteAll')).toBe(true);
+    await expect.poll(() => shellCount(app, '#sessionDeleteAllConfirm')).toBe(1);
+    const confirmLabel = await evaluateInShell(
+      app,
+      `document.getElementById('sessionDeleteAllConfirm')?.textContent ?? ''`,
+    );
+    expect(confirmLabel).toContain('Delete');
+    expect(confirmLabel).toContain('3');
+    // Cancel keeps everything.
+    expect(await shellClick(app, '#sessionDeleteAllCancel')).toBe(true);
+    await expect.poll(() => shellCount(app, '#sessionDeleteAllConfirm')).toBe(0);
+    expect(await shellCount(app, '#sessionList .session-item')).toBe(3);
+    // Confirm → all rows and state drop, including the running one.
+    expect(await shellClick(app, '#sessionDeleteAll')).toBe(true);
+    expect(await shellClick(app, '#sessionDeleteAllConfirm')).toBe(true);
+    await expect.poll(() => shellCount(app, '#sessionList .session-item')).toBe(0);
+    await expect
+      .poll(async () =>
+        Object.values((await localState(app)).sessions).filter((s) => s.workspace === ws).length,
+      )
+      .toBe(0);
+    const deleteAllEvent = (await readEvents(logFile)).find(
+      (entry) => entry.event === 'session-delete-all',
+    );
+    expect(deleteAllEvent).toBeTruthy();
+    expect((deleteAllEvent!.detail as any)?.deleted).toBe(3);
+    expect((deleteAllEvent!.detail as any)?.cancelled).toBe(1);
+    expect((deleteAllEvent!.detail as any)?.failed).toBe(0);
+    expect(await listSessions(app, ws)).toEqual([]);
+    await expect.poll(() => shellCount(app, '#sessionDeleteAll')).toBe(0);
 
     // Markdown rendering must not trip the shell CSP (no inline styles/scripts).
     const consoleEvents = (await readEvents(logFile)).filter((entry) => entry.event === 'console-message');
@@ -461,6 +503,7 @@ test('Local: fake agent without list/load — local-index history, load error, c
       (await evaluateInShell(app, `document.querySelector('.session-item .history-label').textContent`)) as string,
     ).toBe('history not supported by agent');
     expect(await shellCount(app, '.session-delete')).toBe(0);
+    expect(await shellCount(app, '#sessionDeleteAll')).toBe(0);
 
     // session/load is refused when the agent lacks loadSession.
     expect(await loadSession(app, ws, sessionId)).toBe('history not supported by agent');

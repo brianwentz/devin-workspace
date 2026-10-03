@@ -229,10 +229,8 @@ test('local sessions get their own GitHub tab scope and devin terminal', async (
       )
       .toBe('flex');
 
-    // Delete B via the confirm flow → its pty is closed and its scope is gone.
+    // Delete B via the trash → its pty is closed and its scope is gone.
     expect(await shellClick(app, `.session-delete[data-session-id="${sessionB}"]`)).toBe(true);
-    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(1);
-    expect(await shellClick(app, '.session-delete-confirm')).toBe(true);
     await expect.poll(async () => (await localState(app)).sessions[sessionB]).toBeUndefined();
     await expect
       .poll(async () =>
