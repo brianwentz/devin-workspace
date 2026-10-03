@@ -178,9 +178,9 @@ export function computeBounds(
     },
     splitter: {
       x: splitterX,
-      y: 0,
+      y: TITLE_BAR_HEIGHT,
       width: Math.min(SPLITTER_WIDTH, Math.max(0, width - splitterX)),
-      height,
+      height: Math.max(0, height - TITLE_BAR_HEIGHT),
     },
     ghTab: {
       x: paneX,
@@ -192,4 +192,27 @@ export function computeBounds(
     terminalSplitter: docked.terminalSplitter,
     paneCollapsed,
   };
+}
+
+// Window content width to apply BEFORE flipping paneOpen so the devin column
+// keeps its px width. Returns null when no resize is needed/possible.
+export function paneToggleWindowWidth(
+  open: boolean,
+  contentWidth: number,
+  layout: LayoutState,
+  maxWidth: number,
+): number | null {
+  if (!open) {
+    const bounds = computeBounds({ width: contentWidth, height: 1000 }, layout);
+    if (bounds.paneCollapsed || !bounds.ghTab) return null;
+    return RAIL_WIDTH + bounds.devin.width;
+  }
+  const devin = Math.max(0, Math.floor(contentWidth) - RAIL_WIDTH);
+  // Clamp the ratio at 0.95 so f→1 doesn't explode the target width.
+  const fraction = Math.min(0.95, clampFraction01(layout.paneFraction));
+  const pane = Math.max(MIN_PANE_WIDTH, Math.round((fraction / (1 - fraction)) * devin));
+  const target = RAIL_WIDTH + devin + SPLITTER_WIDTH + pane;
+  // Never shrink when opening: stay at contentWidth when it already fits.
+  const next = Math.min(target, Math.max(maxWidth, contentWidth));
+  return next === contentWidth ? null : next;
 }

@@ -21,7 +21,15 @@ import { keepAliveMs, TabManager } from './tabs';
 import { identityResolver } from './identity';
 import { notificationStore, notificationsFlush } from './notifications';
 import { hasDownloadedUpdate, quitAndInstall, restoreUpdateEntry } from './updater';
-import { applyLayout, cancelDrag, detachView, notifyShell } from './window';
+import {
+  applyLayout,
+  cancelDrag,
+  detachView,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH_CLOSED,
+  MIN_WINDOW_WIDTH_OPEN,
+  notifyShell,
+} from './window';
 import {
   attachPlacementTracking,
   initialWindowOptions,
@@ -203,11 +211,12 @@ async function createWindow(): Promise<void> {
   const { restored, ...placementOptions } = initialWindowOptions();
   state.windowRef = new BaseWindow({
     ...placementOptions,
-    minWidth: 1000,
-    minHeight: 640,
+    minWidth: saved.pane.open ? MIN_WINDOW_WIDTH_OPEN : MIN_WINDOW_WIDTH_CLOSED,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: 'Devin Workspaces',
     show: true,
     titleBarStyle: 'hidden',
+    backgroundColor: '#111827',
     titleBarOverlay: { color: '#101722', symbolColor: '#e8edf5', height: 36 },
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 12, y: 10 } } : {}),
   });
@@ -256,7 +265,7 @@ async function createWindow(): Promise<void> {
     },
   });
   state.shellView.setBackgroundColor('#111827');
-  state.devinView.setBackgroundColor('#ffffffff');
+  state.devinView.setBackgroundColor('#111827');
   state.windowRef.contentView.addChildView(state.shellView);
   state.windowRef.contentView.addChildView(state.devinView);
   attachRouting(state.shellView.webContents, 'shell');

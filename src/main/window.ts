@@ -1,9 +1,12 @@
-import { View, type WebContentsView } from 'electron';
+import { screen, View, type WebContentsView } from 'electron';
 import {
   clampPaneWidth,
   clampTerminalHeight,
   computeBounds,
   fractionFromPx,
+  MIN_DEVIN_WIDTH,
+  paneToggleWindowWidth,
+  RAIL_WIDTH,
   SPLITTER_WIDTH,
   type LayoutState,
   type Rect,
@@ -30,6 +33,64 @@ function nativeBounds(rect: Rect | null): Electron.Rectangle {
   return rect
     ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     : { x: 0, y: 0, width: 0, height: 0 };
+}
+
+// Toggling the GitHub pane resizes the WINDOW (the devin column keeps its px
+// width) instead of re-splitting a fixed window. The window's minimum width
+// follows the pane state so the resize isn't clamped by the old minimum.
+export const MIN_WINDOW_WIDTH_OPEN = 1000; // keeps the 1000–1021 auto-collapse band
+export const MIN_WINDOW_WIDTH_CLOSED = RAIL_WIDTH + MIN_DEVIN_WIDTH; // 696
+export const MIN_WINDOW_HEIGHT = 640;
+
+export function applyMinimumSize(): void {
+  state.windowRef?.setMinimumSize(
+    state.paneOpen ? MIN_WINDOW_WIDTH_OPEN : MIN_WINDOW_WIDTH_CLOSED,
+    MIN_WINDOW_HEIGHT,
+  );
+}
+
+// Single seam for every paneOpen change (rail button, shortcut, settings,
+// test hooks, tab auto-open). Maximised/fullscreen windows keep the in-window
+// split — resizing a maximised window is meaningless and the min size is left
+// untouched until the next non-maximised toggle.
+export function setPaneOpen(open: boolean, source: string): void {
+  if (open === state.paneOpen) return;
+  const win = state.windowRef;
+  if (!win) {
+    state.paneOpen = open;
+    applyLayout();
+    return;
+  }
+  if (win.isMaximized() || win.isFullScreen()) {
+    state.paneOpen = open;
+    applyLayout();
+    log('shell', 'pane-toggle', {
+      detail: { paneOpen: open, source, resized: false, maximized: true },
+    });
+    return;
+  }
+  const content = win.getContentBounds();
+  const display = screen.getDisplayMatching(win.getBounds());
+  const maxWidth = display.workArea.x + display.workArea.width - content.x;
+  // Layout BEFORE the flip describes the current split.
+  const target = paneToggleWindowWidth(open, content.width, layoutState(), maxWidth);
+  state.paneOpen = open;
+  // Closing lowers the minimum first so the smaller size is allowed; opening
+  // raises it only after the window has grown.
+  if (!open) applyMinimumSize();
+  if (target !== null) win.setContentSize(target, content.height);
+  if (open) applyMinimumSize();
+  applyLayout();
+  log('shell', 'pane-toggle', {
+    detail: {
+      paneOpen: open,
+      source,
+      resized: target !== null,
+      fromWidth: content.width,
+      toWidth: target ?? content.width,
+      maximized: false,
+    },
+  });
 }
 
 export function layoutState(): LayoutState {

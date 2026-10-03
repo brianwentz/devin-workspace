@@ -3,7 +3,7 @@ import { clampPaneWidth, fractionFromPx, paneWidthPx } from '../core/layout';
 import { newSessionUrl } from '../core/sessions';
 import { log } from './log';
 import { state, testMode, type ViewName } from './state';
-import { applyLayout, cancelDrag } from './window';
+import { applyLayout, cancelDrag, setPaneOpen } from './window';
 
 export function historyAction(
   action: 'back' | 'forward' | 'reload',
@@ -91,8 +91,7 @@ export function handleShortcut(
   let handled = false;
 
   if (ctrl && input.shift && key === 'g') {
-    state.paneOpen = !state.paneOpen;
-    applyLayout();
+    setPaneOpen(!state.paneOpen, 'shortcut');
     focusVisibleContents(contents);
     handled = true;
   } else if (ctrl && key === 'tab' && state.tabManager) {

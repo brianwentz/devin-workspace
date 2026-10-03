@@ -63,9 +63,7 @@ export function Splitter({ axis, rect, enabled }: SplitterProps) {
         role="separator"
         aria-orientation={axis === 'x' ? 'vertical' : 'horizontal'}
         aria-label={axis === 'x' ? 'Resize GitHub pane' : 'Resize terminal dock'}
-        className={`shell-chrome absolute bg-[#2c3949] hover:bg-[#6e9bd0] ${
-          axis === 'x' ? 'top-0' : 'left-0'
-        }`}
+        className="shell-chrome absolute bg-[#2c3949] hover:bg-[#6e9bd0]"
         style={{
           left: rect.x,
           top: rect.y,
@@ -108,14 +106,13 @@ export function Splitter({ axis, rect, enabled }: SplitterProps) {
       <div
         id="dragGuide"
         aria-hidden="true"
-        className={`absolute bg-[#91c4ff] pointer-events-none ${
-          axis === 'x' ? 'top-0 h-full' : 'left-0 w-full'
-        }`}
-        style={
-          axis === 'x'
-            ? { left: guidePos ?? rect.x, width: 2, display: guidePos === null ? 'none' : 'block' }
-            : { top: guidePos ?? rect.y, height: 2, display: guidePos === null ? 'none' : 'block' }
-        }
+        className={`absolute bg-[#91c4ff] pointer-events-none ${axis === 'y' ? 'left-0 w-full' : ''}`}
+        style={{
+          display: guidePos === null ? 'none' : 'block',
+          ...(axis === 'x'
+            ? { left: guidePos ?? rect.x, top: rect.y, width: 2, height: rect.height }
+            : { top: guidePos ?? rect.y, height: 2 }),
+        }}
       />
     </>
   );
