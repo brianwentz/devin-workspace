@@ -10,7 +10,7 @@ import { log } from './log';
 import { allowExternalEnabled } from './settings';
 import { fixtureOrigins, state, type ViewName } from './state';
 import { GLOBAL } from '../core/tabModel';
-import { applyLayout, notifyShell } from './window';
+import { applyLayout, notifyShell, setPaneOpen } from './window';
 import { handleShortcut } from './shortcuts';
 
 export function routeContext(): { tenantUrl: string; githubOrigins: string[] } {
@@ -46,7 +46,7 @@ export function openExternal(
 }
 
 function openGitHubTab(url: string, background: boolean): string | undefined {
-  state.paneOpen = true;
+  setPaneOpen(true, 'github-tab');
   // P8: scope = the currently visible scope (the session open in Cloud). Local
   // chat links therefore land on the session the user was looking at.
   const scope = state.tabManager?.currentScope ?? state.currentSessionId ?? GLOBAL;
