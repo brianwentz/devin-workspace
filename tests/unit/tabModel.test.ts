@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   GLOBAL,
+  effectiveScope,
+  localScope,
   activateTab,
   activeIdFor,
   addTab,
@@ -357,5 +359,19 @@ describe('pickDiscardCandidates', () => {
     // 5 visible + 3 hidden live, cap 2 → only the oldest hidden goes.
     expect(pickDiscardCandidates(entries, 2)).toEqual(['hid-oldest']);
     expect(pickDiscardCandidates(entries, 3)).toEqual([]);
+  });
+
+  it('localScope namespaces local sessions under local:', () => {
+    expect(localScope('abc')).toBe('local:abc');
+    expect(localScope('x')).not.toBe(GLOBAL);
+  });
+
+  it('effectiveScope picks the local session on the local surface, cloud otherwise', () => {
+    expect(effectiveScope('local', 'cloud-1', 'local-1')).toBe('local:local-1');
+    expect(effectiveScope('local', 'cloud-1', null)).toBe('cloud-1');
+    expect(effectiveScope('local', null, null)).toBe(GLOBAL);
+    expect(effectiveScope('cloud', 'cloud-1', 'local-1')).toBe('cloud-1');
+    expect(effectiveScope('settings', 'cloud-1', 'local-1')).toBe('cloud-1');
+    expect(effectiveScope('cloud', null, 'local-1')).toBe(GLOBAL);
   });
 });

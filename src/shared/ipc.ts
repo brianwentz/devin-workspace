@@ -65,10 +65,12 @@ export const IpcChannels = {
   localSessionNew: 'local:session:new',
   localSessionList: 'local:session:list',
   localSessionLoad: 'local:session:load',
+  localSessionDelete: 'local:session:delete',
   localPrompt: 'local:prompt',
   localCancel: 'local:cancel',
   localPermission: 'local:permission',
   localOpenLink: 'local:openLink',
+  localActiveSession: 'local:activeSession',
   // P4b: embedded terminal per workspace
   terminalOpen: 'terminal:open',
   terminalInput: 'terminal:input',
@@ -294,6 +296,8 @@ export type UpdateState = z.infer<typeof UpdateStateSchema>;
 export const TerminalSummarySchema = z.object({
   id: z.string(),
   kind: z.enum(['devin', 'shell']),
+  // The local session a devin-kind pty belongs to (null for shell-kind).
+  sessionId: z.string().nullable().default(null),
   cwd: z.string(),
   title: z.string(),
   exitCode: z.number().int().nullable(),
@@ -345,6 +349,7 @@ export const ShellStateSchema = z.object({
   paneCollapsed: z.boolean(),
   surface: SurfaceSchema,
   currentSessionId: z.string().nullable(),
+  localSessionId: z.string().nullable(),
   settings: SettingsSchema,
   tabs: z.object({
     tabs: z.array(TabSchema), // visible scope only
@@ -404,7 +409,11 @@ export interface ScopeSummary {
 
 // P4b terminal channels.
 export const TerminalOpenArg = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('devin'), workspace: z.string().min(1) }),
+  z.object({
+    kind: z.literal('devin'),
+    workspace: z.string().min(1),
+    sessionId: z.string().min(1),
+  }),
   z.object({
     kind: z.literal('shell'),
     cwd: z.string().min(1).max(4096).optional(),
@@ -514,7 +523,9 @@ const LocalAgentSchema = z.object({
   workspace: z.string(),
   status: z.enum(['missing-cli', 'starting', 'ready', 'crashed', 'stopped']),
   protocolVersion: z.number().optional(),
-  capabilities: z.object({ loadSession: z.boolean(), sessionList: z.boolean() }).optional(),
+  capabilities: z
+    .object({ loadSession: z.boolean(), sessionList: z.boolean(), sessionDelete: z.boolean() })
+    .optional(),
   agentName: z.string().optional(),
   error: z.string().optional(),
   restarts: z.number(),
@@ -536,6 +547,7 @@ export const LocalWorkspaceArg = z.object({ path: WorkspacePath });
 export const LocalSessionNewArg = z.object({ workspace: WorkspacePath });
 export const LocalSessionListArg = z.object({ workspace: WorkspacePath });
 export const LocalSessionLoadArg = z.object({ workspace: WorkspacePath, sessionId: SessionId });
+export const LocalSessionDeleteArg = z.object({ sessionId: SessionId });
 export const LocalPromptArg = z.object({ sessionId: SessionId, text: z.string().min(1).max(200_000) });
 export const LocalCancelArg = z.object({ sessionId: SessionId });
 export const LocalPermissionArg = z.object({
@@ -544,6 +556,7 @@ export const LocalPermissionArg = z.object({
   optionId: z.string().min(1).max(256),
 });
 export const LocalOpenLinkArg = z.object({ url: LinkOpenArg });
+export const LocalActiveSessionArg = z.object({ sessionId: SessionId.nullable() });
 
 export const LocalSessionSummarySchema = z.object({
   id: z.string(),

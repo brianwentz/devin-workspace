@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { buttonClass } from './Cards';
 
@@ -41,6 +42,14 @@ export function TerminalView({ id, active = false, onRestart }: TerminalViewProp
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Clickable URLs: routed like a chat markdown link (gh-tab / external),
+    // never a window.open. Plain click activates.
+    term.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        event.preventDefault();
+        window.devinworkspaces.localOpenLink(uri);
+      }),
+    );
     term.open(container);
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown' || !event.ctrlKey || !event.shiftKey) return true;
@@ -121,7 +130,27 @@ export function TerminalView({ id, active = false, onRestart }: TerminalViewProp
           </button>
         </div>
       )}
-      <div ref={containerRef} className="min-h-0 flex-1 px-1 pt-1" data-terminal-id={id} />
+      <div
+        ref={containerRef}
+        className="min-h-0 flex-1 px-1 pt-1"
+        data-terminal-id={id}
+        // Windows Terminal convention: right-click copies the xterm selection,
+        // otherwise pastes. xterm's selection is not DOM selection, so the
+        // shell context menu never sees it.
+        onContextMenu={(event) => {
+          event.preventDefault();
+          const term = termRef.current;
+          if (!term) return;
+          if (term.hasSelection()) {
+            void navigator.clipboard.writeText(term.getSelection());
+            term.clearSelection();
+          } else {
+            void navigator.clipboard.readText().then((text) => {
+              if (text) window.devinworkspaces.terminalInput(idRef.current, text);
+            });
+          }
+        }}
+      />
     </div>
   );
 }

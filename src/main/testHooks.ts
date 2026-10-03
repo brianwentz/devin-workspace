@@ -1,4 +1,4 @@
-import { webContents, WebContentsView } from 'electron';
+import { clipboard, webContents, WebContentsView } from 'electron';
 import { computeBounds } from '../core/layout';
 import { clampFraction01, clampTerminalHeight } from '../core/layout';
 import { auditCookies } from './cookieAudit';
@@ -175,7 +175,11 @@ export function registerTestHooks(): void {
         localHost()?.loadSession(workspace, sessionId),
       localAgentPid: (workspace: string) => localHost()?.agentPid(workspace) ?? null,
       // P4b terminal
-      terminalOpen: (options: { kind: 'devin'; workspace: string } | { kind: 'shell'; cwd?: string }) =>
+      terminalOpen: (
+        options:
+          | { kind: 'devin'; workspace: string; sessionId: string }
+          | { kind: 'shell'; cwd?: string },
+      ) =>
         terminalHost.open(options),
       terminalList: () => terminalHost.list(),
       setTerminalOpen: (value: boolean) => {
@@ -195,6 +199,8 @@ export function registerTestHooks(): void {
       terminalClose: (id: string) => terminalHost.close(id),
       terminalRead: (id: string) => terminalHost.read(id),
       terminalPid: (id: string) => terminalHost.pid(id),
+      clipboardWrite: (text: string) => clipboard.writeText(text),
+      clipboardRead: () => clipboard.readText(),
     },
   });
 }

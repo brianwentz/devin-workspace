@@ -37,6 +37,8 @@ export const state = {
   paneCollapsed: false,
   surface: 'cloud' as Surface,
   currentSessionId: null as string | null,
+  // Selected Devin Local session — lifted here so it survives surface switches.
+  localSessionId: null as string | null,
   dragStartFraction: DEFAULT_PANE_FRACTION,
   dragLastX: 0,
   dragTimer: null as NodeJS.Timeout | null,

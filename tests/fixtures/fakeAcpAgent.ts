@@ -2,7 +2,8 @@
 // Built to out/fixtures/fakeAcpAgent.cjs and selected by the app in test mode via
 //   DEVIN_WORKSPACES_TEST=1 DEVIN_WORKSPACES_LOCAL_AGENT_CMD="node out/fixtures/fakeAcpAgent.cjs"
 // Capabilities: FAKE_ACP_LIST=1 advertises session/list, FAKE_ACP_LOAD=1 advertises
-// session/load. FAKE_ACP_LINK_URL is embedded as a markdown link in every reply.
+// session/load, FAKE_ACP_DELETE=1 advertises sessionCapabilities.delete +
+// session/delete. FAKE_ACP_LINK_URL is embedded as a markdown link in every reply.
 import { Readable, Writable } from 'node:stream';
 import {
   AgentSideConnection,
@@ -13,6 +14,7 @@ import {
 
 const supportsList = process.env.FAKE_ACP_LIST === '1';
 const supportsLoad = process.env.FAKE_ACP_LOAD === '1';
+const supportsDelete = process.env.FAKE_ACP_DELETE === '1';
 const linkUrl = process.env.FAKE_ACP_LINK_URL ?? 'https://github.com/cognition-ai/devin-workspaces/pull/1';
 
 type Session = {
@@ -48,7 +50,14 @@ function createAgent(connection: AgentSideConnection): Agent {
         protocolVersion: params.protocolVersion,
         agentCapabilities: {
           loadSession: supportsLoad,
-          ...(supportsList ? { sessionCapabilities: { list: {} } } : {}),
+          ...(supportsList || supportsDelete
+            ? {
+                sessionCapabilities: {
+                  ...(supportsList ? { list: {} } : {}),
+                  ...(supportsDelete ? { delete: {} } : {}),
+                },
+              }
+            : {}),
         },
         agentInfo: { name: 'fake-acp', title: 'Fake ACP Agent', version: '0.0.1' },
       };
@@ -99,6 +108,13 @@ function createAgent(connection: AgentSideConnection): Agent {
       }
       for (const update of session.history) {
         await connection.sessionUpdate({ sessionId: session.id, update });
+      }
+      return {};
+    },
+    async deleteSession(params) {
+      if (!supportsDelete) throw new Error('session/delete not supported');
+      if (!sessions.delete(params.sessionId)) {
+        throw new Error(`unknown session ${params.sessionId}`);
       }
       return {};
     },
