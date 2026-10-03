@@ -12,7 +12,7 @@ import { handleLink } from './routing';
 import { copyTabAddress, reloadCurrentScope } from './ipc';
 import { historyAction, navigationTarget, openNewSession } from './shortcuts';
 import { state, testMode } from './state';
-import { applyLayout, publicState } from './window';
+import { applyLayout, publicState, setPaneOpen } from './window';
 import { shutdown } from './index';
 import { localHost } from './local/ipc';
 import { publicLocalState } from './local/localState';
@@ -25,7 +25,7 @@ export function registerTestHooks(): void {
       open: (url: string) => {
         const id = state.tabManager?.open(url);
         if (!id) return '';
-        state.paneOpen = true;
+        setPaneOpen(true, 'test-open');
         applyLayout();
         return id;
       },
@@ -41,10 +41,7 @@ export function registerTestHooks(): void {
         state.lastFocused = contents;
         contents.focus();
       },
-      setPaneOpen: (value: boolean) => {
-        state.paneOpen = value;
-        applyLayout();
-      },
+      setPaneOpen: (value: boolean) => setPaneOpen(value, 'test'),
       // Mirrors settings:set — stores the raw preference, layout applies the px guards.
       setPaneFraction: (value: number) => {
         state.paneFraction = clampFraction01(value);
@@ -64,6 +61,7 @@ export function registerTestHooks(): void {
       getShellWebContents: () => state.shellView?.webContents ?? null,
       getWebContentsCount: () => webContents.getAllWebContents().length,
       getWindowBounds: () => state.windowRef?.getBounds() ?? null,
+      getContentBounds: () => state.windowRef?.getContentBounds() ?? null,
       setWindowSize: (width: number, height: number) => {
         state.windowRef?.setContentSize(width, height);
         applyLayout();

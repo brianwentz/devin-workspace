@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { evaluateInShell, launchApp, shellPage, state, waitForEventCount } from './helpers';
+import { evaluateInShell, launchApp, readEvents, shellPage, state, waitForEventCount } from './helpers';
 
 let fixtures: FixtureServers;
 
@@ -79,6 +79,76 @@ test('auto-collapses the pane below the minimum devin width', async () => {
       }).__devinworkspaces.setWindowSize(1400, 900);
     });
     await expect.poll(async () => (await state(app)).paneCollapsed).toBe(false);
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('pane toggle resizes the window and keeps the devin column width', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-pane-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
+  type PaneHooks = {
+    setWindowSize(w: number, h: number): void;
+    getContentBounds(): { width: number; height: number } | null;
+    layoutRects(): { devin: { width: number }; paneCollapsed: boolean };
+    setPaneOpen(value: boolean): void;
+  };
+  type G = typeof globalThis & { __devinworkspaces: PaneHooks };
+  const contentWidth = (): Promise<number> =>
+    app.evaluate(() => (globalThis as G).__devinworkspaces.getContentBounds()!.width);
+  const devinWidth = (): Promise<number> =>
+    app.evaluate(() => (globalThis as G).__devinworkspaces.layoutRects().devin.width);
+  const setPane = (value: boolean): Promise<void> =>
+    app.evaluate((_e, v: boolean) => (globalThis as G).__devinworkspaces.setPaneOpen(v), value);
+  try {
+    await app.evaluate(() => (globalThis as G).__devinworkspaces.setWindowSize(1400, 900));
+    await expect.poll(contentWidth).toBe(1400);
+    const devin = await devinWidth();
+
+    await setPane(false);
+    await expect.poll(contentWidth).toBe(56 + devin);
+    await expect.poll(devinWidth).toBe(devin);
+    expect((await state(app)).paneOpen).toBe(false);
+
+    await setPane(true);
+    await expect.poll(contentWidth).toBe(1400);
+    await expect.poll(devinWidth).toBe(devin);
+    expect((await state(app)).paneOpen).toBe(true);
+
+    // Maximised: no window resize — the pane keeps splitting in-window.
+    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.maximize());
+    await expect
+      .poll(async () =>
+        app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isMaximized()),
+      )
+      .toBe(true);
+    const maximizedBounds = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.getBounds(),
+    );
+    await setPane(false);
+    await expect.poll(async () => (await state(app)).paneOpen).toBe(false);
+    const afterToggleBounds = await app.evaluate(({ BaseWindow }) =>
+      BaseWindow.getAllWindows()[0]!.getBounds(),
+    );
+    expect(afterToggleBounds).toEqual(maximizedBounds);
+    await expect.poll(devinWidth).toBeGreaterThan(devin);
+    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.unmaximize());
+    await expect
+      .poll(async () =>
+        app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isMaximized()),
+      )
+      .toBe(false);
+
+    const events = await readEvents(logFile);
+    const toggles = events.filter(
+      (entry) =>
+        entry.event === 'pane-toggle' &&
+        (entry.detail as { resized?: boolean } | undefined)?.resized === true,
+    );
+    expect(toggles.length).toBeGreaterThanOrEqual(2);
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await app.close().catch(() => undefined);

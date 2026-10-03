@@ -19,7 +19,15 @@ import { registerTestHooks } from './testHooks';
 import { keepAliveMs, TabManager } from './tabs';
 import { notificationStore, notificationsFlush } from './notifications';
 import { hasDownloadedUpdate, quitAndInstall, restoreUpdateEntry } from './updater';
-import { applyLayout, cancelDrag, detachView, notifyShell } from './window';
+import {
+  applyLayout,
+  cancelDrag,
+  detachView,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH_CLOSED,
+  MIN_WINDOW_WIDTH_OPEN,
+  notifyShell,
+} from './window';
 import {
   attachPlacementTracking,
   initialWindowOptions,
@@ -189,8 +197,8 @@ async function createWindow(): Promise<void> {
   const { restored, ...placementOptions } = initialWindowOptions();
   state.windowRef = new BaseWindow({
     ...placementOptions,
-    minWidth: 1000,
-    minHeight: 640,
+    minWidth: saved.pane.open ? MIN_WINDOW_WIDTH_OPEN : MIN_WINDOW_WIDTH_CLOSED,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: 'Devin Workspaces',
     show: true,
     titleBarStyle: 'hidden',

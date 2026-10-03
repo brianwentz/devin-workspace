@@ -9,6 +9,7 @@ import {
   fractionFromPx,
   MIN_TERMINAL_HEIGHT,
   paneAvailable,
+  paneToggleWindowWidth,
   paneWidthPx,
   type LayoutState,
 } from '../../src/core/layout';
@@ -152,6 +153,69 @@ describe('computeBounds', () => {
     expect(bounds.terminal?.height).toBe(MIN_TERMINAL_HEIGHT);
     expect(bounds.devin.height).toBe(138);
     expect(bounds.terminalSplitter?.y).toBe(174);
+  });
+});
+
+describe('paneToggleWindowWidth', () => {
+  const WIDE = 10_000;
+
+  it('closing at 1400 @ 0.5 shrinks to rail + devin px', () => {
+    // devin column is 669 at 1400/0.5 → 56 + 669 = 725.
+    expect(paneToggleWindowWidth(false, 1400, layout({ paneFraction: 0.5 }), WIDE)).toBe(725);
+  });
+
+  it('opening from 725 @ 0.5 grows back to 1400', () => {
+    expect(paneToggleWindowWidth(true, 725, layout({ paneOpen: false, paneFraction: 0.5 }), WIDE)).toBe(1400);
+  });
+
+  it('round-trips an asymmetric split (560 px pane)', () => {
+    // 1400 @ F560: devin 778 → closed 56 + 778 = 834; opening restores 1400.
+    expect(paneToggleWindowWidth(false, 1400, layout({ paneFraction: F560 }), WIDE)).toBe(834);
+    expect(
+      paneToggleWindowWidth(true, 834, layout({ paneOpen: false, paneFraction: F560 }), WIDE),
+    ).toBe(1400);
+  });
+
+  it('caps the grown width at the work area', () => {
+    expect(
+      paneToggleWindowWidth(true, 725, layout({ paneOpen: false, paneFraction: 0.5 }), 1100),
+    ).toBe(1100);
+  });
+
+  it('never shrinks when the cap is below the current width', () => {
+    expect(
+      paneToggleWindowWidth(true, 725, layout({ paneOpen: false, paneFraction: 0.5 }), 700),
+    ).toBeNull();
+  });
+
+  it('returns null when closing an auto-collapsed pane', () => {
+    // 1000 @ 0.5 auto-collapses: the devin view already fills the window.
+    expect(paneToggleWindowWidth(false, 1000, layout({ paneFraction: 0.5 }), WIDE)).toBeNull();
+  });
+
+  it('clamps fraction 1 to a finite target', () => {
+    const result = paneToggleWindowWidth(
+      true,
+      725,
+      layout({ paneOpen: false, paneFraction: 1 }),
+      WIDE,
+    );
+    expect(result).not.toBeNull();
+    expect(Number.isFinite(result!)).toBe(true);
+  });
+
+  it('returns null when the result equals the current width', () => {
+    // Work-area cap == current width: nothing to grow into.
+    expect(
+      paneToggleWindowWidth(true, 1400, layout({ paneOpen: false, paneFraction: 0.5 }), 1400),
+    ).toBeNull();
+  });
+
+  it('grows by a full pane width for a large cap', () => {
+    // Closed devin column is 1344; @0.5 the pane gets the same → 2750.
+    expect(
+      paneToggleWindowWidth(true, 1400, layout({ paneOpen: false, paneFraction: 0.5 }), WIDE),
+    ).toBe(2750);
   });
 });
 
