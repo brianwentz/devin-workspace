@@ -2,18 +2,17 @@ import { parseSessionId } from '../core/sessions';
 import { log } from './log';
 import { notifier } from './notifier';
 import { state } from './state';
-import { notifyShell, syncScope } from './window';
+import { applyLayout } from './window';
 
 export function attachSessionTracking(devinView: Electron.WebContents): void {
   const update = (url: string) => {
     const sessionId = parseSessionId(url, state.tenantUrl);
     if (sessionId === state.currentSessionId) return;
     state.currentSessionId = sessionId;
-    // Swap the visible GitHub tab scope BEFORE notifyShell/applyLayout run —
-    // they read tabManager.activeView/publicState.
-    syncScope();
+    // The layout pass swaps the GitHub tab scope, sizes/attaches the active
+    // tab view and notifies the shell — it reads tabManager.activeView/publicState.
+    applyLayout();
     log('devin', 'session-change', { url, detail: { sessionId } });
-    notifyShell();
     // Service-user identity inference observes the sessions the user opens.
     notifier.onSessionChanged(sessionId);
   };
