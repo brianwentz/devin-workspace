@@ -63,6 +63,15 @@ await Promise.all([
     format: 'cjs',
     outfile: 'out/fixtures/fakePty.cjs',
   }),
+  // Fake `devin auth status` (DEVIN_WORKSPACES_TEST_AUTH_STATUS_CMD).
+  build({
+    entryPoints: ['tests/fixtures/fakeAuthStatus.ts'],
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    format: 'cjs',
+    outfile: 'out/fixtures/fakeAuthStatus.cjs',
+  }),
   build({
     entryPoints: ['scripts/measure-tabs.ts'],
     bundle: true,

@@ -3,6 +3,7 @@ import type { AppNotification } from '../core/notificationModel';
 import type { CredentialEntry } from '../core/credentials';
 import {
   IpcChannels,
+  type IdentityInfo,
   type SessionPr,
   type LocalResult,
   type LocalSessionSummary,
@@ -245,6 +246,9 @@ const api = {
   notificationsClear: () => ipcRenderer.send(IpcChannels.notificationsClear),
   notificationsOpen: (id: string) => ipcRenderer.send(IpcChannels.notificationsOpen, { id }),
   notificationsPanel: (open: boolean) => ipcRenderer.send(IpcChannels.notificationsPanel, { open }),
+  // Service-user identity: source + masked id only, never the raw user id.
+  identity: () => ipcRenderer.invoke(IpcChannels.notificationsIdentity) as Promise<IdentityInfo>,
+  identityReset: () => ipcRenderer.send(IpcChannels.notificationsIdentityReset),
   updateInstall: () => ipcRenderer.send(IpcChannels.updateInstall),
   // DEVIN_WORKSPACES_TEST_BANNER_MS shortens the banner auto-hide in tests.
   bannerMs: testEnvNumber('DEVIN_WORKSPACES_TEST_BANNER_MS'),

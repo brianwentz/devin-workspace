@@ -52,6 +52,9 @@ export const IpcChannels = {
   notificationsOpen: 'notifications:open',
   notificationsPanel: 'notifications:panel',
   notificationBanner: 'notifications:banner',
+  // Service-user identity resolution
+  notificationsIdentity: 'notifications:identity',
+  notificationsIdentityReset: 'notifications:identityReset',
   // App version / auto-update status
   updateInstall: 'update:install',
   localState: 'local:state',
@@ -115,6 +118,8 @@ const NotificationKindFields = {
 };
 const NotificationsFields = {
   orgId: z.string().max(128),
+  // Manual user-id override for service-user tokens ('' = detect automatically).
+  userId: z.string().max(128),
   collect: z.boolean(),
   banner: z.boolean(),
   kinds: z.object({
@@ -188,6 +193,7 @@ export const SettingsObject = z.object({
   notifications: z
     .object({
       orgId: NotificationsFields.orgId.default(''),
+      userId: NotificationsFields.userId.default(''),
       collect: NotificationsFields.collect.default(true),
       banner: NotificationsFields.banner.default(true),
       kinds: NotificationsFields.kinds.default({
@@ -196,7 +202,7 @@ export const SettingsObject = z.object({
       }),
     })
     .default({
-      orgId: '', collect: true, banner: true,
+      orgId: '', userId: '', collect: true, banner: true,
       kinds: { waiting: true, approval: true, blocked: true, finished: false, prOpened: true, prCompleted: true, update: true },
     }),
   prs: z
@@ -248,6 +254,9 @@ const TabSchema = z.object({
   discarded: z.boolean().optional(),
 });
 
+export const IdentitySourceSchema = z.enum(['self', 'cli', 'inferred', 'manual']);
+export type IdentitySource = z.infer<typeof IdentitySourceSchema>;
+
 // P5: poller/notifier status exposed to the shell. Never contains the PAT.
 export const NotificationsStateSchema = z.object({
   collect: z.boolean(),
@@ -257,10 +266,19 @@ export const NotificationsStateSchema = z.object({
   authError: z.boolean(),
   lastError: z.string().nullable(),
   noUserIdentity: z.boolean(),
+  identity: z.object({ source: IdentitySourceSchema.nullable(), resolved: z.boolean() }),
   openPrCount: z.number().int(),
   unreadCount: z.number().int(),
   panelOpen: z.boolean(),
 });
+// notifications:identity — the user id itself never leaves main; the shell
+// only gets the source and a masked tail (user-…705c6).
+export const IdentityInfoSchema = z.object({
+  source: IdentitySourceSchema.nullable(),
+  maskedUserId: z.string().nullable(),
+  cliOrgMismatch: z.boolean(),
+});
+export type IdentityInfo = z.infer<typeof IdentityInfoSchema>;
 export const NotificationIdArg = z.object({ id: z.string() });
 export const NotificationPanelArg = z.object({ open: z.boolean() });
 

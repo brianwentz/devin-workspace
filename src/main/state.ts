@@ -1,6 +1,6 @@
 import type { BaseWindow, WebContentsView } from 'electron';
 import { DEFAULT_PANE_FRACTION, DEFAULT_TERMINAL_HEIGHT } from '../core/layout';
-import type { Surface } from '../shared/ipc';
+import type { IdentitySource, Surface } from '../shared/ipc';
 import type { CredentialStore } from './credentials';
 import type { SettingsStore } from './settings';
 import type { TabManager } from './tabs';
@@ -58,6 +58,7 @@ export const state = {
     authError: false,
     lastError: null as string | null,
     noUserIdentity: false,
+    identity: { source: null as IdentitySource | null, resolved: false },
   },
   // P6: notification panel z-order raise flag (set via notifications:panel IPC).
   notificationsPanelOpen: false,

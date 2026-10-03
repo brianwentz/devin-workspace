@@ -52,10 +52,10 @@ Because the build is not notarized, the Mac app does not auto-update: check the 
 
 Both features poll the Devin API, so they need an API token:
 
-1. In the Devin web app go to **Settings → API Keys** and create a personal access token (a service-user token also works). The app only calls `GET /v3/self` and `GET /v3/organizations/{org}/sessions`.
+1. In the Devin web app go to **Settings → API Keys** and create a personal access token, or use a **service-user token** (Organization Settings → Devin API — the only kind many enterprise tenants allow). Legacy v1 keys are not supported. The app only calls `GET /v3/self`, `GET /v3/organizations/{org}/sessions` and `GET /v3/organizations/{org}/sessions/{id}`.
 2. In Devin Workspaces open **Settings → Notifications**, paste the token into the token field and click **Save**. The token is encrypted with the OS credential store (DPAPI on Windows, Keychain on macOS) and stored in `secrets.json` in the app's data folder (see [Where things live](#where-things-live)); it is never written to `settings.json`, the log, or shown in the UI again.
 3. Leave *Organization ID* blank — it is resolved from `/v3/self`. Only fill it in if the status line reports that no organization could be determined for your token.
-4. *API base* stays `https://api.devin.ai` unless your enterprise tenant uses a different API host.
+4. *API base* stays `https://api.devin.ai` unless your enterprise tenant uses a different API host. Note the Devin CLI may report `Devin API: https://api.devinenterprise.com` for your tenant — that is the CLI's endpoint, not the app's; `api.devin.ai` answers service-user tokens correctly either way.
 
 Once a token is set the poller runs continuously (10 s while a session is active, 60 s when idle). Three things hang off it:
 
@@ -63,7 +63,7 @@ Once a token is set the poller runs continuously (10 s while a session is active
 - **Open a tab when a session creates a PR** — a background tab for the PR opens in that session's pane within one poll interval. PRs that already existed when the token was saved are not opened, and closing an auto-opened tab does not bring it back.
 - **PR quick-open** — the `PR` rail button lists open pull requests across your sessions with their GitHub titles; clicking one switches to that session and opens the PR in its pane.
 
-The poller only lists sessions created by the token's user (`GET /v3/self` → `user_ids` filter). A service-user token has no user identity, so it shows no sessions, notifications or pull requests — use a personal API token.
+The poller only lists sessions created by the token's user (`GET /v3/self` → `user_ids` filter). With a **personal access token** the user id comes straight from `/v3/self`. A **service-user token** has no user id, so the app determines yours automatically: first from the Devin CLI sign-in (`devin auth login` / `devin auth status` — the same `devin` binary used by Devin Local), then by inferring it from the sessions you open in the app. If neither works, set the **User ID override** in Settings → Notifications; the resolved identity is shown there (masked, e.g. `user-…705c6`) and can be cleared with the **Reset** button. The first poll after a resolution confirms the id against the sessions list and falls back to the next strategy if it doesn't match.
 
 ## Devin Local
 
