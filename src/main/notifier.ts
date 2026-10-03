@@ -6,6 +6,7 @@ import {
   IDLE_POLL_MS,
   archivedScopes,
   backoffMs,
+  catchUpPullRequests,
   newPullRequests,
   openPullRequests,
   pollInterval,
@@ -15,6 +16,7 @@ import { sessionUrl } from '../core/sessions';
 import { confirmIdentity, type IdentitySource } from '../core/identityModel';
 import type { SessionPr, Settings } from '../shared/ipc';
 import { identityResolver } from './identity';
+import { prLedger } from './prLedger';
 import { log } from './log';
 import { route } from '../core/linkRouter';
 import { prStore } from './prs';
@@ -37,6 +39,7 @@ function kindEnabled() {
     'pr-completed': k?.prCompleted ?? true,
     update: k?.update ?? true,
     identity: true,
+    auth: true,
   };
 }
 
@@ -71,6 +74,7 @@ class Notifier {
   private identitySource: IdentitySource | null = null;
   private identityConfirmed = false;
   private identityNotified = false;
+  private authNotified = false;
   private observedSessionIds = new Set<string>();
   private orgMismatchLogged = false;
   private pollAgain = false;
@@ -109,6 +113,7 @@ class Notifier {
     this.identitySource = null;
     this.identityConfirmed = false;
     this.identityNotified = false;
+    this.authNotified = false;
     this.observedSessionIds.clear();
     this.orgMismatchLogged = false;
     this.pollAgain = false;
@@ -190,6 +195,17 @@ class Notifier {
     return this.poll();
   }
 
+  // Regaining focus while the poller is in error: drop the backoff and poll
+  // now so a recovered API (or replaced token) is noticed immediately.
+  onWindowFocus(): void {
+    if (!this.running || this.inFlight) return;
+    if (!state.notifications.authError && this.failures <= 0) return;
+    this.notBefore = 0;
+    this.failures = 0;
+    log('shell', 'notifier-focus-poll');
+    void this.poll();
+  }
+
   private schedule(delayMs: number): void {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
@@ -242,7 +258,9 @@ class Notifier {
         });
         this.orgId = override || self.orgId;
         if (!this.orgId) {
-          throw new DevinApiError('http', 'no org id for this token (set notifications.orgId)');
+          throw new DevinApiError('http', 'no org id for this token (set notifications.orgId)', {
+            op: 'self',
+          });
         }
         log('shell', 'notifier-org', { detail: { source: override ? 'settings' : 'self' } });
         // Observe the session the devin view was already on when this poll ran.
@@ -330,6 +348,7 @@ class Notifier {
       // ignores user_ids.
       const sessions = page.sessions.filter((session) => session.user_id === this.userId);
       this.failures = 0;
+      this.authNotified = false;
       // P8/Q3: close tabs whose session archived, or vanished from a complete
       // (single-page) list — a partial page can't prove absence.
       const previousSessions = state.apiSessions;
@@ -341,10 +360,24 @@ class Notifier {
         });
       }
       // F1: a session gained a PR since the last poll -> lazy background tab
-      // in that session's scope. Only GitHub-class URLs become tabs.
+      // in that session's scope. Only GitHub-class URLs become tabs. A baseline
+      // poll (restart/outage) diffs against the persisted ledger instead, so
+      // PRs that appeared while the poller was down still open once.
       if (autoOpenEnabled() && state.tabManager) {
+        const baseline = previousSessions.length === 0;
+        const candidates = baseline
+          ? catchUpPullRequests(sessions, prLedger().seen(), {
+              lastGoodAt: prLedger().lastGoodAt(),
+              now: Date.now(),
+            })
+          : newPullRequests(previousSessions, sessions);
+        if (baseline && candidates.length > 0) {
+          log('shell', 'pr-catch-up', {
+            detail: { count: candidates.length, lastGoodAgeMs: Date.now() - prLedger().lastGoodAt() },
+          });
+        }
         let opened = 0;
-        for (const pr of newPullRequests(previousSessions, sessions)) {
+        for (const pr of candidates) {
           const decision = route(pr.url, 'shell', 'new-window', routeContext());
           if (decision.kind !== 'gh-tab') continue;
           state.tabManager.open(pr.url, {
@@ -352,11 +385,20 @@ class Notifier {
             originSessionId: pr.sessionId,
             lazy: true,
           });
-          log('shell', 'pr-auto-open', { url: pr.url, detail: { sessionId: pr.sessionId } });
+          log('shell', 'pr-auto-open', {
+            url: pr.url,
+            detail: { sessionId: pr.sessionId, catchUp: baseline },
+          });
           opened += 1;
         }
         if (opened > 0) applyLayout();
       }
+      // Every successful poll feeds the ledger — lastGoodAt tracks poller
+      // health regardless of the autoOpenTabs toggle.
+      prLedger().record(
+        sessions.flatMap((session) => session.pull_requests.map((pr) => pr.pr_url)),
+        Date.now(),
+      );
       // P6: derive in-app notifications from the session diff (baseline =
       // sessions absent from the previous poll).
       if (state.settings?.current.notifications.collect ?? true) {
@@ -395,6 +437,21 @@ class Notifier {
           authError: true,
           lastError: kind === 'auth' ? 'unauthorized' : 'forbidden',
         };
+        if (!this.authNotified) {
+          this.authNotified = true;
+          notificationStore().add({
+            kind: 'auth',
+            sessionId: null,
+            ownerUserId: null,
+            sessionTitle: 'Devin Workspaces',
+            title: 'Devin API token rejected',
+            body:
+              kind === 'forbidden'
+                ? 'The API returned 403 Forbidden for this token — PR tabs and notifications are paused. Check the token in Settings (it must be a Devin v3 personal API token).'
+                : 'The API returned 401 Unauthorized for this token — PR tabs and notifications are paused. Check the token in Settings.',
+            createdAt: Date.now(),
+          });
+        }
         // Do not clear a stale orgId/snapshot on auth errors; just slow down.
         delay = Math.max(base.idle, backoffMs(this.failures, base.active));
       } else if (kind === 'rateLimited') {
@@ -412,6 +469,7 @@ class Notifier {
       log('shell', 'poll-error', {
         detail: {
           kind,
+          op: apiError?.op ?? null,
           status: apiError?.status ?? null,
           retryAfterMs: apiError?.retryAfterMs ?? null,
           failures: this.failures,
@@ -489,7 +547,7 @@ export function openNotification(id: string): void {
     installUpdate();
     return;
   }
-  if (entry.kind === 'identity') {
+  if (entry.kind === 'identity' || entry.kind === 'auth') {
     state.surface = 'settings';
     applyLayout();
     return;

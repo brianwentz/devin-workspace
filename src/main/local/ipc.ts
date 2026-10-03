@@ -9,6 +9,7 @@ import {
   LocalOpenLinkArg,
   LocalPermissionArg,
   LocalPromptArg,
+  LocalSessionDeleteAllArg,
   LocalSessionDeleteArg,
   LocalSessionListArg,
   LocalSessionLoadArg,
@@ -127,12 +128,28 @@ export function setupLocal(): void {
     await requireHost().loadSession(workspace, sessionId);
     return null;
   });
-  handle(IpcChannels.localSessionDelete, LocalSessionDeleteArg, async ({ sessionId }) => {
-    await requireHost().deleteSession(sessionId);
+  // Per-id cleanup after a session is gone from local state: close its devin
+  // pty, forget the lifted selection, and close its GitHub tab scope.
+  const forgetDeletedSession = (sessionId: string): Promise<string[]> | undefined => {
     terminalHost.closeForSession(sessionId);
     if (state.localSessionId === sessionId) state.localSessionId = null;
-    void state.tabManager?.closeScope(localScope(sessionId)).then(applyLayout);
+    return state.tabManager?.closeScope(localScope(sessionId));
+  };
+  handle(IpcChannels.localSessionDelete, LocalSessionDeleteArg, async ({ sessionId }) => {
+    await requireHost().deleteSession(sessionId);
+    void forgetDeletedSession(sessionId)?.then(applyLayout);
     return null;
+  });
+  handle(IpcChannels.localSessionDeleteAll, LocalSessionDeleteAllArg, async ({ workspace }) => {
+    const result = await requireHost().deleteWorkspaceSessions(workspace);
+    await Promise.all(result.deleted.map((id) => forgetDeletedSession(id)));
+    applyLayout();
+    if (result.failed > 0) {
+      throw new Error(
+        `${result.failed} of ${result.deleted.length + result.failed} sessions could not be deleted`,
+      );
+    }
+    return { deleted: result.deleted.length };
   });
   guardedOn(IpcChannels.localActiveSession, (_event, payload: unknown) => {
     const parsed = LocalActiveSessionArg.safeParse(payload);

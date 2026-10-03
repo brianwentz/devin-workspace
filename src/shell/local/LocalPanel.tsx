@@ -39,7 +39,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   // Lazily open one devin pty per session, only once the Terminal tab is
   // opened; every session's view stays mounted (display:none) so scrollback
   // survives session switches.
@@ -67,6 +67,10 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   useEffect(() => {
     window.devinworkspaces.localActiveSession(sessionId);
   }, [sessionId]);
+
+  useEffect(() => {
+    setConfirmDeleteAll(false);
+  }, [workspace]);
 
   useEffect(() => {
     if (!workspace || listedFor.current.has(workspace)) return;
@@ -150,7 +154,6 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   };
 
   const deleteSession = async (id: string) => {
-    setConfirmDeleteId(null);
     const result = await run(window.devinworkspaces.localSessionDelete(id));
     if (result !== undefined) {
       // The pty itself was closed in main (terminalHost.closeForSession).
@@ -164,9 +167,27 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
     }
   };
 
+  const deleteAllSessions = async () => {
+    if (!workspace) return;
+    setConfirmDeleteAll(false);
+    const ids = sessions.map((item) => item.id);
+    await run(window.devinworkspaces.localSessionDeleteAll(workspace));
+    // On partial failure `run` surfaces the error, but succeeded sessions are
+    // already gone from local state — prune ids that no longer exist.
+    const remaining = await window.devinworkspaces.getLocalState();
+    const gone = new Set(ids.filter((id) => !(id in remaining.sessions)));
+    if (gone.size > 0) {
+      setTerminalIds((map) => {
+        const next = { ...map };
+        for (const id of gone) delete next[id];
+        return next;
+      });
+      if (sessionId && gone.has(sessionId)) setSessionId(null);
+    }
+  };
+
   const openSession = async (target: Session) => {
     setSessionId(target.id);
-    setConfirmDeleteId(null);
     setError(null);
     if (!target.loaded && workspace) {
       const result = await window.devinworkspaces.localLoadSession(workspace, target.id);
@@ -257,15 +278,51 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
         </ul>
         <div className="mt-2 flex items-center justify-between border-y border-[#39475a] px-3 py-2">
           <span className="text-xs uppercase tracking-wide text-[#7f8ca0]">Sessions</span>
-          <button
-            id="sessionNew"
-            type="button"
-            className={buttonClass}
-            disabled={!workspace || busy || !local?.cliPath}
-            onClick={() => void newSession()}
-          >
-            New session
-          </button>
+          <span className="flex items-center gap-1">
+            {agent?.capabilities?.sessionDelete && sessions.length > 0 &&
+              (confirmDeleteAll ? (
+                <span className="flex items-center gap-1">
+                  <button
+                    id="sessionDeleteAllConfirm"
+                    type="button"
+                    className="rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#ff8a8a]"
+                    disabled={busy}
+                    onClick={() => void deleteAllSessions()}
+                  >
+                    Delete {sessions.length}
+                  </button>
+                  <button
+                    id="sessionDeleteAllCancel"
+                    type="button"
+                    className="rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#7f8ca0]"
+                    onClick={() => setConfirmDeleteAll(false)}
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  id="sessionDeleteAll"
+                  type="button"
+                  aria-label="Delete all sessions"
+                  title="Delete all sessions"
+                  className="rounded p-1 text-[#7f8ca0] hover:text-[#ff8a8a]"
+                  disabled={busy}
+                  onClick={() => setConfirmDeleteAll(true)}
+                >
+                  <Trash2 size={13} />
+                </button>
+              ))}
+            <button
+              id="sessionNew"
+              type="button"
+              className={buttonClass}
+              disabled={!workspace || busy || !local?.cliPath}
+              onClick={() => void newSession()}
+            >
+              New session
+            </button>
+          </span>
         </div>
         <ul id="sessionList" className="m-0 flex flex-1 list-none flex-col overflow-auto p-0">
           {sessions.map((item) => (
@@ -288,37 +345,18 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
                   )}
                 </div>
               </button>
-              {agent?.capabilities?.sessionDelete &&
-                (confirmDeleteId === item.id ? (
-                  <span className="absolute right-1 flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="session-delete-confirm rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#ff8a8a]"
-                      disabled={busy}
-                      onClick={() => void deleteSession(item.id)}
-                    >
-                      Delete
-                    </button>
-                    <button
-                      type="button"
-                      className="session-delete-cancel rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#7f8ca0]"
-                      onClick={() => setConfirmDeleteId(null)}
-                    >
-                      Cancel
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className="session-delete absolute right-1 rounded p-1 text-[#7f8ca0] opacity-0 hover:text-[#ff8a8a] group-hover:opacity-100 disabled:hidden"
-                    aria-label="Delete session"
-                    data-session-id={item.id}
-                    disabled={item.running}
-                    onClick={() => setConfirmDeleteId(item.id)}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                ))}
+              {agent?.capabilities?.sessionDelete && (
+                <button
+                  type="button"
+                  className="session-delete absolute right-1 rounded p-1 text-[#7f8ca0] opacity-0 hover:text-[#ff8a8a] group-hover:opacity-100 disabled:hidden"
+                  aria-label="Delete session"
+                  data-session-id={item.id}
+                  disabled={item.running}
+                  onClick={() => void deleteSession(item.id)}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </li>
           ))}
         </ul>

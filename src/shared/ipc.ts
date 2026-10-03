@@ -71,6 +71,7 @@ export const IpcChannels = {
   localSessionList: 'local:session:list',
   localSessionLoad: 'local:session:load',
   localSessionDelete: 'local:session:delete',
+  localSessionDeleteAll: 'local:session:deleteAll',
   localPrompt: 'local:prompt',
   localCancel: 'local:cancel',
   localPermission: 'local:permission',
@@ -560,6 +561,7 @@ export const LocalSessionNewArg = z.object({ workspace: WorkspacePath });
 export const LocalSessionListArg = z.object({ workspace: WorkspacePath });
 export const LocalSessionLoadArg = z.object({ workspace: WorkspacePath, sessionId: SessionId });
 export const LocalSessionDeleteArg = z.object({ sessionId: SessionId });
+export const LocalSessionDeleteAllArg = z.object({ workspace: WorkspacePath });
 export const LocalPromptArg = z.object({ sessionId: SessionId, text: z.string().min(1).max(200_000) });
 export const LocalCancelArg = z.object({ sessionId: SessionId });
 export const LocalPermissionArg = z.object({

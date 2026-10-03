@@ -21,6 +21,8 @@ function NotificationsButton({ buttonClass }: { buttonClass: string }) {
   const state = useShellState();
   const unread = state?.notifications.unreadCount ?? 0;
   const open = state?.notifications.panelOpen ?? false;
+  const authError = state?.notifications.authError ?? false;
+  const noUserIdentity = state?.notifications.noUserIdentity ?? false;
   return (
     <button
       id="notificationsButton"
@@ -39,6 +41,17 @@ function NotificationsButton({ buttonClass }: { buttonClass: string }) {
         >
           {unread > 9 ? '9+' : unread}
         </span>
+      )}
+      {(authError || noUserIdentity) && (
+        <span
+          id="pollerWarning"
+          className="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#e0a03c]"
+          title={
+            authError
+              ? 'Devin API token rejected — open Settings'
+              : 'Could not determine your user — open Settings'
+          }
+        />
       )}
     </button>
   );
