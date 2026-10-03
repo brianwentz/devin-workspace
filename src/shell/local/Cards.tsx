@@ -194,7 +194,7 @@ export function AgentBadge({ agent, installGuidance }: { agent: Agent | undefine
       {agent?.capabilities && (
         <span id="agentCaps" className="text-[#7f8ca0]">
           ACP v{agent.protocolVersion ?? '?'} · list {agent.capabilities.sessionList ? 'yes' : 'no'} · load{' '}
-          {agent.capabilities.loadSession ? 'yes' : 'no'}
+          {agent.capabilities.loadSession ? 'yes' : 'no'} · delete {agent.capabilities.sessionDelete ? 'yes' : 'no'}
         </span>
       )}
       {status === 'missing-cli' && (

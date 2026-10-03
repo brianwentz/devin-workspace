@@ -1,9 +1,8 @@
 import { parseSessionId } from '../core/sessions';
-import { GLOBAL } from '../core/tabModel';
 import { log } from './log';
 import { notifier } from './notifier';
 import { state } from './state';
-import { notifyShell } from './window';
+import { notifyShell, syncScope } from './window';
 
 export function attachSessionTracking(devinView: Electron.WebContents): void {
   const update = (url: string) => {
@@ -12,7 +11,7 @@ export function attachSessionTracking(devinView: Electron.WebContents): void {
     state.currentSessionId = sessionId;
     // Swap the visible GitHub tab scope BEFORE notifyShell/applyLayout run —
     // they read tabManager.activeView/publicState.
-    state.tabManager?.setScope(sessionId ?? GLOBAL);
+    syncScope();
     log('devin', 'session-change', { url, detail: { sessionId } });
     notifyShell();
     // Service-user identity inference observes the sessions the user opens.

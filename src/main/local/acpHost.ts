@@ -26,6 +26,7 @@ import {
   titleFromPrompt,
   upsertAgent,
   upsertSession,
+  removeSession as removeSessionEntry,
   removeWorkspace as removeWorkspaceEntry,
   type AgentCapabilities,
   type LocalSession,
@@ -33,6 +34,7 @@ import {
   type SessionUpdate,
   type StopReason,
 } from '../../core/localModel';
+import { LinkScanner, type PrLinkContext } from '../../core/prLinks';
 import type { LocalSessionSummary } from '../../shared/ipc';
 import { log } from '../log';
 import { getLocalState, replaceLocalState, update } from './localState';
@@ -82,6 +84,29 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Text worth PR-link scanning from a session update: agent message chunks and
+// tool call titles/content/rawOutput. Never user_message_chunk.
+function collectAgentOutputText(update: Record<string, unknown>, kind: string): string[] {
+  const texts: string[] = [];
+  if (kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
+    const content = update.content as { text?: unknown } | undefined;
+    if (typeof content?.text === 'string') texts.push(content.text);
+  } else if (kind === 'tool_call' || kind === 'tool_call_update') {
+    if (typeof update.title === 'string') texts.push(update.title);
+    if (Array.isArray(update.content)) {
+      for (const block of update.content as Array<{
+        text?: unknown;
+        content?: { text?: unknown };
+      }>) {
+        if (typeof block?.text === 'string') texts.push(block.text);
+        else if (typeof block?.content?.text === 'string') texts.push(block.content.text);
+      }
+    }
+    if (typeof update.rawOutput === 'string') texts.push(update.rawOutput);
+  }
+  return texts;
+}
+
 function withTimeout<T>(promise: Promise<T>, milliseconds: number, operation: string): Promise<T> {
   return new Promise<T>((resolvePromise, rejectPromise) => {
     const timer = setTimeout(
@@ -126,6 +151,10 @@ export interface DevinLocalHostOptions {
   devinPathOverride: string | null | undefined;
   workspaces: string[];
   onWorkspacesChanged: (workspaces: string[]) => void;
+  // Called with each never-before-seen PR URL found in agent output (chat
+  // only — user messages and pty output are not scanned here).
+  onPullRequestUrl?: (url: string, sessionId: string) => void;
+  prLinkContext?: PrLinkContext;
 }
 
 export class DevinLocalHost {
@@ -134,6 +163,7 @@ export class DevinLocalHost {
   private readonly indexFile: string;
   private index: IndexEntry[] = [];
   private workspaces: string[];
+  private readonly linkScanners = new Map<string, LinkScanner>();
   private readonly command: HostCommand | null;
   private disposed = false;
 
@@ -220,6 +250,11 @@ export class DevinLocalHost {
     for (const [sessionId, binding] of this.bindings) {
       if (binding.workspace === normalized) this.bindings.delete(sessionId);
     }
+    for (const sessionId of [...this.linkScanners.keys()]) {
+      if (getLocalState().sessions[sessionId]?.workspace === normalized) {
+        this.linkScanners.delete(sessionId);
+      }
+    }
     update((state) => removeWorkspaceEntry(state, normalized));
     log('local', 'workspace-remove', { detail: { workspace: normalized } });
   }
@@ -245,7 +280,7 @@ export class DevinLocalHost {
         exit: deferred(),
         remoteToUi: new Map(),
         pendingPermissions: new Map(),
-        capabilities: { loadSession: false, sessionList: false },
+        capabilities: { loadSession: false, sessionList: false, sessionDelete: false },
       };
       this.agents.set(workspace, handle);
     }
@@ -338,6 +373,7 @@ export class DevinLocalHost {
     handle.capabilities = {
       loadSession: response.agentCapabilities?.loadSession === true,
       sessionList: Boolean(response.agentCapabilities?.sessionCapabilities?.list),
+      sessionDelete: Boolean(response.agentCapabilities?.sessionCapabilities?.delete),
     };
     update((state) =>
       upsertAgent(state, workspace, {
@@ -424,6 +460,26 @@ export class DevinLocalHost {
     return this.agents.get(resolve(workspace))?.child?.pid ?? null;
   }
 
+  private scanForPrLinks(sessionId: string, text: string): void {
+    let scanner = this.linkScanners.get(sessionId);
+    if (!scanner) {
+      scanner = new LinkScanner({ context: this.options.prLinkContext ?? {} });
+      this.linkScanners.set(sessionId, scanner);
+    }
+    for (const url of scanner.scan(text)) {
+      this.options.onPullRequestUrl?.(url, sessionId);
+    }
+  }
+
+  // Prompt settled — a URL deferred at a chunk boundary may still be pending.
+  private flushPrLinks(sessionId: string): void {
+    const scanner = this.linkScanners.get(sessionId);
+    if (!scanner) return;
+    for (const url of scanner.flush()) {
+      this.options.onPullRequestUrl?.(url, sessionId);
+    }
+  }
+
   // ---- ACP client callbacks ----
 
   private onSessionUpdate(handle: AgentHandle, params: SessionNotification): void {
@@ -431,6 +487,11 @@ export class DevinLocalHost {
     const kind = params.update.sessionUpdate;
     if (kind === 'tool_call' || kind === 'tool_call_update' || kind === 'plan') {
       log('local', 'session-update', { detail: { sessionId, kind } });
+    }
+    if (this.options.onPullRequestUrl) {
+      for (const text of collectAgentOutputText(params.update as unknown as Record<string, unknown>, kind)) {
+        this.scanForPrLinks(sessionId, text);
+      }
     }
     update((state) => applyUpdate(state, sessionId, params.update as unknown as SessionUpdate));
   }
@@ -579,11 +640,13 @@ export class DevinLocalHost {
       const stopReason = response.stopReason as StopReason;
       handle.backoffMs = BACKOFF_MIN_MS;
       update((state) => finishPrompt(state, sessionId, stopReason));
+      this.flushPrLinks(sessionId);
       log('local', 'prompt-finish', { detail: { sessionId, stopReason } });
       return stopReason;
     } catch (error) {
       const message = errorMessage(error);
       update((state) => finishPrompt(state, sessionId, 'error', message));
+      this.flushPrLinks(sessionId);
       log('local', 'prompt-error', { detail: { sessionId, message } });
       throw error;
     }
@@ -603,6 +666,41 @@ export class DevinLocalHost {
     update((state) => clearPermission(state, sessionId));
     log('local', 'cancel', { detail: { sessionId } });
     await handle.connection.cancel({ sessionId: binding.remoteId });
+  }
+
+  // Deletes the agent's persistent session (the id returned by session/new or
+  // session/list — never a crash-rebind remoteId). Requires
+  // sessionCapabilities.delete; running prompts must be cancelled first.
+  async deleteSession(sessionId: string): Promise<void> {
+    const session = this.requireSession(sessionId);
+    if (session.running) throw new Error('cancel the running prompt before deleting');
+    const handle = await this.ensureAgent(session.workspace);
+    if (!handle.capabilities.sessionDelete) throw new Error('delete not supported by agent');
+    const connection = handle.connection;
+    if (!connection) throw new Error('agent not connected');
+    for (const [requestId, pending] of handle.pendingPermissions) {
+      if (pending.sessionId === sessionId) {
+        handle.pendingPermissions.delete(requestId);
+        pending.resolve({ outcome: 'cancelled' });
+      }
+    }
+    await Promise.race([
+      withTimeout(
+        connection.deleteSession({ sessionId: session.id }),
+        INITIALIZE_TIMEOUT_MS,
+        'session/delete',
+      ),
+      handle.exit.promise,
+    ]);
+    this.bindings.delete(sessionId);
+    this.linkScanners.delete(sessionId);
+    for (const [remoteId, uiId] of handle.remoteToUi) {
+      if (uiId === sessionId) handle.remoteToUi.delete(remoteId);
+    }
+    this.index = this.index.filter((entry) => entry.id !== sessionId);
+    this.saveIndex();
+    update((state) => removeSessionEntry(state, sessionId));
+    log('local', 'session-delete', { detail: { workspace: session.workspace, sessionId } });
   }
 
   async listSessions(workspace: string): Promise<LocalSessionSummary[]> {

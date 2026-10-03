@@ -15,6 +15,25 @@ export interface BrowserTab {
 // was opened from; GLOBAL collects tabs opened outside any session.
 export const GLOBAL = '';
 
+// Local (Devin CLI) sessions get their own GitHub tab scope, namespaced so a
+// local session id can never collide with a Cloud session id.
+export const LOCAL_SCOPE_PREFIX = 'local:';
+
+export function localScope(sessionId: string): string {
+  return `${LOCAL_SCOPE_PREFIX}${sessionId}`;
+}
+
+// The scope the tab strip currently serves: the selected local session while
+// the Local surface is up, else the Cloud session (GLOBAL outside any session).
+export function effectiveScope(
+  surface: 'cloud' | 'local' | 'settings',
+  cloudSessionId: string | null,
+  localSessionId: string | null,
+): string {
+  if (surface === 'local' && localSessionId) return localScope(localSessionId);
+  return cloudSessionId ?? GLOBAL;
+}
+
 export function scopeOf(tab: Pick<BrowserTab, 'originSessionId'>): string {
   return tab.originSessionId ?? GLOBAL;
 }

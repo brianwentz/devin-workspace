@@ -47,6 +47,8 @@ const localApi = {
     ipcRenderer.invoke(IpcChannels.localSessionLoad, { workspace, sessionId }) as Promise<
       LocalResult<null>
     >,
+  localSessionDelete: (sessionId: string) =>
+    ipcRenderer.invoke(IpcChannels.localSessionDelete, { sessionId }) as Promise<LocalResult<null>>,
   localPrompt: (sessionId: string, text: string) =>
     ipcRenderer.invoke(IpcChannels.localPrompt, { sessionId, text }) as Promise<LocalResult<string>>,
   localCancel: (sessionId: string) =>
@@ -58,13 +60,18 @@ const localApi = {
   localOpenLink: (url: string) => {
     if (isString(url) && url.length < 8192) ipcRenderer.send(IpcChannels.localOpenLink, { url });
   },
+  localActiveSession: (sessionId: string | null) => {
+    if (sessionId === null || isString(sessionId)) {
+      ipcRenderer.send(IpcChannels.localActiveSession, { sessionId });
+    }
+  },
 };
 
 // P4b embedded terminal + F5 dock.
 const terminalApi = {
   terminalOpen: (
     options:
-      | { kind: 'devin'; workspace: string }
+      | { kind: 'devin'; workspace: string; sessionId: string }
       | { kind: 'shell'; cwd?: string; profile?: string },
   ) =>
     ipcRenderer.invoke(IpcChannels.terminalOpen, options) as Promise<

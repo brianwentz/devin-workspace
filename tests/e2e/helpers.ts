@@ -9,6 +9,7 @@ export type PublicState = {
   paneCollapsed: boolean;
   surface: 'cloud' | 'local' | 'settings';
   currentSessionId: string | null;
+  localSessionId: string | null;
   credentials: Array<{
     id: string;
     origin: string;
@@ -55,6 +56,7 @@ export type PublicState = {
   terminals: Array<{
     id: string;
     kind: 'devin' | 'shell';
+    sessionId: string | null;
     cwd: string;
     title: string;
     exitCode: number | null;

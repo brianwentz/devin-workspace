@@ -10,7 +10,7 @@ import { evaluateInShell, launchApp, readEvents, shellPage, state, waitForEvent 
 
 type Hooks = {
   terminalOpen(
-    options: { kind: 'devin'; workspace: string } | { kind: 'shell'; cwd?: string },
+    options: { kind: 'devin'; workspace: string; sessionId: string } | { kind: 'shell'; cwd?: string },
   ): { ok: true; id: string } | { ok: false; error: string };
   terminalInput(id: string, data: string): boolean;
   terminalResize(id: string, cols: number, rows: number): boolean;
@@ -19,6 +19,8 @@ type Hooks = {
   terminalPid(id: string): number | null;
   terminalList(): Array<{ id: string; kind: string; cwd: string; title: string; exitCode: number | null }>;
   localAddWorkspace(path: string): string | null;
+  localNewSession(workspace: string): Promise<string>;
+  localState(): { agents: Record<string, { status: string }> };
   setSurface(value: 'cloud' | 'local' | 'settings'): void;
   setTerminalOpen(value: boolean): void;
   setTerminalHeight(value: number): void;
@@ -26,6 +28,8 @@ type Hooks = {
   childViews(): Array<{ bounds: { x: number; y: number; width: number; height: number }; url: string | null }>;
   layoutRects(): { terminal: { x: number; y: number; width: number; height: number } };
   setPaneOpen(value: boolean): void;
+  clipboardWrite(text: string): void;
+  clipboardRead(): string;
 };
 
 type G = typeof globalThis & { __devinworkspaces: Hooks };
@@ -64,6 +68,7 @@ test('terminal: opens a pty, echoes input, resizes, closes, and leaves no orphan
   const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
     DEVIN_WORKSPACES_TEST_TERMINAL_CMD: TERMINAL_CMD,
+    DEVIN_WORKSPACES_LOCAL_AGENT_CMD: 'node out/fixtures/fakeAcpAgent.cjs',
   });
   let closed = false;
   try {
@@ -73,7 +78,7 @@ test('terminal: opens a pty, echoes input, resizes, closes, and leaves no orphan
 
     // A path outside the configured workspaces must be rejected.
     const denied = await app.evaluate(
-      (_e, path) => (globalThis as G).__devinworkspaces.terminalOpen({ kind: 'devin', workspace: path as string }),
+      (_e, path) => (globalThis as G).__devinworkspaces.terminalOpen({ kind: 'devin', workspace: path as string, sessionId: 'deny-session' }),
       tmpdir(),
     );
     expect(denied.ok).toBe(false);
@@ -83,7 +88,7 @@ test('terminal: opens a pty, echoes input, resizes, closes, and leaves no orphan
     );
     expect(added).toBeTruthy();
     const opened = await app.evaluate(
-      (_e, ws) => (globalThis as G).__devinworkspaces.terminalOpen({ kind: 'devin', workspace: ws as string }),
+      (_e, ws) => (globalThis as G).__devinworkspaces.terminalOpen({ kind: 'devin', workspace: ws as string, sessionId: 'sess-term' }),
       added,
     );
     expect(opened.ok).toBe(true);
@@ -121,10 +126,22 @@ test('terminal: opens a pty, echoes input, resizes, closes, and leaves no orphan
     );
     expect(pid).toBeTruthy();
 
-    // Shell DOM: Terminal tab shows an xterm surface.
+    // Shell DOM: Terminal tab shows an xterm surface (per-session pty — the
+    // hook-opened one belongs to 'sess-term', the session gets its own).
+    await expect
+      .poll(async () => (await app.evaluate(() => (globalThis as G).__devinworkspaces.localState())).agents[added!]?.status)
+      .toBe('ready');
+    const uiSessionId = await app.evaluate(
+      (_e, w) => (globalThis as G).__devinworkspaces.localNewSession(w as string),
+      added,
+    );
     await app.evaluate(() => (globalThis as G).__devinworkspaces.setSurface('local'));
-    const page = await shellPage(app);await page.waitForSelector('#view-terminal', { timeout: 10000 });
-    await page.click('#view-terminal');await page.waitForSelector('.xterm', { timeout: 10000 });
+    const page = await shellPage(app);
+    await page.waitForSelector(`.session-item[data-session-id="${uiSessionId}"]`, { timeout: 10000 });
+    await page.click(`.session-item[data-session-id="${uiSessionId}"]`);
+    await page.waitForSelector('#view-terminal:not([disabled])', { timeout: 10000 });
+    await page.click('#view-terminal');
+    await page.waitForSelector('.xterm', { timeout: 10000 });
 
     // Close kills the child process.
     await app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalClose(tid as string), id);
@@ -132,7 +149,7 @@ test('terminal: opens a pty, echoes input, resizes, closes, and leaves no orphan
 
     // A second terminal left open is disposed on quit — no orphan conhost/node.
     const opened2 = await app.evaluate(
-      (_e, ws) => (globalThis as G).__devinworkspaces.terminalOpen({ kind: 'devin', workspace: ws as string }),
+      (_e, ws) => (globalThis as G).__devinworkspaces.terminalOpen({ kind: 'devin', workspace: ws as string, sessionId: 'sess-term' }),
       added,
     );
     expect(opened2.ok).toBe(true);
@@ -363,6 +380,147 @@ test('terminal dock: rail toggle, shell tabs, surface gating, persisted height',
       await app2.close().catch(() => undefined);
     }
     closed = true;
+  } finally {
+    if (!closed) {
+      spawnSync('taskkill', ['/PID', String(app.process().pid), '/T', '/F'], { stdio: 'ignore' });
+      await Promise.race([
+        app.close().then(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
+    }
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        rmSync(profile, { recursive: true, force: true });
+        rmSync(workspace, { recursive: true, force: true });
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+  }
+});
+
+test('terminal clipboard: Ctrl+Shift+V pastes, right-click pastes, context menu suppressed', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-termclip-'));
+  const logFile = join(profile, 'events.jsonl');
+  writeFileSync(logFile, '', 'utf8');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_TEST_TERMINAL_CMD: TERMINAL_CMD,
+  });
+  let closed = false;
+  try {
+    await expect
+      .poll(async () => app.evaluate(() => Boolean((globalThis as G).__devinworkspaces)))
+      .toBe(true);
+    const page = await shellPage(app);
+    await page.waitForSelector('#terminalToggle', { timeout: 10_000 });
+    await page.click('#terminalToggle');
+    await page.waitForSelector('#terminalNew', { timeout: 10_000 });
+    await page.click('#terminalNew');
+    let id = '';
+    await expect
+      .poll(async () => {
+        id = (await state(app)).terminals[0]?.id ?? '';
+        return id;
+      })
+      .not.toBe('');
+    await page.waitForSelector(`[data-terminal-id="${id}"] .xterm`, { timeout: 10_000 });
+    await expect
+      .poll(async () =>
+        app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id),
+      )
+      .toContain('ready');
+    await page.locator(`[data-terminal-id="${id}"]`).click();
+
+    // Ctrl+Shift+V pastes clipboard text into the pty.
+    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), 'clip-v-paste');
+    await page.keyboard.press('Control+Shift+v');
+    await expect
+      .poll(async () =>
+        app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id),
+      )
+      .toContain('clip-v-paste');
+
+    // Right-click with no xterm selection pastes (Windows Terminal convention).
+    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), 'right-click-paste');
+    await page.locator(`[data-terminal-id="${id}"]`).click({ button: 'right' });
+    await expect
+      .poll(async () =>
+        app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id),
+      )
+      .toContain('right-click-paste');
+
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await app.close();
+    closed = true;
+  } finally {
+    if (!closed) {
+      spawnSync('taskkill', ['/PID', String(app.process().pid), '/T', '/F'], { stdio: 'ignore' });
+      await Promise.race([
+        app.close().then(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
+    }
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        rmSync(profile, { recursive: true, force: true });
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+  }
+});
+
+test('terminal: quit disposes several live devin ptys and the process exits', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-termquit-'));
+  const logFile = join(profile, 'events.jsonl');
+  writeFileSync(logFile, '', 'utf8');
+  const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_TEST_TERMINAL_CMD: TERMINAL_CMD,
+  });
+  let closed = false;
+  try {
+    await expect
+      .poll(async () => app.evaluate(() => Boolean((globalThis as G).__devinworkspaces)))
+      .toBe(true);
+    const added = await app.evaluate(
+      (_e, path) => (globalThis as G).__devinworkspaces.localAddWorkspace(path),
+      workspace,
+    );
+    expect(added).toBeTruthy();
+    // Three live per-session devin ptys at quit.
+    for (let i = 0; i < 3; i += 1) {
+      const opened = await app.evaluate(
+        (_e, args) =>
+          (globalThis as G).__devinworkspaces.terminalOpen({
+            kind: 'devin',
+            workspace: args.ws as string,
+            sessionId: args.sid as string,
+          }),
+        { ws: added, sid: `quit-sess-${i}` },
+      );
+      expect(opened.ok).toBe(true);
+    }
+    expect(
+      (await app.evaluate(() => (globalThis as G).__devinworkspaces.terminalList())).length,
+    ).toBe(3);
+
+    // quit + wait on the process 'exit' — the evaluate reply can be lost when
+    // the app exits first, so it is fired un-awaited.
+    const exitStatus = new Promise<'exited' | 'timeout'>((resolve) => {
+      app.process().once('exit', () => resolve('exited'));
+      setTimeout(() => resolve('timeout'), 30_000);
+    });
+    void app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    expect(await exitStatus).toBe('exited');
+    await waitForEvent(logFile, 'window-close-complete');
+    closed = true;
+    await Promise.race([
+      app.close().then(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 10_000)),
+    ]);
   } finally {
     if (!closed) {
       spawnSync('taskkill', ['/PID', String(app.process().pid), '/T', '/F'], { stdio: 'ignore' });

@@ -1,12 +1,15 @@
+import { resolve } from 'node:path';
 import { app, dialog } from 'electron';
 import { guardedHandle, guardedOn } from '../ipcGuard';
 import type { ZodType } from 'zod';
 import {
   IpcChannels,
+  LocalActiveSessionArg,
   LocalCancelArg,
   LocalOpenLinkArg,
   LocalPermissionArg,
   LocalPromptArg,
+  LocalSessionDeleteArg,
   LocalSessionListArg,
   LocalSessionLoadArg,
   LocalSessionNewArg,
@@ -15,9 +18,12 @@ import {
 } from '../../shared/ipc';
 import { log } from '../log';
 import { handleLink } from '../routing';
-import { state, testMode } from '../state';
+import { fixtureOrigins, state, testMode } from '../state';
+import { applyLayout } from '../window';
+import { localScope } from '../../core/tabModel';
 import { DevinLocalHost } from './acpHost';
-import { publicLocalState } from './localState';
+import { autoOpenLocalPr } from './prAutoOpen';
+import { getLocalState, publicLocalState } from './localState';
 import { setupTerminalIpc } from './terminalIpc';
 import { terminalHost } from './terminalHost';
 
@@ -69,6 +75,10 @@ export function setupLocal(): void {
     onWorkspacesChanged: (workspaces) => {
       state.settings?.merge({ workspaces });
     },
+    onPullRequestUrl: (url, sessionId) => {
+      autoOpenLocalPr(url, sessionId, 'local-chat');
+    },
+    prLinkContext: { githubOrigins: fixtureOrigins },
   });
   setupTerminalIpc();
   app.on('before-quit', () => host?.dispose());
@@ -94,8 +104,17 @@ export function setupLocal(): void {
 
   handle(IpcChannels.localWorkspaceAdd, LocalWorkspaceArg, ({ path }) => requireHost().addWorkspace(path));
   handle(IpcChannels.localWorkspaceRemove, LocalWorkspaceArg, ({ path }) => {
+    // Forget the lifted selection when its session lived in this workspace —
+    // the sessions map is read before removeWorkspace drops it.
+    const selectedWorkspace = state.localSessionId
+      ? getLocalState().sessions[state.localSessionId]?.workspace
+      : undefined;
     terminalHost.closeForWorkspace(path);
     requireHost().removeWorkspace(path);
+    if (selectedWorkspace && resolve(selectedWorkspace) === resolve(path)) {
+      state.localSessionId = null;
+      applyLayout();
+    }
     return null;
   });
   handle(IpcChannels.localSessionNew, LocalSessionNewArg, ({ workspace }) =>
@@ -107,6 +126,20 @@ export function setupLocal(): void {
   handle(IpcChannels.localSessionLoad, LocalSessionLoadArg, async ({ workspace, sessionId }) => {
     await requireHost().loadSession(workspace, sessionId);
     return null;
+  });
+  handle(IpcChannels.localSessionDelete, LocalSessionDeleteArg, async ({ sessionId }) => {
+    await requireHost().deleteSession(sessionId);
+    terminalHost.closeForSession(sessionId);
+    if (state.localSessionId === sessionId) state.localSessionId = null;
+    void state.tabManager?.closeScope(localScope(sessionId)).then(applyLayout);
+    return null;
+  });
+  guardedOn(IpcChannels.localActiveSession, (_event, payload: unknown) => {
+    const parsed = LocalActiveSessionArg.safeParse(payload);
+    if (!parsed.success) return;
+    state.localSessionId = parsed.data.sessionId;
+    log('local', 'active-session', { detail: { sessionId: parsed.data.sessionId } });
+    applyLayout();
   });
   handle(IpcChannels.localPrompt, LocalPromptArg, ({ sessionId, text }) =>
     requireHost().prompt(sessionId, text),

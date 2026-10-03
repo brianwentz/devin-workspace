@@ -12,6 +12,7 @@ import {
   type Rect,
 } from '../core/layout';
 import { openPullRequests } from '../core/notifyModel';
+import { effectiveScope } from '../core/tabModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 
 import { terminalHost } from './local/terminalHost';
@@ -108,6 +109,7 @@ export function publicState(): ShellState {
     paneCollapsed: state.paneCollapsed,
     surface: state.surface,
     currentSessionId: state.currentSessionId,
+    localSessionId: state.localSessionId,
     settings: state.settings?.current ?? SettingsSchema.parse({}),
     tabs: state.tabManager?.publicState() ?? { tabs: [], activeId: null, scope: '', hiddenTabCount: 0 },
     credentials: state.credentials?.list() ?? [],
@@ -226,9 +228,20 @@ export function lowerShell(): void {
   if (state.paneOpen && !state.paneCollapsed) addAtTop(tabManager?.activeView ?? null);
 }
 
+// The tab strip's scope follows the visible surface: the selected local
+// session on Local, else the Cloud session. setScope is a no-op when unchanged,
+// so running it from applyLayout covers every surface/selection change without
+// each caller having to know about scopes.
+export function syncScope(): void {
+  state.tabManager?.setScope(
+    effectiveScope(state.surface, state.currentSessionId, state.localSessionId),
+  );
+}
+
 export function applyLayout(): void {
   const { windowRef, shellView, devinView, tabManager } = state;
   if (!windowRef || !shellView || !devinView || !tabManager) return;
+  syncScope();
   const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
   state.paneCollapsed = bounds.paneCollapsed;
   const size = windowRef.getContentBounds();

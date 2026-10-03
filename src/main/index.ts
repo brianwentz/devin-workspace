@@ -8,6 +8,7 @@ import { closeAutofillOverlaysForInactiveTabs, disposeAutofill, setupAutofillIpc
 import { setupDownloads } from './downloads';
 import { setupIpc } from './ipc';
 import { setupLocal, localHost } from './local/ipc';
+import { autoOpenLocalPr } from './local/prAutoOpen';
 import { terminalHost } from './local/terminalHost';
 import { log, logFile } from './log';
 import { setPermissions } from './permissions';
@@ -35,6 +36,7 @@ import {
   initialWindowOptions,
   savePlacementNow,
 } from './windowPlacement';
+import { attachContextMenu } from './contextMenu';
 import { attachRouting } from './routing';
 import { setupUpdater } from './updater';
 import { notifier } from './notifier';
@@ -122,7 +124,14 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
     notificationsFlush();
     savePlacementNow();
     state.settings?.syncFromState();
-    await terminalHost.dispose();
+    try {
+      await terminalHost.dispose();
+    } catch (error) {
+      // Never let pty teardown veto the quit sequence.
+      log('shell', 'terminal-dispose-failed', {
+        detail: { message: error instanceof Error ? error.message : String(error) },
+      });
+    }
     const contents = [
       state.shellView?.webContents,
       state.devinView?.webContents,
@@ -180,6 +189,9 @@ async function createWindow(): Promise<void> {
   state.terminalOpen = saved.layout.terminalOpen;
   state.terminalHeight = saved.layout.terminalHeight;
   terminalHost.onChange = notifyShell;
+  terminalHost.onPullRequestUrl = (url, sessionId) => {
+    autoOpenLocalPr(url, sessionId, 'local-terminal');
+  };
   state.surface = saved.surface;
   // Env override wins over the persisted tenant URL (tests rely on it).
   state.tenantUrl = process.env.DEVIN_WORKSPACES_TENANT_URL ?? saved.tenantUrl;
@@ -259,6 +271,7 @@ async function createWindow(): Promise<void> {
   state.windowRef.contentView.addChildView(state.shellView);
   state.windowRef.contentView.addChildView(state.devinView);
   attachRouting(state.shellView.webContents, 'shell');
+  attachContextMenu(state.shellView.webContents);
   attachRouting(state.devinView.webContents, 'devin');
   attachSessionTracking(state.devinView.webContents);
 
