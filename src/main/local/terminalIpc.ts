@@ -1,7 +1,9 @@
+import { clipboard } from 'electron';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { guardedHandle, guardedOn } from '../ipcGuard';
 import {
+  ClipboardWriteArg,
   IpcChannels,
   TerminalActivateArg,
   TerminalCloseArg,
@@ -57,6 +59,18 @@ export function setupTerminalIpc(): void {
     if (!terminalHost.list().some((entry) => entry.id === parsed.data.id)) return;
     state.activeTerminalId = parsed.data.id;
     notifyShell();
+  });
+  // Terminal copy/paste rides the OS clipboard; only op + length are logged.
+  guardedHandle(IpcChannels.clipboardReadText, async () => {
+    const text = (await clipboard.readText()).slice(0, 65536);
+    log('shell', 'terminal-clipboard', { detail: { op: 'paste', length: text.length } });
+    return text;
+  });
+  guardedOn(IpcChannels.clipboardWriteText, (_event, payload: unknown) => {
+    const parsed = ClipboardWriteArg.safeParse(payload);
+    if (!parsed.success) return;
+    clipboard.writeText(parsed.data.text);
+    log('shell', 'terminal-clipboard', { detail: { op: 'copy', length: parsed.data.text.length } });
   });
 }
 
