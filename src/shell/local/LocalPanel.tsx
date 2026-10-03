@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { Trash2 } from 'lucide-react';
 import type { LocalStatePublic } from '../../shared/ipc';
 import { AgentBadge, MessageView, PermissionCard, PlanList, buttonClass } from './Cards';
 import { TerminalView } from './TerminalView';
+import { useShellState } from '../store';
 import { useLocalState } from './store';
 
 type Session = LocalStatePublic['sessions'][string];
@@ -26,52 +28,45 @@ function sessionsOf(state: LocalStatePublic, workspace: string | null): Session[
 
 export function LocalPanel({ style }: { style: CSSProperties }) {
   const local = useLocalState();
+  const shell = useShellState();
   const [workspace, setWorkspace] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // App only renders surfaces once shell state exists, so the initializer sees
+  // the selection the main process kept across the last surface switch.
+  const [sessionId, setSessionId] = useState<string | null>(
+    () => shell?.localSessionId ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
-  // Lazily open the workspace's devin pty only once the Terminal tab is opened;
-  // keep the view mounted (display:none) afterwards so scrollback survives.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // Lazily open one devin pty per session, only once the Terminal tab is
+  // opened; every session's view stays mounted (display:none) so scrollback
+  // survives session switches.
   const [terminalActive, setTerminalActive] = useState(false);
-  const [terminalId, setTerminalId] = useState<string | null>(null);
-  const [terminalWorkspace, setTerminalWorkspace] = useState<string | null>(null);
+  const [terminalIds, setTerminalIds] = useState<Record<string, string>>({});
   const [terminalError, setTerminalError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const listedFor = useRef<Set<string>>(new Set());
 
   const workspaces = useMemo(() => Object.keys(local?.agents ?? {}).sort(), [local]);
 
-  // Pick a default workspace, and auto-list its sessions once.
+  // Pick a default workspace, and auto-list its sessions once. On remount
+  // (surface switch), restore the selection the main process kept for us.
   useEffect(() => {
     if (!local) return;
     if (!workspace || !local.agents[workspace]) {
-      setWorkspace(workspaces[0] ?? null);
-      setSessionId(null);
+      const remembered = shell?.localSessionId ? local.sessions[shell.localSessionId] : undefined;
+      setWorkspace(remembered ? remembered.workspace : (workspaces[0] ?? null));
+      setSessionId(remembered ? remembered.id : null);
     }
-  }, [local, workspace, workspaces]);
+  }, [local, workspace, workspaces, shell?.localSessionId]);
 
-  // Open (or reuse) the workspace devin pty when the Terminal tab is shown.
+  // Keep main's selection in sync — it drives the GitHub tab scope and
+  // survives surface switches (this panel unmounts when leaving Local).
   useEffect(() => {
-    if (!terminalActive || !workspace || (terminalWorkspace === workspace && terminalId)) return;
-    let cancelled = false;
-    void window.devinworkspaces
-      .terminalOpen({ kind: 'devin', workspace })
-      .then((result) => {
-        if (cancelled) return;
-        if (result.ok) {
-          setTerminalId(result.id);
-          setTerminalWorkspace(workspace);
-          setTerminalError(null);
-        } else {
-          setTerminalError(result.error);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [terminalActive, workspace, terminalWorkspace, terminalId]);
+    window.devinworkspaces.localActiveSession(sessionId);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!workspace || listedFor.current.has(workspace)) return;
@@ -84,6 +79,30 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   const sessions = local ? sessionsOf(local, workspace) : [];
   const session = sessionId && local ? (local.sessions[sessionId] ?? null) : null;
   const agent = workspace && local ? local.agents[workspace] : undefined;
+
+  // Open (or reuse) the selected session's devin pty when the Terminal tab is shown.
+  useEffect(() => {
+    if (!terminalActive || !session || terminalIds[session.id]) return;
+    const targetSessionId = session.id;
+    const targetWorkspace = session.workspace;
+    let cancelled = false;
+    void window.devinworkspaces
+      .terminalOpen({ kind: 'devin', workspace: targetWorkspace, sessionId: targetSessionId })
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setTerminalIds((map) =>
+            map[targetSessionId] ? map : { ...map, [targetSessionId]: result.id },
+          );
+          setTerminalError(null);
+        } else {
+          setTerminalError(result.error);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [terminalActive, session, terminalIds]);
 
   useEffect(() => {
     const element = scroller.current;
@@ -130,8 +149,24 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
     if (id) setSessionId(id);
   };
 
+  const deleteSession = async (id: string) => {
+    setConfirmDeleteId(null);
+    const result = await run(window.devinworkspaces.localSessionDelete(id));
+    if (result !== undefined) {
+      // The pty itself was closed in main (terminalHost.closeForSession).
+      setTerminalIds((map) => {
+        if (!map[id]) return map;
+        const next = { ...map };
+        delete next[id];
+        return next;
+      });
+      if (sessionId === id) setSessionId(null);
+    }
+  };
+
   const openSession = async (target: Session) => {
     setSessionId(target.id);
+    setConfirmDeleteId(null);
     setError(null);
     if (!target.loaded && workspace) {
       const result = await window.devinworkspaces.localLoadSession(workspace, target.id);
@@ -234,7 +269,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
         </div>
         <ul id="sessionList" className="m-0 flex flex-1 list-none flex-col overflow-auto p-0">
           {sessions.map((item) => (
-            <li key={item.id}>
+            <li key={item.id} className="group relative flex items-center">
               <button
                 type="button"
                 className={`session-item w-full px-3 py-1.5 text-left text-xs ${
@@ -253,6 +288,37 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
                   )}
                 </div>
               </button>
+              {agent?.capabilities?.sessionDelete &&
+                (confirmDeleteId === item.id ? (
+                  <span className="absolute right-1 flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="session-delete-confirm rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#ff8a8a]"
+                      disabled={busy}
+                      onClick={() => void deleteSession(item.id)}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      type="button"
+                      className="session-delete-cancel rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#7f8ca0]"
+                      onClick={() => setConfirmDeleteId(null)}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="session-delete absolute right-1 rounded p-1 text-[#7f8ca0] opacity-0 hover:text-[#ff8a8a] group-hover:opacity-100 disabled:hidden"
+                    aria-label="Delete session"
+                    data-session-id={item.id}
+                    disabled={item.running}
+                    onClick={() => setConfirmDeleteId(item.id)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                ))}
             </li>
           ))}
         </ul>
@@ -274,6 +340,8 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
                 className={`px-3 py-1 text-xs ${
                   view === tab ? 'bg-[#27364a] text-[#e8edf5]' : 'text-[#7f8ca0] hover:bg-[#18212e]'
                 }`}
+                disabled={tab === 'terminal' && !session}
+                title={tab === 'terminal' && !session ? 'Select a session' : undefined}
                 onClick={() => {
                   setView(tab);
                   if (tab === 'terminal') setTerminalActive(true);
@@ -292,17 +360,28 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
         >
           {terminalActive && workspace && (
             <>
-              {terminalWorkspace !== workspace || !terminalId ? null : (
-                <TerminalView
-                  key={terminalId}
-                  id={terminalId}
-                  active={view === 'terminal'}
-                  onRestart={() => {
-                    window.devinworkspaces.terminalClose(terminalId);
-                    setTerminalId(null);
-                  }}
-                />
-              )}
+              {Object.entries(terminalIds).map(([sid, id]) => (
+                <div
+                  key={sid}
+                  data-session-terminal={sid}
+                  className="flex min-h-0 flex-1 flex-col"
+                  style={{ display: sid === session?.id ? 'flex' : 'none' }}
+                >
+                  <TerminalView
+                    id={id}
+                    active={view === 'terminal' && sid === session?.id}
+                    onRestart={() => {
+                      window.devinworkspaces.terminalClose(id);
+                      setTerminalIds((map) => {
+                        if (!map[sid]) return map;
+                        const next = { ...map };
+                        delete next[sid];
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+              ))}
               {terminalError && (
                 <div className="border-b border-[#39475a] px-3 py-1.5 text-xs text-[#ff8a8a]">
                   {terminalError}

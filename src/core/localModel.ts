@@ -65,7 +65,11 @@ export type LocalSession = {
 
 export type AgentStatus = 'missing-cli' | 'starting' | 'ready' | 'crashed' | 'stopped';
 
-export type AgentCapabilities = { loadSession: boolean; sessionList: boolean };
+export type AgentCapabilities = {
+  loadSession: boolean;
+  sessionList: boolean;
+  sessionDelete: boolean;
+};
 
 export type LocalAgent = {
   workspace: string;
@@ -375,6 +379,13 @@ export function upsertAgent(
     else (next as Record<string, unknown>)[key] = value;
   }
   return { ...state, agents: { ...state.agents, [workspace]: next } };
+}
+
+export function removeSession(state: LocalState, sessionId: string): LocalState {
+  if (!state.sessions[sessionId]) return state;
+  const sessions = { ...state.sessions };
+  delete sessions[sessionId];
+  return { ...state, sessions };
 }
 
 export function removeWorkspace(state: LocalState, workspace: string): LocalState {

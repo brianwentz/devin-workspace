@@ -17,13 +17,14 @@ import {
   type WtProfile,
 } from '../../core/windowsTerminal';
 import { IpcChannels, type TerminalSummary } from '../../shared/ipc';
+import { LinkScanner } from '../../core/prLinks';
 import { log } from '../log';
-import { state } from '../state';
+import { fixtureOrigins, state } from '../state';
 import { resolveDevinPath } from './acpHost';
 
 export type TerminalKind = 'devin' | 'shell';
 export type TerminalOpenOptions =
-  | { kind: 'devin'; workspace: string }
+  | { kind: 'devin'; workspace: string; sessionId: string }
   | { kind: 'shell'; cwd?: string | undefined; profile?: string | undefined };
 
 export interface ShellProfileInfo {
@@ -40,6 +41,7 @@ export type { TerminalSummary };
 interface TerminalEntry {
   id: string;
   kind: TerminalKind;
+  sessionId: string | null;
   cwd: string;
   title: string;
   profile: string | null;
@@ -52,6 +54,8 @@ interface TerminalEntry {
   lastDataLogAt: number;
   // Test mode only: rolling output buffer for __devinworkspaces.terminalRead.
   readBuffer: string;
+  // Devin-kind only: PR-URL scanner over the pty output stream.
+  linkScanner: LinkScanner | null;
 }
 
 // Sampled event-log volume for terminal output (F2).
@@ -75,12 +79,13 @@ function resolveOnPath(name: string): string | null {
   }
 }
 
-// One interactive `devin` CLI pty per workspace. The external binary is spawned
+// One interactive `devin` CLI pty per local session (fresh TUI — no `-r`, so
+// each session gets its own context). The external binary is spawned
 // via node-pty/ConPTY — never node (RunAsNode fuse is off). A full command
 // override exists only in test mode (DEVIN_WORKSPACES_TEST_TERMINAL_CMD).
 export class TerminalHost {
   private readonly terminals = new Map<string, TerminalEntry>();
-  private readonly byWorkspace = new Map<string, string>();
+  private readonly bySession = new Map<string, string>();
 
   constructor(private readonly testMode: boolean) {}
 
@@ -238,7 +243,7 @@ export class TerminalHost {
   // (ELECTRON_RUN_AS_NODE in particular turns spawned devin/node binaries into
   // plain node), NODE_INSPECT_* hijack ports, and JB_*/IDEA_*/WEBSTORM_* leak
   // IDE debugger hooks when launched from JetBrains. Only names are logged.
-  private ptyEnv(): Record<string, string> {
+  private ptyEnv(kind: TerminalKind): Record<string, string> {
     const strip = (name: string) =>
       name === 'NODE_OPTIONS' ||
       name.startsWith('NODE_INSPECT_') ||
@@ -253,8 +258,21 @@ export class TerminalHost {
       if (strip(name)) stripped.push(name);
       else env[name] = value;
     }
-    if (stripped.length > 0) {
-      log('local', 'terminal-env', { detail: { stripped } });
+    const added: string[] = [];
+    // The devin CLI classifies its host terminal from TERM_PROGRAM/WT_SESSION;
+    // a ConPTY-backed xterm looks like conhost, so pose as Windows Terminal.
+    if (kind === 'devin' && process.platform === 'win32') {
+      if (env.WT_SESSION === undefined) {
+        env.WT_SESSION = randomUUID();
+        added.push('WT_SESSION');
+      }
+      if (env.TERM_PROGRAM === undefined) {
+        env.TERM_PROGRAM = 'WindowsTerminal';
+        added.push('TERM_PROGRAM');
+      }
+    }
+    if (stripped.length > 0 || added.length > 0) {
+      log('local', 'terminal-env', { detail: { stripped, added } });
     }
     return env;
   }
@@ -271,12 +289,18 @@ export class TerminalHost {
       options.kind === 'devin' ? workspaces : [...workspaces, resolve(homedir())];
     if (!allowed.includes(normalized)) {
       log('local', 'terminal-open', {
-        detail: { cwd: normalized, kind: options.kind, ok: false, error: 'cwd not allowed' },
+        detail: {
+          cwd: normalized,
+          kind: options.kind,
+          ok: false,
+          error: 'cwd not allowed',
+          ...(options.kind === 'devin' ? { sessionId: options.sessionId } : {}),
+        },
       });
       return { ok: false, error: 'cwd not allowed' };
     }
     if (options.kind === 'devin') {
-      const existingId = this.byWorkspace.get(normalized);
+      const existingId = this.bySession.get(options.sessionId);
       if (existingId) {
         const existing = this.terminals.get(existingId);
         if (existing && existing.exitCode === null) return { ok: true, id: existingId };
@@ -296,7 +320,7 @@ export class TerminalHost {
         cwd: normalized,
         cols,
         rows,
-        env: this.ptyEnv(),
+        env: this.ptyEnv(options.kind),
         name: 'xterm-256color',
         useConpty: true,
       });
@@ -309,6 +333,7 @@ export class TerminalHost {
     const entry: TerminalEntry = {
       id: randomUUID(),
       kind: options.kind,
+      sessionId: options.kind === 'devin' ? options.sessionId : null,
       cwd: normalized,
       title: basename(normalized) || normalized,
       profile: command.label,
@@ -319,27 +344,49 @@ export class TerminalHost {
       bytesOut: 0,
       lastDataLogAt: 0,
       readBuffer: '',
+      linkScanner:
+        options.kind === 'devin'
+          ? new LinkScanner({ context: { githubOrigins: fixtureOrigins } })
+          : null,
     };
     this.terminals.set(entry.id, entry);
-    if (options.kind === 'devin') this.byWorkspace.set(normalized, entry.id);
+    if (options.kind === 'devin') this.bySession.set(options.sessionId, entry.id);
     proc.onData((data) => this.pushData(entry, data));
     proc.onExit(({ exitCode }) => {
       entry.exitCode = exitCode;
       this.flush(entry);
+      if (entry.linkScanner && entry.sessionId && this.onPullRequestUrl) {
+        const sessionId = entry.sessionId;
+        for (const url of entry.linkScanner.flush()) {
+          this.onPullRequestUrl(url, sessionId);
+        }
+      }
       if (entry.bytesOut > 0) {
         log('local', 'terminal-data', { detail: { id: entry.id, bytes: entry.bytesOut } });
         entry.bytesOut = 0;
       }
-      if (this.byWorkspace.get(normalized) === entry.id) this.byWorkspace.delete(normalized);
-      state.shellView?.webContents.send(IpcChannels.terminalExit, {
-        id: entry.id,
-        exitCode,
-      });
+      if (entry.sessionId && this.bySession.get(entry.sessionId) === entry.id) {
+        this.bySession.delete(entry.sessionId);
+      }
+      const view = state.shellView;
+      if (view && !view.webContents.isDestroyed()) {
+        view.webContents.send(IpcChannels.terminalExit, {
+          id: entry.id,
+          exitCode,
+        });
+      }
       log('local', 'terminal-exit', { detail: { id: entry.id, exitCode } });
       this.onChange?.();
     });
     log('local', 'terminal-open', {
-      detail: { id: entry.id, cwd: normalized, kind: options.kind, ok: true, pid: proc.pid },
+      detail: {
+        id: entry.id,
+        cwd: normalized,
+        kind: options.kind,
+        ok: true,
+        pid: proc.pid,
+        ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
+      },
     });
     this.onChange?.();
     return { ok: true, id: entry.id };
@@ -347,11 +394,14 @@ export class TerminalHost {
 
   // Wired by the main process to refresh ShellState.terminals.
   onChange: (() => void) | null = null;
+  // Injected by index.ts: a never-before-seen PR URL in a devin pty's output.
+  onPullRequestUrl: ((url: string, sessionId: string) => void) | null = null;
 
   list(): TerminalSummary[] {
     return [...this.terminals.values()].map((entry) => ({
       id: entry.id,
       kind: entry.kind,
+      sessionId: entry.sessionId,
       cwd: entry.cwd,
       title: entry.title,
       exitCode: entry.exitCode,
@@ -385,6 +435,12 @@ export class TerminalHost {
     if (!entry.pending) return;
     const data = entry.pending;
     entry.pending = '';
+    if (entry.linkScanner && entry.sessionId && this.onPullRequestUrl) {
+      const sessionId = entry.sessionId;
+      for (const url of entry.linkScanner.scan(data)) {
+        this.onPullRequestUrl(url, sessionId);
+      }
+    }
     const view = state.shellView;
     if (view && !view.webContents.isDestroyed()) {
       view.webContents.send(IpcChannels.terminalData, { id: entry.id, data });
@@ -424,14 +480,23 @@ export class TerminalHost {
     }
     if (entry.timer) clearTimeout(entry.timer);
     this.terminals.delete(id);
-    if (this.byWorkspace.get(entry.cwd) === id) this.byWorkspace.delete(entry.cwd);
+    if (entry.sessionId && this.bySession.get(entry.sessionId) === id) {
+      this.bySession.delete(entry.sessionId);
+    }
     log('local', 'terminal-close', { detail: { id } });
     this.onChange?.();
     return true;
   }
 
   closeForWorkspace(workspace: string): void {
-    const id = this.byWorkspace.get(resolve(workspace));
+    const normalized = resolve(workspace);
+    for (const entry of [...this.terminals.values()]) {
+      if (entry.kind === 'devin' && entry.cwd === normalized) this.close(entry.id);
+    }
+  }
+
+  closeForSession(sessionId: string): void {
+    const id = this.bySession.get(sessionId);
     if (id) this.close(id);
   }
 
@@ -444,20 +509,39 @@ export class TerminalHost {
   }
 
   // Kills every pty and waits (bounded) for them to exit — ConPTY teardown
-  // threads can otherwise deadlock the host process's own exit().
+  // threads can otherwise deadlock the host process's own exit(). Per-entry
+  // failures are isolated: a throw here must never abort the caller's quit.
   async dispose(): Promise<void> {
     const waits: Promise<unknown>[] = [];
     for (const id of [...this.terminals.keys()]) {
-      const entry = this.terminals.get(id);
-      if (entry) {
-        waits.push(
-          new Promise((resolve) => {
-            entry.proc.onExit(resolve);
-            setTimeout(resolve, 2000);
-          }),
-        );
+      try {
+        const entry = this.terminals.get(id);
+        if (entry) {
+          waits.push(
+            new Promise((resolve) => {
+              try {
+                entry.proc.onExit(resolve);
+              } catch {
+                // onExit registration on a half-dead pty — the timeout covers it.
+              }
+              setTimeout(resolve, 2000);
+            }),
+          );
+          // Kill the child tree before proc.kill(): ClosePseudoConsole on a
+          // live ConPTY host can deadlock the libuv loop at quit (observed:
+          // terminal-close logged, then nothing — timers never fire).
+          if (process.platform === 'win32' && entry.exitCode === null) {
+            spawnSync('taskkill', ['/PID', String(entry.proc.pid), '/T', '/F'], {
+              stdio: 'ignore',
+            });
+          }
+        }
+        this.close(id);
+      } catch (error) {
+        log('local', 'terminal-dispose-error', {
+          detail: { id, message: error instanceof Error ? error.message : String(error) },
+        });
       }
-      this.close(id);
     }
     await Promise.all(waits);
   }

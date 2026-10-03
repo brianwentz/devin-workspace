@@ -5,6 +5,7 @@ import {
   emptyLocalState,
   finishPrompt,
   newSession,
+  removeSession,
   removeWorkspace,
   resetHistory,
   sessionsFor,
@@ -308,9 +309,13 @@ describe('localModel reducers', () => {
     state = upsertAgent(state, WS, {
       status: 'ready',
       protocolVersion: 1,
-      capabilities: { loadSession: true, sessionList: false },
+      capabilities: { loadSession: true, sessionList: false, sessionDelete: false },
     });
-    expect(state.agents[WS]!.capabilities).toEqual({ loadSession: true, sessionList: false });
+    expect(state.agents[WS]!.capabilities).toEqual({
+      loadSession: true,
+      sessionList: false,
+      sessionDelete: false,
+    });
     state = upsertAgent(state, WS, { status: 'crashed', error: 'exit 1', retryInMs: 1000, restarts: 1 });
     expect(state.agents[WS]!.error).toBe('exit 1');
     state = upsertAgent(state, WS, { status: 'ready', error: undefined, retryInMs: undefined });
@@ -325,6 +330,14 @@ describe('localModel reducers', () => {
     state = removeWorkspace(state, WS);
     expect(state.agents[WS]).toBeUndefined();
     expect(Object.keys(state.sessions)).toEqual(['keep']);
+  });
+
+  it('removeSession drops a known session and returns the same state for unknown ids', () => {
+    let state = withSession();
+    state = upsertSession(state, newSession({ id: 'other', workspace: WS }));
+    const removed = removeSession(state, SID);
+    expect(Object.keys(removed.sessions)).toEqual(['other']);
+    expect(removeSession(state, 'nope')).toBe(state);
   });
 
   it('emptyLocalState carries install guidance when the CLI is missing', () => {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { evaluateInShell, launchApp, readEvents, state, waitForEventCount } from './helpers';
+import { evaluateInShell, launchApp, readEvents, shellPage, state, waitForEventCount } from './helpers';
 
 // Mirrors LocalStateSchema in src/shared/ipc.ts (subset used by the assertions).
 type LocalState = {
@@ -15,7 +15,7 @@ type LocalState = {
     {
       status: string;
       protocolVersion?: number;
-      capabilities?: { loadSession: boolean; sessionList: boolean };
+      capabilities?: { loadSession: boolean; sessionList: boolean; sessionDelete: boolean };
       restarts: number;
       error?: string;
     }
@@ -52,6 +52,8 @@ type Hooks = {
   localLoadSession(workspace: string, sessionId: string): Promise<void>;
   localAgentPid(workspace: string): number | null;
   setSurface(value: 'cloud' | 'local' | 'settings'): void;
+  clipboardWrite(text: string): void;
+  clipboardRead(): string;
 };
 
 const FAKE_AGENT_CMD = 'node out/fixtures/fakeAcpAgent.cjs';
@@ -203,6 +205,7 @@ test('Local: fake agent with session/list + session/load — prompt, permission,
     DEVIN_WORKSPACES_LOCAL_AGENT_CMD: FAKE_AGENT_CMD,
     FAKE_ACP_LIST: '1',
     FAKE_ACP_LOAD: '1',
+    FAKE_ACP_DELETE: '1',
     FAKE_ACP_LINK_URL: linkUrl,
   });
   let agentPids: number[] = [];
@@ -218,7 +221,7 @@ test('Local: fake agent with session/list + session/load — prompt, permission,
     await expect.poll(async () => (await localState(app)).agents[ws]?.status).toBe('ready');
     let local = await localState(app);
     expect(local.agents[ws]?.protocolVersion).toBe(1);
-    expect(local.agents[ws]?.capabilities).toEqual({ loadSession: true, sessionList: true });
+    expect(local.agents[ws]?.capabilities).toEqual({ loadSession: true, sessionList: true, sessionDelete: true });
     expect(((await state(app)).settings as { workspaces: string[] }).workspaces).toContain(ws);
     await expect.poll(() => shellCount(app, '#agentBadge[data-status="ready"]')).toBe(1);
     await expect.poll(() => shellCount(app, `.ws-item[data-status="ready"]`)).toBe(1);
@@ -335,6 +338,54 @@ test('Local: fake agent with session/list + session/load — prompt, permission,
       ),
     ).toBe(true);
 
+    // Delete (sessionCapabilities.delete): caps badge, hover trash, inline
+    // confirm/cancel, running-refusal, and the agent's list no longer returns it.
+    expect(
+      ((await evaluateInShell(app, `document.getElementById('agentCaps')?.textContent`)) as string) ?? '',
+    ).toContain('delete yes');
+    const secondId = await newSession(app, ws);
+    await expect.poll(() => shellCount(app, `.session-item[data-session-id="${secondId}"]`)).toBe(1);
+    await expect.poll(() => shellCount(app, '.session-delete')).toBe(2);
+
+    const deleteButton = `.session-delete[data-session-id="${secondId}"]`;
+    // Click → inline confirm; Cancel keeps the session.
+    expect(await shellClick(app, deleteButton)).toBe(true);
+    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(1);
+    expect(await shellClick(app, '.session-delete-cancel')).toBe(true);
+    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(0);
+    expect(await shellCount(app, `.session-item[data-session-id="${secondId}"]`)).toBe(1);
+
+    // Re-open the confirm, then run a slow prompt on that session: deleting
+    // while running is refused through #localError.
+    expect(await shellClick(app, deleteButton)).toBe(true);
+    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(1);
+    await promptNoWait(app, secondId, 'please be slow');
+    await expect.poll(async () => (await localState(app)).sessions[secondId]?.running).toBe(true);
+    expect(await shellClick(app, '.session-delete-confirm')).toBe(true);
+    await expect
+      .poll(async () =>
+        evaluateInShell(app, `document.getElementById('localError')?.textContent ?? ''`),
+      )
+      .toBe('cancel the running prompt before deleting');
+    await app.evaluate(
+      (_e, id) => (globalThis as G).__devinworkspaces.localCancel(id as string),
+      secondId,
+    );
+    await expect.poll(async () => (await localState(app)).sessions[secondId]?.running).toBe(false);
+
+    // Confirm → row and state drop; the agent no longer lists it.
+    expect(await shellClick(app, deleteButton)).toBe(true);
+    await expect.poll(() => shellCount(app, '.session-delete-confirm')).toBe(1);
+    expect(await shellClick(app, '.session-delete-confirm')).toBe(true);
+    await expect.poll(() => shellCount(app, `.session-item[data-session-id="${secondId}"]`)).toBe(0);
+    await expect.poll(async () => (await localState(app)).sessions[secondId]).toBeUndefined();
+    const deleteEvents = (await readEvents(logFile)).filter(
+      (entry) => entry.event === 'session-delete',
+    );
+    expect(deleteEvents.some((entry) => (entry.detail as any)?.sessionId === secondId)).toBe(true);
+    const afterDelete = await listSessions(app, ws);
+    expect(afterDelete.map((entry) => entry.id)).not.toContain(secondId);
+
     // Markdown rendering must not trip the shell CSP (no inline styles/scripts).
     const consoleEvents = (await readEvents(logFile)).filter((entry) => entry.event === 'console-message');
     // (the pre-existing "frame-ancestors is ignored when delivered via <meta>" notice is not a violation)
@@ -377,7 +428,15 @@ test('Local: fake agent without list/load — local-index history, load error, c
     await setSurfaceLocal(app);
     const ws = await addWorkspace(app, workspace);
     await expect.poll(async () => (await localState(app)).agents[ws]?.status).toBe('ready');
-    expect((await localState(app)).agents[ws]?.capabilities).toEqual({ loadSession: false, sessionList: false });
+    expect((await localState(app)).agents[ws]?.capabilities).toEqual({
+      loadSession: false,
+      sessionList: false,
+      sessionDelete: false,
+    });
+    // No delete capability → the badge reports delete no and rows have no trash.
+    expect(
+      ((await evaluateInShell(app, `document.getElementById('agentCaps')?.textContent`)) as string) ?? '',
+    ).toContain('delete no');
     agentPids.push(await agentPid(app, ws));
 
     const sessionId = await newSession(app, ws);
@@ -401,6 +460,7 @@ test('Local: fake agent without list/load — local-index history, load error, c
     expect(
       (await evaluateInShell(app, `document.querySelector('.session-item .history-label').textContent`)) as string,
     ).toBe('history not supported by agent');
+    expect(await shellCount(app, '.session-delete')).toBe(0);
 
     // session/load is refused when the agent lacks loadSession.
     expect(await loadSession(app, ws, sessionId)).toBe('history not supported by agent');
@@ -444,6 +504,70 @@ test('Local: fake agent without list/load — local-index history, load error, c
     await waitForEventCount(logFile, 'window-close-complete', 2);
     await app.close();
     await expect.poll(() => agentPids.some(processAlive)).toBe(false);
+  } finally {
+    await app.close().catch(() => undefined);
+    for (const pid of agentPids) {
+      try {
+        process.kill(pid);
+      } catch {
+        // already gone
+      }
+    }
+    rmSync(profile, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Local composer: native editing shortcuts work (Ctrl+A/C/V/X/Z) — regression guard', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-composer-'));
+  const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_LOCAL_AGENT_CMD: FAKE_AGENT_CMD,
+  });
+  const agentPids: number[] = [];
+  try {
+    await waitForHooks(app);
+    await setSurfaceLocal(app);
+    const ws = await addWorkspace(app, workspace);
+    await expect.poll(async () => (await localState(app)).agents[ws]?.status).toBe('ready');
+    agentPids.push(await agentPid(app, ws));
+    const sessionId = await newSession(app, ws);
+    expect(sessionId).toBeTruthy();
+
+    const page = await shellPage(app);
+    await expect.poll(() => shellCount(app, `.session-item[data-session-id="${sessionId}"]`)).toBe(1);
+    expect(await shellClick(app, `.session-item[data-session-id="${sessionId}"]`)).toBe(true);
+    await page.waitForSelector('#composer:not([disabled])');
+    const composer = page.locator('#composer');
+    await composer.click();
+    await page.keyboard.type('clip text');
+
+    // Ctrl+A selects all; Ctrl+C writes the selection to the OS clipboard.
+    await page.keyboard.press('Control+a');
+    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), '__seed__');
+    await page.keyboard.press('Control+c');
+    await expect
+      .poll(async () => app.evaluate(() => (globalThis as G).__devinworkspaces.clipboardRead()))
+      .toBe('clip text');
+
+    // Ctrl+V pastes; Ctrl+X cuts; Ctrl+Z undoes.
+    await app.evaluate((_e, text) => (globalThis as G).__devinworkspaces.clipboardWrite(text as string), 'PASTED');
+    await page.keyboard.press('Control+a');
+    await page.keyboard.press('Control+v');
+    await expect.poll(async () => composer.inputValue()).toBe('PASTED');
+    await page.keyboard.press('Control+a');
+    await page.keyboard.press('Control+x');
+    await expect.poll(async () => composer.inputValue()).toBe('');
+    await expect
+      .poll(async () => app.evaluate(() => (globalThis as G).__devinworkspaces.clipboardRead()))
+      .toBe('PASTED');
+    await page.keyboard.press('Control+z');
+    await expect.poll(async () => composer.inputValue()).toBe('PASTED');
+
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await waitForEventCount(logFile, 'window-close-complete', 1);
+    await app.close();
   } finally {
     await app.close().catch(() => undefined);
     for (const pid of agentPids) {
