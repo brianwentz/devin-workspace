@@ -5,6 +5,7 @@ import { auditCookies } from './cookieAudit';
 import { fromShell } from './ipcGuard';
 import { terminalHost } from './local/terminalHost';
 import type { Surface } from '../shared/ipc';
+import { identityResolver } from './identity';
 import { notificationStore } from './notifications';
 import { notifier, openNotification, openPrs, openSessionPr } from './notifier';
 import { updateAvailable, updateDownloaded } from './updater';
@@ -156,6 +157,12 @@ export function registerTestHooks(): void {
       simulateUpdateDownloaded: (version: string) => updateDownloaded(version),
       simulateUpdateAvailable: (version: string) => updateAvailable(version),
       panelOpen: () => state.notificationsPanelOpen,
+      // Service-user identity resolution (never the raw user id).
+      identity: () => identityResolver().current(),
+      identityReset: () => {
+        identityResolver().reset();
+        notifier.restart('identity-reset');
+      },
       notificationsOpen: (id: string) => openNotification(id),
       newSession: () => openNewSession(),
       // Devin Local (P4)

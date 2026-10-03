@@ -64,6 +64,17 @@ function hooks(app: ElectronApplication) {
     simulateUpdateAvailable: (version: string) =>
       app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.simulateUpdateAvailable(value), version),
     panelOpen: () => app.evaluate(() => (globalThis as any).__devinworkspaces.panelOpen()),
+    identity: () =>
+      app.evaluate(
+        () =>
+          (globalThis as any).__devinworkspaces.identity() as {
+            source: 'self' | 'cli' | 'inferred' | 'manual' | null;
+            maskedUserId: string | null;
+            cliOrgMismatch: boolean;
+          },
+      ),
+    identityReset: () =>
+      app.evaluate(() => (globalThis as any).__devinworkspaces.identityReset()),
     childViews: () => app.evaluate(() => (globalThis as any).__devinworkspaces.childViews()),
     loadDevinUrl: (url: string) =>
       app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.loadDevinUrl(value), url),
@@ -96,11 +107,12 @@ function hooks(app: ElectronApplication) {
   };
 }
 
-async function launch(profile: string, logFile: string) {
+async function launch(profile: string, logFile: string, extraEnv: Record<string, string> = {}) {
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
     DEVIN_WORKSPACES_API_BASE: fixtures.apiUrl,
     DEVIN_WORKSPACES_POLL_MS: String(POLL_MS),
     DEVIN_WORKSPACES_TEST_BANNER_MS: '1500',
+    ...extraEnv,
   });
   await expect.poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces))).toBe(true);
   return app;
@@ -116,6 +128,7 @@ test.beforeEach(() => {
   fixtures.api.setMode({ kind: 'ok' });
   fixtures.api.setSelf('pat_user');
   fixtures.api.setSessions([]);
+  fixtures.api.setIgnoreUserIds(false);
   fixtures.api.clearRequests();
 });
 
@@ -381,10 +394,15 @@ test('lists open PRs across my sessions with GitHub titles and opens them in the
   }
 });
 
-test('shows nothing for a service-user token', async () => {
+// The "resolution failed entirely" case: service-user token, CLI
+// unauthenticated (exit 1), no sessions observed, no manual override.
+test('shows nothing for a service-user token when no identity resolves', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
   const logFile = join(profile, 'events.jsonl');
-  const app = await launch(profile, logFile);
+  const app = await launch(profile, logFile, {
+    DEVIN_WORKSPACES_TEST_AUTH_STATUS_CMD: 'node out/fixtures/fakeAuthStatus.cjs',
+    FAKE_AUTH_STATUS_EXIT: '1',
+  });
   const h = hooks(app);
   try {
     fixtures.api.setSelf('service_user');
@@ -482,7 +500,10 @@ test('service-user token prunes leftovers and surfaces an identity notification'
       },
     ]),
   );
-  const app = await launch(profile, logFile);
+  const app = await launch(profile, logFile, {
+    DEVIN_WORKSPACES_TEST_AUTH_STATUS_CMD: 'node out/fixtures/fakeAuthStatus.cjs',
+    FAKE_AUTH_STATUS_EXIT: '1',
+  });
   const h = hooks(app);
   try {
     fixtures.api.setSelf('service_user');
@@ -807,5 +828,164 @@ test('settings shows the app version and an Update now button', async () => {
   } finally {
     await app.close().catch(() => undefined);
     rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('service-user token resolves the user from the Devin CLI sign-in', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-identity-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile, {
+    DEVIN_WORKSPACES_TEST_AUTH_STATUS_CMD: 'node out/fixtures/fakeAuthStatus.cjs',
+  });
+  const h = hooks(app);
+  try {
+    fixtures.api.setSelf('service_user');
+    fixtures.api.setSessions([
+      {
+        session_id: 'sess-mine',
+        title: 'Mine',
+        status: 'running',
+        status_detail: 'working',
+        updated_at: 3,
+        user_id: 'user-fixture',
+        pull_requests: [{ pr_url: `${fixtures.githubUrl}/acme/widgets/pull/42`, pr_state: 'open' }],
+      },
+      { session_id: 'sess-other', title: 'Not mine', status: 'running', updated_at: 5, user_id: 'user-other' },
+    ]);
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.identity.source).toBe('cli');
+    expect((await state(app)).notifications.noUserIdentity).toBe(false);
+    expect(await h.identity()).toMatchObject({
+      source: 'cli',
+      maskedUserId: 'user-…xture',
+      cliOrgMismatch: false,
+    });
+
+    // Only the CLI user's session is listed; the request carried the filter.
+    const prs = await h.listPrs();
+    expect(prs.map((pr) => pr.sessionId)).toEqual(['sess-mine']);
+    await expect.poll(async () => (await state(app)).notifications.openPrCount).toBe(1);
+    expect(
+      fixtures.api.requests().some((r) => r.path.includes('user_ids=user-fixture')),
+    ).toBe(true);
+
+    // Settings shows the resolved (masked) identity.
+    await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
+    await expect.poll(async () => (await state(app)).surface).toBe('settings');
+    await expect
+      .poll(async () =>
+        evaluateInShell(app, `document.getElementById('identityStatus')?.getAttribute('data-identity-source')`),
+      )
+      .toBe('cli');
+    const statusText = (await evaluateInShell(
+      app,
+      `document.getElementById('identityStatus')?.textContent`,
+    )) as string;
+    expect(statusText).toContain('user-…xture');
+    expect(statusText).toContain('CLI');
+
+    // The log records the resolution but never the raw user id or the token.
+    const resolves = (await readEvents(logFile)).filter((e) => e.event === 'identity-resolve');
+    expect(
+      resolves.some(
+        (e) => (e.detail as any).source === 'cli' && (e.detail as any).ok === true,
+      ),
+    ).toBe(true);
+    const logText = readFileSync(logFile, 'utf8');
+    expect(logText).not.toContain('user-fixture');
+    expect(logText).not.toContain(PAT);
+  } finally {
+    await quit(app, profile);
+  }
+});
+
+test('service-user token infers the user from an observed session', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-identity-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile, {
+    DEVIN_WORKSPACES_TEST_AUTH_STATUS_CMD: 'node out/fixtures/fakeAuthStatus.cjs',
+    FAKE_AUTH_STATUS_EXIT: '1',
+  });
+  const h = hooks(app);
+  try {
+    fixtures.api.setSelf('service_user');
+    fixtures.api.setSessions([
+      {
+        session_id: 'sess-mine',
+        title: 'Mine',
+        status: 'running',
+        status_detail: 'working',
+        updated_at: 3,
+        created_at: new Date().toISOString(),
+        user_id: 'user-fixture',
+      },
+    ]);
+    // Navigate before the token exists: the session the devin view is already
+    // on when the first poll runs must still be observed (pendingSessionId).
+    await h.loadDevinUrl(`${fixtures.devinUrl}/sessions/sess-mine`);
+    await expect.poll(async () => (await state(app)).currentSessionId).toBe('sess-mine');
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.identity.source).toBe('inferred');
+    expect((await state(app)).notifications.noUserIdentity).toBe(false);
+    expect((await h.identity()).maskedUserId).toBe('user-…xture');
+    const observed = (await readEvents(logFile)).filter((e) => e.event === 'identity-observe');
+    expect(observed.some((e) => (e.detail as any).accepted === true)).toBe(true);
+    expect(
+      fixtures.api.requests().some((r) => r.path.includes('user_ids=user-fixture')),
+    ).toBe(true);
+
+    // Reset clears the persisted identity and re-runs resolution — the devin
+    // view is still on sess-mine, so the restart re-observes it and infers
+    // the same user again.
+    await h.identityReset();
+    await waitForEvent(logFile, 'identity-reset');
+    await expect.poll(async () => (await h.identity()).source).toBe('inferred');
+    const observedAfter = (await readEvents(logFile)).filter((e) => e.event === 'identity-observe');
+    expect(
+      observedAfter.filter((e) => (e.detail as any).accepted === true).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
+  } finally {
+    await quit(app, profile);
+  }
+});
+
+test('an unconfirmed CLI identity is rejected and the manual override wins', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-identity-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile, {
+    DEVIN_WORKSPACES_TEST_AUTH_STATUS_CMD: 'node out/fixtures/fakeAuthStatus.cjs',
+    FAKE_AUTH_STATUS_USER_ID: 'user-ghost',
+  });
+  const h = hooks(app);
+  try {
+    fixtures.api.setSelf('service_user');
+    // The list ignores user_ids here, so the confirmation sees a non-empty
+    // page with no session owned by user-ghost -> rejected.
+    fixtures.api.setIgnoreUserIds(true);
+    fixtures.api.setSessions([
+      { session_id: 'sess-fixture', title: 'Mine', status: 'running', updated_at: 3, user_id: 'user-fixture' },
+    ]);
+    await h.setPat(PAT);
+    await waitForEvent(logFile, 'identity-rejected');
+    const rejected = (await readEvents(logFile)).filter((e) => e.event === 'identity-rejected');
+    expect((rejected[0]?.detail as any).source).toBe('cli');
+    await expect.poll(async () => (await state(app)).notifications.noUserIdentity).toBe(true);
+    expect((await h.identity()).source).toBeNull();
+
+    // The manual override resolves and confirms against the same page.
+    await evaluateInShell(
+      app,
+      `window.devinworkspaces.setSettings({ notifications: { userId: 'user-fixture' } })`,
+    );
+    await expect.poll(async () => (await state(app)).notifications.identity.source).toBe('manual');
+    expect((await state(app)).notifications.noUserIdentity).toBe(false);
+    expect(
+      fixtures.api.requests().some((r) => r.path.includes('user_ids=user-fixture')),
+    ).toBe(true);
+    expect((await h.identity()).maskedUserId).toBe('user-…xture');
+    expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
+  } finally {
+    await quit(app, profile);
   }
 });

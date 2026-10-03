@@ -33,9 +33,11 @@ export interface DevinSession {
   title: string | null;
   status: DevinSessionStatus;
   status_detail: string | null;
+  created_at: number;
   updated_at: number;
   url?: string | undefined;
   user_id: string | null;
+  service_user_id: string | null;
   pull_requests: DevinPullRequest[];
 }
 
@@ -97,13 +99,14 @@ export function normalizeSession(raw: unknown): DevinSession | null {
   const sessionId = str(record.session_id);
   const status = str(record.status);
   if (!sessionId || !status) return null;
-  const updatedRaw = record.updated_at;
-  const updatedAt =
-    typeof updatedRaw === 'number'
-      ? updatedRaw
-      : typeof updatedRaw === 'string'
-        ? Date.parse(updatedRaw) || 0
+  const timestamp = (value: unknown): number =>
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Date.parse(value) || 0
         : 0;
+  const updatedAt = timestamp(record.updated_at);
+  const createdAt = timestamp(record.created_at);
   const prs = Array.isArray(record.pull_requests) ? record.pull_requests : [];
   const pullRequests: DevinPullRequest[] = [];
   for (const item of prs) {
@@ -117,9 +120,11 @@ export function normalizeSession(raw: unknown): DevinSession | null {
     title: str(record.title),
     status,
     status_detail: str(record.status_detail),
+    created_at: createdAt,
     updated_at: updatedAt,
     url: str(record.url) ?? undefined,
     user_id: str(record.user_id),
+    service_user_id: str(record.service_user_id),
     pull_requests: pullRequests,
   };
 }
@@ -182,6 +187,15 @@ export class DevinApiClient {
     const hasNextPage =
       typeof record.has_next_page === 'boolean' ? record.has_next_page : nextCursor !== null;
     return { sessions, nextCursor: hasNextPage ? nextCursor : null, hasNextPage };
+  }
+
+  // GET /v3/organizations/{org}/sessions/{devin_id} — used by service-user
+  // identity inference (the observed session's user_id + created_at).
+  async getSession(orgId: string, sessionId: string): Promise<DevinSession> {
+    const path = `/v3/organizations/${encodeURIComponent(orgId)}/sessions/${encodeURIComponent(sessionId)}`;
+    const session = normalizeSession(await this.request(path));
+    if (!session) throw new DevinApiError('parse', 'session response did not parse');
+    return session;
   }
 
   private async request(path: string): Promise<unknown> {

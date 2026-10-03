@@ -14,7 +14,9 @@ import {
   scopeLabel,
 } from '../core/notifyModel';
 import { sessionUrl } from '../core/sessions';
+import { confirmIdentity, type IdentitySource } from '../core/identityModel';
 import type { SessionPr, Settings } from '../shared/ipc';
+import { identityResolver } from './identity';
 import { log } from './log';
 import { route } from '../core/linkRouter';
 import { prTitles } from './prTitles';
@@ -67,7 +69,13 @@ class Notifier {
   private failures = 0;
   private orgId: string | null = null;
   private userId: string | null = null;
+  private identitySource: IdentitySource | null = null;
+  private identityConfirmed = false;
   private identityNotified = false;
+  private observedSessionIds = new Set<string>();
+  private orgMismatchLogged = false;
+  private pollAgain = false;
+  private pendingSessionId: string | null = null;
   private generation = 0;
   private notBefore = 0;
 
@@ -99,7 +107,13 @@ class Notifier {
     this.stop(reason);
     this.orgId = null;
     this.userId = null;
+    this.identitySource = null;
+    this.identityConfirmed = false;
     this.identityNotified = false;
+    this.observedSessionIds.clear();
+    this.orgMismatchLogged = false;
+    this.pollAgain = false;
+    this.pendingSessionId = null;
     this.failures = 0;
     this.notBefore = 0;
     state.apiSessions = [];
@@ -108,18 +122,69 @@ class Notifier {
       authError: false,
       lastError: null,
       noUserIdentity: false,
+      identity: { source: null, resolved: false },
     };
+    identityResolver().resetGeneration();
     this.start();
+    // Re-observe the session the devin view is already on — a token/settings
+    // change shouldn't lose the inference signal for it.
+    if (state.currentSessionId) this.pendingSessionId = state.currentSessionId;
     notifyShell();
   }
 
   onSettingsChanged(previous: Settings, next: Settings): void {
     if (
       previous.apiBase !== next.apiBase ||
-      previous.notifications.orgId !== next.notifications.orgId
+      previous.notifications.orgId !== next.notifications.orgId ||
+      previous.notifications.userId !== next.notifications.userId ||
+      previous.local.devinPath !== next.local.devinPath
     ) {
       this.restart('settings-changed');
     }
+  }
+
+  // Service-user identity inference: when the devin view navigates to a
+  // session while we have no user id yet, fetch that session and feed its
+  // user_id/created_at into the observation list.
+  onSessionChanged(sessionId: string | null): void {
+    if (!sessionId || this.userId !== null) return;
+    const pat = state.secrets?.getPat() ?? null;
+    if (!pat) return;
+    // orgId not resolved yet (first poll still in flight): remember the
+    // session and observe it once poll() has an org id.
+    if (!this.orgId) {
+      this.pendingSessionId = sessionId;
+      return;
+    }
+    if (this.observedSessionIds.has(sessionId)) return;
+    this.observedSessionIds.add(sessionId);
+    const client = new DevinApiClient({
+      apiBase: apiBase(),
+      token: pat,
+      fetch: (url, init) => fetch(url, { ...init, signal: init.signal ?? null }),
+    });
+    const orgId = this.orgId;
+    void client
+      .getSession(orgId, sessionId)
+      .then((session) => {
+        const resolved = identityResolver().observe(sessionId, {
+          user_id: session.user_id,
+          created_at: session.created_at,
+        });
+        if (resolved) {
+          // A poll may be in flight — flag a follow-up so the resolved
+          // identity is picked up immediately, not on the idle schedule.
+          this.pollAgain = true;
+          void this.poll();
+        }
+      })
+      .catch((error: unknown) => {
+        const apiError = error instanceof DevinApiError ? error : null;
+        if (apiError?.status === 404) return;
+        log('shell', 'identity-observe-error', {
+          detail: { kind: apiError?.kind ?? 'unknown', status: apiError?.status ?? null },
+        });
+      });
   }
 
   pollNow(): Promise<void> {
@@ -151,6 +216,7 @@ class Notifier {
       return;
     }
     this.inFlight = true;
+    this.pollAgain = false;
     const base = pollBase();
     let delay = base.idle;
     const started = Date.now();
@@ -163,7 +229,12 @@ class Notifier {
       if (!this.orgId) {
         const override = state.settings?.current.notifications.orgId?.trim();
         const self = await client.getSelf();
-        this.userId = self.userId;
+        if (self.userId) {
+          this.userId = self.userId;
+          this.identitySource = 'self';
+          this.identityConfirmed = true;
+          identityResolver().setSelfIdentity(self.userId);
+        }
         // First poll of this identity resolution: drop persisted entries that
         // were derived for a different token user (or a pre-owner build).
         notificationStore().reconcile(this.userId);
@@ -175,15 +246,45 @@ class Notifier {
           throw new DevinApiError('http', 'no org id for this token (set notifications.orgId)');
         }
         log('shell', 'notifier-org', { detail: { source: override ? 'settings' : 'self' } });
+        // Observe the session the devin view was already on when this poll ran.
+        if (this.pendingSessionId) {
+          const pending = this.pendingSessionId;
+          this.pendingSessionId = null;
+          this.onSessionChanged(pending);
+        }
+      }
+      // Service-user token: resolve the signed-in user (manual → CLI →
+      // persisted → inferred). Retried every poll while unresolved — cheap
+      // because the CLI result is cached per generation.
+      if (this.userId === null) {
+        const resolved = await identityResolver().resolve({
+          manualUserId: state.settings?.current.notifications.userId ?? '',
+          devinPathOverride: state.settings?.current.local.devinPath,
+        });
+        if (resolved) {
+          this.userId = resolved.userId;
+          this.identitySource = resolved.source;
+          this.identityConfirmed = resolved.source === 'manual';
+          notificationStore().reconcile(this.userId);
+        }
+        // Once per generation: does the CLI's primary org match the token's?
+        const cliOrg = identityResolver().cliOrgId();
+        if (cliOrg && !this.orgMismatchLogged) {
+          this.orgMismatchLogged = true;
+          const matches = cliOrg === this.orgId;
+          identityResolver().setCliOrgMismatch(!matches);
+          log('shell', 'notifier-org-mismatch', { detail: { cliMatchesToken: matches } });
+        }
       }
       if (!this.userId) {
-        // Service-user token: no user identity, so "my sessions" is empty.
+        // Service-user token with no resolvable identity: "my sessions" is empty.
         state.apiSessions = [];
         state.notifications = {
           lastPollAt: new Date().toISOString(),
           authError: false,
           lastError: null,
           noUserIdentity: true,
+          identity: { source: null, resolved: false },
         };
         if (!this.identityNotified) {
           this.identityNotified = true;
@@ -192,8 +293,8 @@ class Notifier {
             sessionId: null,
             ownerUserId: null,
             sessionTitle: 'Devin Workspaces',
-            title: 'API token has no user identity',
-            body: 'This is a service-user token, so no sessions or notifications are shown. Use a personal API token.',
+            title: 'Could not determine your user',
+            body: 'Could not determine your user — sign in with the Devin CLI (devin auth login) or set your user id in Settings.',
             createdAt: Date.now(),
           });
         }
@@ -206,6 +307,26 @@ class Notifier {
         first: PAGE_SIZE,
         userIds: [this.userId],
       });
+      // First poll after a cli/inferred resolution must confirm the id: a
+      // matching session, or a genuinely idle user (empty single page).
+      if (!this.identityConfirmed && !confirmIdentity(this.userId, page)) {
+        const rejectedSource = this.identitySource;
+        if (rejectedSource) identityResolver().reject(rejectedSource);
+        this.userId = null;
+        this.identitySource = null;
+        state.apiSessions = [];
+        state.notifications = {
+          lastPollAt: new Date().toISOString(),
+          authError: false,
+          lastError: null,
+          noUserIdentity: true,
+          identity: { source: null, resolved: false },
+        };
+        delay = 0;
+        log('shell', 'poll', { detail: { sessions: 0, noUserIdentity: true, rejected: true } });
+        return;
+      }
+      this.identityConfirmed = true;
       // Defensive: keep only the token user's sessions even if the server
       // ignores user_ids.
       const sessions = page.sessions.filter((session) => session.user_id === this.userId);
@@ -253,6 +374,7 @@ class Notifier {
         authError: false,
         lastError: null,
         noUserIdentity: false,
+        identity: { source: this.identitySource, resolved: true },
       };
       delay = pollInterval(sessions, base);
       log('shell', 'poll', {
@@ -300,7 +422,12 @@ class Notifier {
     } finally {
       this.inFlight = false;
       notifyShell();
-      this.schedule(delay);
+      if (this.pollAgain) {
+        this.pollAgain = false;
+        this.schedule(0);
+      } else {
+        this.schedule(delay);
+      }
     }
   }
 

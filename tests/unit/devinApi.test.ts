@@ -159,9 +159,11 @@ describe('normalizeSession', () => {
       title: null,
       status: 'running',
       status_detail: null,
+      created_at: 1,
       updated_at: 2,
       url: 'https://app.devin.ai/sessions/s1',
       user_id: null,
+      service_user_id: null,
       pull_requests: [{ pr_url: 'https://github.com/o/r/pull/1', pr_state: 'open' }],
     });
     expect(normalizeSession({ status: 'running' })).toBeNull();
@@ -170,6 +172,57 @@ describe('normalizeSession', () => {
 
   it('keeps user_id when present', () => {
     expect(normalizeSession(session('s2', { user_id: 'user-9' }))?.user_id).toBe('user-9');
+  });
+
+  it('normalizes an ISO created_at to ms and keeps service_user_id', () => {
+    const normalized = normalizeSession(
+      session('s3', {
+        created_at: '2026-01-02T03:04:05Z',
+        service_user_id: 'svc-9',
+        user_id: 'user-9',
+      }),
+    );
+    expect(normalized?.created_at).toBe(Date.parse('2026-01-02T03:04:05Z'));
+    expect(normalized?.service_user_id).toBe('svc-9');
+  });
+});
+
+describe('getSession', () => {
+  it('GETs the single-session path and normalizes the item', async () => {
+    const created = '2026-01-02T03:04:05Z';
+    const { fetch, calls } = stubFetch(() => ({
+      status: 200,
+      body: session('sess-9', {
+        created_at: created,
+        user_id: 'user-9',
+        service_user_id: 'svc-9',
+      }),
+    }));
+    const client = new DevinApiClient({ apiBase: 'https://api.devin.ai', token: 't', fetch });
+    const result = await client.getSession('org-1', 'sess-9');
+    expect(calls[0]?.url).toBe(
+      'https://api.devin.ai/v3/organizations/org-1/sessions/sess-9',
+    );
+    expect(result.session_id).toBe('sess-9');
+    expect(result.user_id).toBe('user-9');
+    expect(result.service_user_id).toBe('svc-9');
+    expect(result.created_at).toBe(Date.parse(created));
+  });
+
+  it('maps a 404 to an http error with status 404', async () => {
+    const { fetch } = stubFetch(() => ({ status: 404, body: { title: 'Not Found' } }));
+    const client = new DevinApiClient({ apiBase: 'https://api.devin.ai', token: 't', fetch });
+    const error = (await client.getSession('org-1', 'nope').catch((e: unknown) => e)) as DevinApiError;
+    expect(error).toBeInstanceOf(DevinApiError);
+    expect(error.kind).toBe('http');
+    expect(error.status).toBe(404);
+  });
+
+  it('maps an unparseable body to a parse error', async () => {
+    const { fetch } = stubFetch(() => ({ status: 200, body: { nope: true } }));
+    const client = new DevinApiClient({ apiBase: 'https://api.devin.ai', token: 't', fetch });
+    const error = (await client.getSession('org-1', 's').catch((e: unknown) => e)) as DevinApiError;
+    expect(error.kind).toBe('parse');
   });
 });
 

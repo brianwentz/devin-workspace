@@ -24,6 +24,7 @@ import {
   TabsTabMenuArg,
   type Settings,
 } from '../shared/ipc';
+import { identityResolver } from './identity';
 import { log } from './log';
 import { notificationStore } from './notifications';
 import { notifier, openNotification, openPrs, popupPrMenu } from './notifier';
@@ -269,6 +270,13 @@ function setupExtrasIpc(): void {
   guardedOn(IpcChannels.notificationsPanel, (_e, arg: unknown) => {
     const parsed = NotificationPanelArg.safeParse(arg);
     if (parsed.success) setNotificationsPanel(parsed.data.open);
+  });
+  // Service-user identity: read the resolved source + masked id; reset clears
+  // identity.json and re-runs resolution (never returns the raw user id).
+  guardedHandle(IpcChannels.notificationsIdentity, () => identityResolver().current());
+  guardedOn(IpcChannels.notificationsIdentityReset, () => {
+    identityResolver().reset();
+    notifier.restart('identity-reset');
   });
   guardedOn(IpcChannels.updateInstall, () => {
     if (hasDownloadedUpdate()) installUpdate();

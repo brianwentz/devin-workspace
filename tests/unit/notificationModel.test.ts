@@ -42,8 +42,10 @@ const session = (
   title: `t-${id}`,
   status,
   status_detail: detail,
+  created_at: 0,
   updated_at: 0,
   user_id: null,
+  service_user_id: null,
   pull_requests: prs,
 });
 
