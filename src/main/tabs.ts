@@ -489,7 +489,7 @@ export class TabManager {
       this.log('tab-restore', { id: tabId }, entry.url);
     }
     entry.loading = true;
-    view.setBackgroundColor('#ffffffff');
+    view.setBackgroundColor('#111827');
     const contents = view.webContents;
 
     contents.on('page-title-updated', (_event, title) => {

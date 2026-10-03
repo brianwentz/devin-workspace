@@ -196,6 +196,7 @@ async function createWindow(): Promise<void> {
     title: 'Devin Workspaces',
     show: true,
     titleBarStyle: 'hidden',
+    backgroundColor: '#111827',
     titleBarOverlay: { color: '#101722', symbolColor: '#e8edf5', height: 36 },
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 12, y: 10 } } : {}),
   });
@@ -244,7 +245,7 @@ async function createWindow(): Promise<void> {
     },
   });
   state.shellView.setBackgroundColor('#111827');
-  state.devinView.setBackgroundColor('#ffffffff');
+  state.devinView.setBackgroundColor('#111827');
   state.windowRef.contentView.addChildView(state.shellView);
   state.windowRef.contentView.addChildView(state.devinView);
   attachRouting(state.shellView.webContents, 'shell');

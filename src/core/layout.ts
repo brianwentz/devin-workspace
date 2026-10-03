@@ -178,9 +178,9 @@ export function computeBounds(
     },
     splitter: {
       x: splitterX,
-      y: 0,
+      y: TITLE_BAR_HEIGHT,
       width: Math.min(SPLITTER_WIDTH, Math.max(0, width - splitterX)),
-      height,
+      height: Math.max(0, height - TITLE_BAR_HEIGHT),
     },
     ghTab: {
       x: paneX,

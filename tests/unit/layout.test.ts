@@ -31,7 +31,7 @@ describe('computeBounds', () => {
     const bounds = computeBounds({ width: 1400, height: 900 }, layout({ paneFraction: F560 }));
     expect(bounds.rail).toEqual({ x: 0, y: 0, width: 56, height: 900 });
     expect(bounds.titleBar).toEqual({ x: 0, y: 0, width: 1400, height: 36 });
-    expect(bounds.splitter).toEqual({ x: 834, y: 0, width: 6, height: 900 });
+    expect(bounds.splitter).toEqual({ x: 834, y: 36, width: 6, height: 864 });
     expect(bounds.devin).toEqual({ x: 56, y: 36, width: 778, height: 864 });
     expect(bounds.ghTab).toEqual({ x: 840, y: 36, width: 560, height: 864 });
     expect(bounds.terminal).toBeNull();
