@@ -23,7 +23,7 @@ import { notifyShell } from './window';
 
 const AppNotificationSchema = z.object({
   id: z.string(),
-  kind: z.enum(['waiting', 'approval', 'blocked', 'finished', 'pr-opened', 'pr-completed', 'update', 'identity']),
+  kind: z.enum(['waiting', 'approval', 'blocked', 'finished', 'pr-opened', 'pr-completed', 'update', 'identity', 'auth']),
   sessionId: z.string().nullable(),
   ownerUserId: z.string().nullable().optional(),
   sessionTitle: z.string(),
@@ -37,6 +37,9 @@ const AppNotificationSchema = z.object({
 });
 
 const SAVE_DEBOUNCE_MS = 300;
+
+// 'update'/'identity'/'auth' entries are runtime-only — never persisted.
+const RUNTIME_ONLY = new Set<AppNotification['kind']>(['update', 'identity', 'auth']);
 
 // In-app notification center state: persisted history (minus 'update' entries,
 // which are runtime-only), the taskbar overlay count, and the title-bar banner
@@ -161,8 +164,7 @@ export class NotificationStore {
       this.saveTimer = null;
       try {
         mkdirSync(join(this.file, '..'), { recursive: true });
-        // 'update'/'identity' entries are runtime-only — never persisted.
-        const stored = this.list.filter((item) => item.kind !== 'update' && item.kind !== 'identity');
+        const stored = this.list.filter((item) => !RUNTIME_ONLY.has(item.kind));
         writeFileSync(this.file, JSON.stringify(stored.slice(0, MAX_NOTIFICATIONS)));
       } catch (error) {
         log('shell', 'notifications-save-error', { detail: { message: String(error) } });
@@ -178,7 +180,7 @@ export class NotificationStore {
     }
     try {
       mkdirSync(join(this.file, '..'), { recursive: true });
-      const stored = this.list.filter((item) => item.kind !== 'update' && item.kind !== 'identity');
+      const stored = this.list.filter((item) => !RUNTIME_ONLY.has(item.kind));
       writeFileSync(this.file, JSON.stringify(stored.slice(0, MAX_NOTIFICATIONS)));
     } catch {
       // best effort at shutdown

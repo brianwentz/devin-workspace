@@ -51,6 +51,10 @@ const localApi = {
     >,
   localSessionDelete: (sessionId: string) =>
     ipcRenderer.invoke(IpcChannels.localSessionDelete, { sessionId }) as Promise<LocalResult<null>>,
+  localSessionDeleteAll: (workspace: string) =>
+    ipcRenderer.invoke(IpcChannels.localSessionDeleteAll, { workspace }) as Promise<
+      LocalResult<{ deleted: number }>
+    >,
   localPrompt: (sessionId: string, text: string) =>
     ipcRenderer.invoke(IpcChannels.localPrompt, { sessionId, text }) as Promise<LocalResult<string>>,
   localCancel: (sessionId: string) =>

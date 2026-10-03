@@ -997,3 +997,129 @@ test('an unconfirmed CLI identity is rejected and the manual override wins', asy
     await quit(app, profile);
   }
 });
+
+test('a rejected token raises an auth notification and a rail warning; focus re-polls', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  const pollErrors = async () => (await readEvents(logFile)).filter((e) => e.event === 'poll-error');
+  try {
+    fixtures.api.setSessions([
+      { session_id: 'sess-1', status: 'running', status_detail: 'working', updated_at: 1 },
+    ]);
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
+    expect((await state(app)).notifications.authError).toBe(false);
+
+    fixtures.api.setMode({ kind: 'status', status: 403 });
+    await expect.poll(async () => (await state(app)).notifications.authError).toBe(true);
+    expect((await state(app)).notifications.lastError).toBe('forbidden');
+
+    // Exactly one 'auth' entry, even across repeated poll errors.
+    await expect.poll(async () => (await pollErrors()).length).toBeGreaterThanOrEqual(2);
+    const entries = (await h.notifications()) as {
+      kind: string;
+      sessionId: string | null;
+      title: string;
+      body: string;
+    }[];
+    const authEntries = entries.filter((e) => e.kind === 'auth');
+    expect(authEntries).toHaveLength(1);
+    expect(authEntries[0]?.sessionId).toBeNull();
+    expect(authEntries[0]?.title).toBe('Devin API token rejected');
+    expect(authEntries[0]?.body).not.toContain(PAT);
+
+    // The rail bell shows the amber warning dot.
+    await expect
+      .poll(async () => evaluateInShell(app, `document.getElementById('pollerWarning')?.getAttribute('title')`))
+      .toBe('Devin API token rejected — open Settings');
+
+    // Restarting (same token) clears the cached org id, so the next poll fails
+    // inside /v3/self — every poll-error since is tagged op 'self'.
+    await h.setPat(PAT);
+    const before = (await pollErrors()).length;
+    await expect.poll(async () => (await pollErrors()).length).toBeGreaterThan(before);
+    const since = (await pollErrors()).slice(before);
+    expect(since.length).toBeGreaterThan(0);
+    expect(since.every((e) => (e.detail as any).op === 'self')).toBe(true);
+
+    // Recovery via the focus re-poll: ok mode + a focus event drops the
+    // backoff and clears authError + the rail warning.
+    fixtures.api.setMode({ kind: 'ok' });
+    await app.evaluate(({ BaseWindow }) => {
+      for (const win of BaseWindow.getAllWindows()) win.emit('focus');
+    });
+    await waitForEvent(logFile, 'notifier-focus-poll');
+    await expect.poll(async () => (await state(app)).notifications.authError).toBe(false);
+    await expect
+      .poll(async () => evaluateInShell(app, `Boolean(document.getElementById('pollerWarning'))`))
+      .toBe(false);
+    expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
+  } finally {
+    await quit(app, profile);
+  }
+});
+
+test('catches up PRs that appeared while the poller was down, across a restart', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-notify-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  const events = async (name: string) => (await readEvents(logFile)).filter((e) => e.event === name);
+  const prA = `${fixtures.githubUrl}/acme/widgets/pull/11`;
+  const prB = `${fixtures.githubUrl}/acme/widgets/pull/12`;
+  const session = (prs: string[]) => ({
+    session_id: 'sess-1',
+    title: 'PR session',
+    status: 'running',
+    status_detail: 'working',
+    updated_at: 3,
+    pull_requests: prs.map((pr_url) => ({ pr_url, pr_state: 'open' })),
+  });
+  try {
+    fixtures.api.setSessions([session([prA])]);
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
+    // Baseline poll with an empty ledger: nothing opens for A. One more
+    // successful poll makes sure A is recorded in the ledger.
+    await expect.poll(async () => (await events('poll')).length).toBeGreaterThanOrEqual(2);
+    expect(await events('pr-auto-open')).toHaveLength(0);
+    expect(existsSync(join(profile, 'pr-ledger.json'))).toBe(true);
+
+    // The API goes down; B appears on the session while unreachable.
+    fixtures.api.setMode({ kind: 'status', status: 403 });
+    fixtures.api.setSessions([session([prA, prB])]);
+    await expect.poll(async () => (await pollErrorsCount())).toBeGreaterThanOrEqual(1);
+    async function pollErrorsCount() {
+      return (await events('poll-error')).length;
+    }
+
+    // Quit and relaunch with the same profile (ledger persisted). The first
+    // poll after restart is a baseline again — B opens as a catch-up, A does
+    // not.
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await app.close().catch(() => undefined);
+    fixtures.api.setMode({ kind: 'ok' });
+    const app2 = await launch(profile, logFile);
+    try {
+      await waitForEvent(logFile, 'pr-catch-up');
+      const opens = await events('pr-auto-open');
+      const forB = opens.filter((e) => e.url === prB);
+      expect(forB).toHaveLength(1);
+      expect((forB[0]?.detail as any).catchUp).toBe(true);
+      expect((forB[0]?.detail as any).sessionId).toBe('sess-1');
+      expect(opens.filter((e) => e.url === prA)).toHaveLength(0);
+      const catchUps = await events('pr-catch-up');
+      expect(catchUps).toHaveLength(1);
+      expect((catchUps[0]?.detail as any).count).toBe(1);
+      expect(existsSync(join(profile, 'pr-ledger.json'))).toBe(true);
+      expect(readFileSync(logFile, 'utf8')).not.toContain(PAT);
+    } finally {
+      await app2.close().catch(() => undefined);
+    }
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});

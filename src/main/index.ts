@@ -20,6 +20,7 @@ import { registerTestHooks } from './testHooks';
 import { keepAliveMs, TabManager } from './tabs';
 import { identityResolver } from './identity';
 import { notificationStore, notificationsFlush } from './notifications';
+import { prLedger } from './prLedger';
 import { hasDownloadedUpdate, quitAndInstall, restoreUpdateEntry } from './updater';
 import {
   applyLayout,
@@ -178,6 +179,7 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
 async function createWindow(): Promise<void> {
   state.settings = new SettingsStore(userData);
   notificationStore(userData);
+  prLedger(userData);
   identityResolver(userData, testMode);
   state.secrets = new SecretStore(userData);
   await state.secrets.load();
@@ -300,6 +302,8 @@ async function createWindow(): Promise<void> {
     });
   });
   state.windowRef.on('resize', applyLayout);
+  // Re-poll immediately on focus while the poller is in error (backoff drop).
+  state.windowRef.on('focus', () => notifier.onWindowFocus());
   state.windowRef.on('close', (event) => {
     if (state.shuttingDown) return;
     event.preventDefault();
