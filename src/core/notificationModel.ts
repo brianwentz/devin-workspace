@@ -12,7 +12,8 @@ export type NotificationKind =
   | 'pr-opened'
   | 'pr-completed'
   | 'update'
-  | 'identity';
+  | 'identity'
+  | 'auth';
 
 export interface AppNotification {
   id: string;
@@ -109,6 +110,7 @@ const STATUS_BODY: Record<NotificationKind, string> = {
   'pr-completed': '',
   update: '',
   identity: '',
+  auth: '',
 };
 
 const sessionTitleOf = (s: DevinSession) => s.title?.trim() || s.session_id;

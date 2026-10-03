@@ -143,3 +143,36 @@ export function newPullRequests(
   return out;
 }
 
+export const CATCH_UP_MAX_AGE_MS = 24 * 60 * 60_000;
+export const CATCH_UP_LIMIT = 10;
+
+// PRs present on non-archived sessions that were never seen by any earlier
+// successful poll (persisted ledger) — used on a baseline poll (empty
+// `previous`) so an outage or restart doesn't swallow new PRs. Only when the
+// ledger is recent (lastGoodAt within maxAgeMs); open/null state only;
+// sessions by updated_at desc; capped.
+export function catchUpPullRequests(
+  sessions: readonly DevinSession[],
+  seen: ReadonlySet<string>,
+  opts: { lastGoodAt: number; now: number; maxAgeMs?: number; limit?: number },
+): NewPullRequest[] {
+  const maxAgeMs = opts.maxAgeMs ?? CATCH_UP_MAX_AGE_MS;
+  const limit = opts.limit ?? CATCH_UP_LIMIT;
+  if (opts.lastGoodAt <= 0 || opts.now - opts.lastGoodAt > maxAgeMs) return [];
+  const sorted = [...sessions]
+    .filter((session) => session.status !== 'archived')
+    .sort((a, b) => b.updated_at - a.updated_at);
+  const out: NewPullRequest[] = [];
+  const emitted = new Set<string>();
+  for (const session of sorted) {
+    for (const pr of session.pull_requests) {
+      if (pr.pr_state !== 'open' && pr.pr_state !== null) continue;
+      if (seen.has(pr.pr_url) || emitted.has(pr.pr_url)) continue;
+      emitted.add(pr.pr_url);
+      out.push({ sessionId: session.session_id, url: pr.pr_url });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+

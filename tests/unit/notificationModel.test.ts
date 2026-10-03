@@ -24,6 +24,7 @@ const ENABLED: Record<NotificationKind, boolean> = {
   'pr-completed': true,
   update: true,
   identity: true,
+  auth: true,
 };
 const ctx = (over: Partial<DeriveContext> = {}): DeriveContext => ({
   enabled: ENABLED,

@@ -103,6 +103,26 @@ describe('DevinApiClient', () => {
     expect(calls[0]?.url).toContain('first=200');
   });
 
+  it('tags errors with the failing operation', async () => {
+    const forbidden = stubFetch(() => ({ status: 403 }));
+    const clientA = new DevinApiClient({ apiBase: 'x://a', token: 't', fetch: forbidden.fetch });
+    const selfError = (await clientA.getSelf().catch((e: unknown) => e)) as DevinApiError;
+    expect(selfError.kind).toBe('forbidden');
+    expect(selfError.op).toBe('self');
+
+    const server = stubFetch(() => ({ status: 500 }));
+    const clientB = new DevinApiClient({ apiBase: 'x://a', token: 't', fetch: server.fetch });
+    const listError = (await clientB.listSessions({ orgId: 'o' }).catch((e: unknown) => e)) as DevinApiError;
+    expect(listError.kind).toBe('http');
+    expect(listError.op).toBe('list');
+
+    const notObject = stubFetch(() => ({ status: 200, body: [1, 2] }));
+    const clientC = new DevinApiClient({ apiBase: 'x://a', token: 't', fetch: notObject.fetch });
+    const parseError = (await clientC.listSessions({ orgId: 'o' }).catch((e: unknown) => e)) as DevinApiError;
+    expect(parseError.kind).toBe('parse');
+    expect(parseError.op).toBe('list');
+  });
+
   it('maps 401 to an auth error', async () => {
     const { fetch } = stubFetch(() => ({ status: 401, body: { detail: 'nope' } }));
     const client = new DevinApiClient({ apiBase: 'https://api.devin.ai', token: 't', fetch });

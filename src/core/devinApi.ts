@@ -55,21 +55,27 @@ export interface SelfInfo {
 
 export type DevinApiErrorKind = 'auth' | 'forbidden' | 'rateLimited' | 'http' | 'network' | 'parse';
 
+// Which call produced the error — lets the poller tell "the token was
+// rejected" ('self'/'list') apart from a single-session lookup failure.
+export type DevinApiOp = 'self' | 'list' | 'session';
+
 export class DevinApiError extends Error {
   readonly kind: DevinApiErrorKind;
   readonly status: number | null;
   readonly retryAfterMs: number | null;
+  readonly op: DevinApiOp | null;
 
   constructor(
     kind: DevinApiErrorKind,
     message: string,
-    options: { status?: number | null; retryAfterMs?: number | null } = {},
+    options: { status?: number | null; retryAfterMs?: number | null; op?: DevinApiOp | null } = {},
   ) {
     super(message);
     this.name = 'DevinApiError';
     this.kind = kind;
     this.status = options.status ?? null;
     this.retryAfterMs = options.retryAfterMs ?? null;
+    this.op = options.op ?? null;
   }
 }
 
@@ -150,7 +156,7 @@ export class DevinApiClient {
   }
 
   async getSelf(): Promise<SelfInfo> {
-    const body = await this.request('/v3/self');
+    const body = await this.request('/v3/self', 'self');
     const record = asRecord(body);
     return {
       principalType: record ? str(record.principal_type) : null,
@@ -170,16 +176,16 @@ export class DevinApiClient {
     if (options.cursor) params.set('after', options.cursor);
     for (const userId of options.userIds ?? []) params.append('user_ids', userId);
     const path = `/v3/organizations/${encodeURIComponent(options.orgId)}/sessions?${params}`;
-    const body = await this.request(path);
+    const body = await this.request(path, 'list');
     const record = asRecord(body);
-    if (!record) throw new DevinApiError('parse', 'sessions response is not an object');
+    if (!record) throw new DevinApiError('parse', 'sessions response is not an object', { op: 'list' });
     // Accept `items` (documented) and `sessions` (defensive alias).
     const rawItems = Array.isArray(record.items)
       ? record.items
       : Array.isArray(record.sessions)
         ? record.sessions
         : null;
-    if (!rawItems) throw new DevinApiError('parse', 'sessions response has no items array');
+    if (!rawItems) throw new DevinApiError('parse', 'sessions response has no items array', { op: 'list' });
     const sessions = rawItems
       .map(normalizeSession)
       .filter((item): item is DevinSession => item !== null);
@@ -193,12 +199,12 @@ export class DevinApiClient {
   // identity inference (the observed session's user_id + created_at).
   async getSession(orgId: string, sessionId: string): Promise<DevinSession> {
     const path = `/v3/organizations/${encodeURIComponent(orgId)}/sessions/${encodeURIComponent(sessionId)}`;
-    const session = normalizeSession(await this.request(path));
-    if (!session) throw new DevinApiError('parse', 'session response did not parse');
+    const session = normalizeSession(await this.request(path, 'session'));
+    if (!session) throw new DevinApiError('parse', 'session response did not parse', { op: 'session' });
     return session;
   }
 
-  private async request(path: string): Promise<unknown> {
+  private async request(path: string, op: DevinApiOp): Promise<unknown> {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
     let response: Awaited<ReturnType<FetchLike>>;
@@ -212,25 +218,25 @@ export class DevinApiClient {
         signal: controller?.signal,
       });
     } catch (error) {
-      throw new DevinApiError('network', sanitizeMessage(String(error), this.token));
+      throw new DevinApiError('network', sanitizeMessage(String(error), this.token), { op });
     } finally {
       if (timer) clearTimeout(timer);
     }
     const status = response.status;
-    if (status === 401) throw new DevinApiError('auth', 'unauthorized', { status });
-    if (status === 403) throw new DevinApiError('forbidden', 'forbidden', { status });
+    if (status === 401) throw new DevinApiError('auth', 'unauthorized', { status, op });
+    if (status === 403) throw new DevinApiError('forbidden', 'forbidden', { status, op });
     if (status === 429) {
       const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
-      throw new DevinApiError('rateLimited', 'rate limited', { status, retryAfterMs });
+      throw new DevinApiError('rateLimited', 'rate limited', { status, retryAfterMs, op });
     }
     const text = await response.text().catch(() => '');
     if (status < 200 || status >= 300) {
-      throw new DevinApiError('http', `http ${status}`, { status });
+      throw new DevinApiError('http', `http ${status}`, { status, op });
     }
     try {
       return text ? (JSON.parse(text) as unknown) : null;
     } catch {
-      throw new DevinApiError('parse', 'invalid json', { status });
+      throw new DevinApiError('parse', 'invalid json', { status, op });
     }
   }
 }
