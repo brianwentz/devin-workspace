@@ -122,6 +122,8 @@ export class TabManager {
   private keepAliveMs: number;
   private maxLiveTabs: number;
   private sweepTimer: NodeJS.Timeout | null = null;
+  // Attached views get the last layout rect so a scope switch never shows a 0x0 view.
+  private lastBounds: Electron.Rectangle | null = null;
 
   constructor(options: TabManagerOptions) {
     this.parent = options.parent;
@@ -570,6 +572,7 @@ export class TabManager {
     if (!view) return;
     if (this.parent.children.includes(view)) this.parent.removeChildView(view);
     this.parent.addChildView(view);
+    view.setBounds(this.lastBounds ?? { x: 0, y: 0, width: 0, height: 0 });
     this.activeViewId = tabId;
     const entry = this.entries.get(tabId);
     if (entry) entry.lastActiveAt = Date.now();
@@ -596,6 +599,7 @@ export class TabManager {
   }
 
   setBounds(bounds: Electron.Rectangle | null): void {
+    this.lastBounds = bounds;
     const active = this.activeView;
     if (!active) return;
     active.setBounds(

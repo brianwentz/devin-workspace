@@ -45,6 +45,25 @@ async function openSession(app: ElectronApplication, name: string): Promise<void
   await expect.poll(async () => (await state(app)).tabs.scope).toBe(name);
 }
 
+async function activeTabBounds(app: ElectronApplication) {
+  const s = await state(app);
+  if (!s.tabs.activeId) return null;
+  return app.evaluate(
+    (_e, id: string) => (globalThis as any).__devinworkspaces.getTabBounds(id),
+    s.tabs.activeId,
+  );
+}
+
+async function expectActiveTabSized(app: ElectronApplication) {
+  await expect
+    .poll(async () => {
+      const b = await activeTabBounds(app);
+      return b !== null && b.width > 0 && b.height > 0;
+    })
+    .toBe(true);
+  return activeTabBounds(app);
+}
+
 async function scopes(
   app: ElectronApplication,
 ): Promise<Array<{ scope: string; count: number; liveCount: number; lastSeen: number }>> {
@@ -75,6 +94,11 @@ test('tabs follow the visible session; hidden tabs stay live and keep scroll/for
     expect(aState.tabs.scope).toBe('A');
     expect(aState.tabs.hiddenTabCount).toBe(0);
     expect(aState.tabs.activeId).toBe(aIds[1]);
+    // The active tab view must already be sized (regression: scope switches
+    // used to leave a freshly attached view at 0x0 until a tab click).
+    const aBounds = await expectActiveTabSized(app);
+    expect(aBounds!.width).toBeGreaterThan(0);
+    expect(aBounds!.height).toBeGreaterThan(0);
 
     // Type into the active tab's page; the webContents id + input must survive a switch.
     const activeUrl = `${fixtures.githubUrl}/page/session-a-2`;
@@ -106,6 +130,7 @@ test('tabs follow the visible session; hidden tabs stay live and keep scroll/for
     ).length;
     await openSession(app, 'A');
     await waitForTabCount(app, 2);
+    expect(await expectActiveTabSized(app)).toEqual(aBounds);
     const back = await state(app);
     expect(back.tabs.tabs.map((t) => t.id)).toEqual(aIds);
     expect(back.tabs.activeId).toBe(aIds[1]);
@@ -159,6 +184,7 @@ test('keepAliveHours=0 discards hidden-scope tabs on switch and restores on retu
     await routeLink(app, `${fixtures.githubUrl}/page/session-a-2`);
     await waitForTabCount(app, 2);
     await waitForTabTitle(app, 'session-a-2');
+    const aBounds = await expectActiveTabSized(app);
 
     await openSession(app, 'B');
     // Both A tabs discard; B's scope is empty.
@@ -176,6 +202,9 @@ test('keepAliveHours=0 discards hidden-scope tabs on switch and restores on retu
     await openSession(app, 'A');
     await waitForEvent(logFile, 'tab-restore');
     await waitForTabCount(app, 2);
+    // The restored view is brand-new — it must get real bounds from the scope
+    // switch's layout pass, not stay 0x0 until a tab click.
+    expect(await expectActiveTabSized(app)).toEqual(aBounds);
     const s = await state(app);
     const restoredId = s.tabs.activeId!;
     expect(s.tabs.tabs.find((t) => t.id === restoredId)?.discarded).toBeUndefined();
