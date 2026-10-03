@@ -173,6 +173,9 @@ export function registerTestHooks(): void {
       localListSessions: (workspace: string) => localHost()?.listSessions(workspace),
       localLoadSession: (workspace: string, sessionId: string) =>
         localHost()?.loadSession(workspace, sessionId),
+      localDeleteSession: (sessionId: string) => localHost()?.deleteSession(sessionId),
+      localDeleteWorkspaceSessions: (workspace: string) =>
+        localHost()?.deleteWorkspaceSessions(workspace),
       localAgentPid: (workspace: string) => localHost()?.agentPid(workspace) ?? null,
       // P4b terminal
       terminalOpen: (
