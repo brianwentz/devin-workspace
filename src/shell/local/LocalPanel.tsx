@@ -73,6 +73,15 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   }, [workspace]);
 
   useEffect(() => {
+    if (!confirmDeleteAll) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setConfirmDeleteAll(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [confirmDeleteAll]);
+
+  useEffect(() => {
     if (!workspace || listedFor.current.has(workspace)) return;
     listedFor.current.add(workspace);
     void window.devinworkspaces.localListSessions(workspace).then((result) => {
@@ -217,7 +226,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   };
 
   return (
-    <main id="localPanel" className="shell-chrome flex bg-[#111925] text-[#e8edf5]" style={style}>
+    <main id="localPanel" className="shell-chrome relative flex bg-[#111925] text-[#e8edf5]" style={style}>
       {/* Left column: workspaces + sessions */}
       <aside className="flex w-64 flex-none flex-col border-r border-[#39475a] bg-[#101722]">
         <div className="flex items-center justify-between border-b border-[#39475a] px-3 py-2">
@@ -279,40 +288,19 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
         <div className="mt-2 flex items-center justify-between border-y border-[#39475a] px-3 py-2">
           <span className="text-xs uppercase tracking-wide text-[#7f8ca0]">Sessions</span>
           <span className="flex items-center gap-1">
-            {agent?.capabilities?.sessionDelete && sessions.length > 0 &&
-              (confirmDeleteAll ? (
-                <span className="flex items-center gap-1">
-                  <button
-                    id="sessionDeleteAllConfirm"
-                    type="button"
-                    className="rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#ff8a8a]"
-                    disabled={busy}
-                    onClick={() => void deleteAllSessions()}
-                  >
-                    Delete {sessions.length}
-                  </button>
-                  <button
-                    id="sessionDeleteAllCancel"
-                    type="button"
-                    className="rounded bg-[#101722] px-1.5 py-0.5 text-[10px] text-[#7f8ca0]"
-                    onClick={() => setConfirmDeleteAll(false)}
-                  >
-                    Cancel
-                  </button>
-                </span>
-              ) : (
-                <button
-                  id="sessionDeleteAll"
-                  type="button"
-                  aria-label="Delete all sessions"
-                  title="Delete all sessions"
-                  className="rounded p-1 text-[#7f8ca0] hover:text-[#ff8a8a]"
-                  disabled={busy}
-                  onClick={() => setConfirmDeleteAll(true)}
-                >
-                  <Trash2 size={13} />
-                </button>
-              ))}
+            {agent?.capabilities?.sessionDelete && sessions.length > 0 && (
+              <button
+                id="sessionDeleteAll"
+                type="button"
+                aria-label="Delete all sessions"
+                title="Delete all sessions"
+                className="rounded p-1 text-[#7f8ca0] hover:text-[#ff8a8a]"
+                disabled={busy}
+                onClick={() => setConfirmDeleteAll(true)}
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
             <button
               id="sessionNew"
               type="button"
@@ -494,6 +482,51 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
         </footer>
         </div>
       </section>
+      {confirmDeleteAll && (
+        <div
+          id="sessionDeleteAllBackdrop"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/50"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setConfirmDeleteAll(false);
+          }}
+        >
+          <section
+            id="sessionDeleteAllDialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="sessionDeleteAllTitle"
+            className="flex w-[360px] flex-col gap-3 rounded-lg border border-[#39475a] bg-[#101722] px-4 py-4 shadow-xl"
+          >
+            <h2 id="sessionDeleteAllTitle" className="m-0 text-sm font-semibold text-[#e8edf5]">
+              Delete all sessions?
+            </h2>
+            <p className="m-0 text-xs text-[#7f8ca0]">
+              This permanently deletes {sessions.length} session{sessions.length === 1 ? '' : 's'} in{' '}
+              {baseName(workspace ?? '')}. Running prompts are cancelled first.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                id="sessionDeleteAllCancel"
+                type="button"
+                className={buttonClass}
+                onClick={() => setConfirmDeleteAll(false)}
+              >
+                Cancel
+              </button>
+              <button
+                id="sessionDeleteAllConfirm"
+                type="button"
+                autoFocus
+                disabled={busy}
+                className="rounded-md border border-[#7a3a3a] bg-[#3a1d1d] px-3 py-1.5 text-sm text-[#ff8a8a] hover:bg-[#4a2424] disabled:opacity-50"
+                onClick={() => void deleteAllSessions()}
+              >
+                Delete {sessions.length}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

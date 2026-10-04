@@ -6,6 +6,8 @@ import {
   type RouteDisposition,
   type RouteSource,
 } from '../../src/core/linkRouter';
+import { compileLinkRules } from '../../src/core/linkRules';
+import type { LinkRule } from '../../src/shared/ipc';
 
 const context = {
   tenantUrl: 'https://cloudbeds.devinenterprise.com',
@@ -186,5 +188,61 @@ describe('route from the analytics surface', () => {
     expect(route('https://example.org/x', 'analytics', 'new-window', context)).toEqual({
       kind: 'external',
     });
+  });
+});
+
+describe('link rules', () => {
+  const linkRule = (overrides: Partial<LinkRule> = {}): LinkRule => ({
+    id: 'r1',
+    kind: 'prefix',
+    pattern: 'https://jira.example.com/browse/',
+    enabled: true,
+    ...overrides,
+  });
+  const ruleContext = {
+    ...context,
+    rules: compileLinkRules([
+      linkRule({ id: 'jira', pattern: 'https://jira.example.com/browse/' }),
+      linkRule({ id: 'everything', kind: 'regex', pattern: '^https://' }),
+    ]),
+  };
+
+  it('routes a matched URL to rule', () => {
+    expect(routeUrl('https://jira.example.com/browse/ISSUE-1', ruleContext)).toBe('rule');
+    const onlyJira = {
+      ...context,
+      rules: compileLinkRules([linkRule({ id: 'jira' })]),
+    };
+    expect(routeUrl('https://unrelated.example.org/', onlyJira)).toBe('external');
+  });
+
+  it('tenant always beats a rule, github always beats a rule', () => {
+    expect(
+      routeUrl('https://cloudbeds.devinenterprise.com/sessions/1', ruleContext),
+    ).toBe('devin');
+    expect(routeUrl('https://github.com/org/repo', ruleContext)).toBe('github');
+    expect(routeUrl('http://127.0.0.1:43111/page', ruleContext)).toBe('github');
+  });
+
+  it('treats rule matches like github for decisions', () => {
+    const url = 'https://jira.example.com/browse/ISSUE-1';
+    expect(route(url, 'devin', 'new-window', ruleContext)).toEqual({
+      kind: 'gh-tab',
+      background: false,
+    });
+    expect(route(url, 'shell', 'new-window', ruleContext)).toEqual({
+      kind: 'gh-tab',
+      background: false,
+    });
+    expect(route(url, 'github', 'background', ruleContext)).toEqual({
+      kind: 'gh-tab',
+      background: true,
+    });
+    expect(route(url, 'devin', 'navigate', ruleContext)).toEqual({
+      kind: 'gh-tab',
+      background: false,
+    });
+    // Navigations inside hosted views stay in place even when a rule matches.
+    expect(route(url, 'github', 'navigate', ruleContext)).toEqual({ kind: 'in-place' });
   });
 });

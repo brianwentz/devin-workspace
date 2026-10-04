@@ -103,7 +103,18 @@ export const IpcChannels = {
 export const SurfaceSchema = z.enum(['cloud', 'local', 'settings', 'analytics']);
 export type Surface = z.infer<typeof SurfaceSchema>;
 
-const RoutingFields = { allowExternal: z.boolean() };
+// User-configurable URL rules: matching links open as GitHub-pane tabs.
+export const LinkRuleSchema = z.object({
+  id: z.string().min(1).max(64),
+  kind: z.enum(['prefix', 'regex']),
+  pattern: z.string().min(1).max(512),
+  enabled: z.boolean(),
+});
+export type LinkRule = z.infer<typeof LinkRuleSchema>;
+const RoutingFields = {
+  allowExternal: z.boolean(),
+  rules: z.array(LinkRuleSchema).max(100),
+};
 // F2: the pane split is a fraction of (windowWidth - rail - splitter), 0..1.
 const PaneFields = { open: z.boolean(), fraction: z.number().min(0).max(1) };
 // F2: window bounds remembered per display configuration (key = display geometry).
@@ -184,8 +195,11 @@ export const SettingsObject = z.object({
   apiBase: SettingsFields.apiBase.default('https://api.devin.ai'),
   workspaces: SettingsFields.workspaces.default([]),
   routing: z
-    .object({ allowExternal: RoutingFields.allowExternal.default(true) })
-    .default({ allowExternal: true }),
+    .object({
+      allowExternal: RoutingFields.allowExternal.default(true),
+      rules: RoutingFields.rules.default([]),
+    })
+    .default({ allowExternal: true, rules: [] }),
   pane: z
     .object({
       open: PaneFields.open.default(true),

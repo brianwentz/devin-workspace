@@ -1,15 +1,19 @@
 import { isGitHubHost } from '../core/linkRouter';
+import { ruleOwnsOrigin } from '../core/linkRules';
 import { log } from './log';
+import { routeContext } from './routing';
 import { fixtureOrigins, originOf, state } from './state';
 
 // F1: GitHub tab views get sanitized clipboard writes (PR copy buttons); the
 // Devin view gets clipboard-write only (OS notifications go through the in-app center). In test mode
-// the fixture Git origins count as GitHub hosts.
+// the fixture Git origins count as GitHub hosts. Origins owned by an enabled
+// link rule count too — rule-routed tabs are gh:* views.
 function isGitOrigin(origin: string): boolean {
   try {
     const url = new URL(origin);
     if (isGitHubHost(url.hostname)) return true;
-    return fixtureOrigins.includes(url.origin);
+    if (fixtureOrigins.includes(url.origin)) return true;
+    return ruleOwnsOrigin(url.origin, routeContext().rules ?? []);
   } catch {
     return false;
   }

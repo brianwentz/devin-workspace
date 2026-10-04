@@ -271,3 +271,58 @@ describe('terminal dock settings (F5)', () => {
     expect(settings.layout.terminalHeight).toBe(280);
   });
 });
+
+describe('routing.rules', () => {
+  const linkRule = (id: string) => ({
+    id,
+    kind: 'prefix' as const,
+    pattern: 'https://x.example/',
+    enabled: true,
+  });
+
+  it('defaults to an empty array', () => {
+    expect(SettingsSchema.parse({}).routing).toEqual({ allowExternal: true, rules: [] });
+  });
+
+  it('mergeSettings replaces the whole rules array', () => {
+    const base = mergeSettings(SettingsSchema.parse({}), {
+      routing: { rules: [linkRule('a'), linkRule('b')] },
+    });
+    expect(base.routing.rules.map((r) => r.id)).toEqual(['a', 'b']);
+    const replaced = mergeSettings(base, { routing: { rules: [linkRule('c')] } });
+    expect(replaced.routing.rules.map((r) => r.id)).toEqual(['c']);
+    // A patch without `rules` leaves the array alone.
+    const untouched = mergeSettings(replaced, { routing: { allowExternal: false } });
+    expect(untouched.routing).toEqual({ allowExternal: false, rules: [linkRule('c')] });
+  });
+
+  it('drops an oversized or invalid rules array on repair', () => {
+    const oversized = {
+      routing: {
+        allowExternal: false,
+        rules: Array.from({ length: 101 }, (_, i) => linkRule(`r${i}`)),
+      },
+    };
+    const { settings, dropped } = parseSettingsFile(oversized);
+    expect(dropped).toEqual(['routing']);
+    expect(settings.routing).toEqual({ allowExternal: true, rules: [] });
+    const badRule = parseSettingsFile({
+      routing: { rules: [{ id: 'x', kind: 'bogus', pattern: 'p', enabled: true }] },
+    });
+    expect(badRule.dropped).toEqual(['routing']);
+    expect(badRule.settings.routing.rules).toEqual([]);
+  });
+
+  it('rejects invalid rules in patches', () => {
+    expect(
+      SettingsPatchSchema.safeParse({
+        routing: { rules: [{ id: '', kind: 'prefix', pattern: 'https://x/', enabled: true }] },
+      }).success,
+    ).toBe(false);
+    expect(
+      SettingsPatchSchema.safeParse({
+        routing: { rules: [{ id: 'x', kind: 'prefix', pattern: '', enabled: true }] },
+      }).success,
+    ).toBe(false);
+  });
+});

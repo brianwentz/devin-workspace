@@ -1,8 +1,9 @@
 // Pure link router (plan §4.1). No electron imports.
 
+import { matchLinkRule, type CompiledRule } from './linkRules';
 import { isAnalyticsUrl } from './sessions';
 
-export type RouteKind = 'devin' | 'github' | 'external' | 'mailto' | 'deny';
+export type RouteKind = 'devin' | 'github' | 'rule' | 'external' | 'mailto' | 'deny';
 
 export type RouteSource = 'devin' | 'github' | 'local' | 'shell' | 'analytics';
 export type RouteDisposition = 'new-window' | 'navigate' | 'background';
@@ -17,6 +18,7 @@ export type RouteDecision =
 export interface RouteContext {
   tenantUrl: string;
   githubOrigins?: readonly string[];
+  rules?: readonly CompiledRule[];
 }
 
 function hostMatches(hostname: string, domain: string): boolean {
@@ -67,17 +69,23 @@ export function routeUrl(rawUrl: string, context: RouteContext): RouteKind {
     return 'deny';
   }
 
+  if (matchLinkRule(url.href, context.rules ?? [])) return 'rule';
+
   return 'external';
 }
 
 // Full routing decision (plan §4.1):
 // - new-window / background (popups, _blank, ctrl/middle-click) from any source:
-//   GitHub host -> gh-tab (background iff disposition is 'background'); tenant -> devin;
-//   other http(s) and mailto -> external; other schemes -> deny.
-// - navigate (top-frame, link-initiated) from 'devin' to a GitHub host -> gh-tab.
+//   GitHub host or a matched link rule -> gh-tab (background iff disposition is
+//   'background'); tenant -> devin; other http(s) and mailto -> external;
+//   other schemes -> deny.
+// - navigate (top-frame, link-initiated) from 'devin' to a GitHub host or a
+//   matched link rule -> gh-tab.
 // - navigate inside a hosted view ('devin' or 'github') to anything else -> in-place, so
 //   server redirects, form posts and IdP/SSO hops are never split across views.
 // - navigate from 'shell' / 'local' behaves like new-window (those surfaces never navigate).
+// Host classes rank github > tenant > rule > external: a rule can never steal a
+// GitHub or tenant URL.
 export function route(
   rawUrl: string,
   source: RouteSource,
@@ -90,8 +98,9 @@ export function route(
 
   const hosted = source === 'devin' || source === 'github' || source === 'analytics';
   if (disposition === 'navigate' && hosted) {
-    if (kind === 'github' && (source === 'devin' || source === 'analytics'))
+    if ((kind === 'github' || kind === 'rule') && (source === 'devin' || source === 'analytics')) {
       return { kind: 'gh-tab', background: false };
+    }
     // Analytics is a hosted surface: same-tab clicks into the rest of the
     // tenant (e.g. a session from a chart) open in the Cloud view instead.
     if (
@@ -103,7 +112,9 @@ export function route(
     return { kind: 'in-place' };
   }
 
-  if (kind === 'github') return { kind: 'gh-tab', background: disposition === 'background' };
+  if (kind === 'github' || kind === 'rule') {
+    return { kind: 'gh-tab', background: disposition === 'background' };
+  }
   if (kind === 'devin') return { kind: 'devin' };
   return { kind: 'external' };
 }

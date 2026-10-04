@@ -7,6 +7,7 @@ import { setSettingsTab, useSettingsTab, useShellState } from '../store';
 import { NotificationSettings } from './NotificationSettings';
 import { PasswordsSection } from './PasswordsSection';
 import { GeneralTab } from './settings/GeneralTab';
+import { LinksTab } from './settings/LinksTab';
 import { SettingsTabs } from './settings/SettingsTabs';
 import { UpdatesTab } from './settings/UpdatesTab';
 
@@ -57,6 +58,7 @@ export function SettingsPanel({ settings, credentials, style }: SettingsPanelPro
       )}
       <section role="tabpanel" id={`settingsPanel-${tab}`}>
         {tab === 'general' && <GeneralTab />}
+        {tab === 'links' && <LinksTab />}
         {tab === 'passwords' && (
           <PasswordsSection credentials={credentials} tenantUrl={settings.tenantUrl} />
         )}
