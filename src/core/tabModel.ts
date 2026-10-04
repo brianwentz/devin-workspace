@@ -1,3 +1,5 @@
+import type { Surface } from '../shared/ipc';
+
 export interface BrowserTab {
   id: string;
   url: string;
@@ -26,7 +28,7 @@ export function localScope(sessionId: string): string {
 // The scope the tab strip currently serves: the selected local session while
 // the Local surface is up, else the Cloud session (GLOBAL outside any session).
 export function effectiveScope(
-  surface: 'cloud' | 'local' | 'settings',
+  surface: Surface,
   cloudSessionId: string | null,
   localSessionId: string | null,
 ): string {

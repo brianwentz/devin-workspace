@@ -1,10 +1,11 @@
 // Pure link router (plan §4.1). No electron imports.
 
 import { matchLinkRule, type CompiledRule } from './linkRules';
+import { isAnalyticsUrl } from './sessions';
 
 export type RouteKind = 'devin' | 'github' | 'rule' | 'external' | 'mailto' | 'deny';
 
-export type RouteSource = 'devin' | 'github' | 'local' | 'shell';
+export type RouteSource = 'devin' | 'github' | 'local' | 'shell' | 'analytics';
 export type RouteDisposition = 'new-window' | 'navigate' | 'background';
 
 export type RouteDecision =
@@ -95,11 +96,19 @@ export function route(
   if (kind === 'deny') return { kind: 'deny' };
   if (kind === 'mailto') return { kind: 'external' };
 
-  const hosted = source === 'devin' || source === 'github';
+  const hosted = source === 'devin' || source === 'github' || source === 'analytics';
   if (disposition === 'navigate' && hosted) {
-    if ((kind === 'github' || kind === 'rule') && source === 'devin') {
+    if ((kind === 'github' || kind === 'rule') && (source === 'devin' || source === 'analytics')) {
       return { kind: 'gh-tab', background: false };
     }
+    // Analytics is a hosted surface: same-tab clicks into the rest of the
+    // tenant (e.g. a session from a chart) open in the Cloud view instead.
+    if (
+      kind === 'devin' &&
+      source === 'analytics' &&
+      !isAnalyticsUrl(rawUrl, context.tenantUrl)
+    )
+      return { kind: 'devin' };
     return { kind: 'in-place' };
   }
 

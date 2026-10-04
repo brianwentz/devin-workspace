@@ -158,6 +158,39 @@ describe('route (host class x source x disposition)', () => {
   });
 });
 
+describe('route from the analytics surface', () => {
+  it('routes same-tab tenant links (non-analytics) to the Cloud view', () => {
+    expect(
+      route('https://cloudbeds.devinenterprise.com/sessions/abc', 'analytics', 'navigate', context),
+    ).toEqual({ kind: 'devin' });
+  });
+
+  it('keeps same-tab analytics routes in place', () => {
+    expect(
+      route('https://cloudbeds.devinenterprise.com/analytics/usage', 'analytics', 'navigate', context),
+    ).toEqual({ kind: 'in-place' });
+    expect(
+      route('https://cloudbeds.devinenterprise.com/analytics', 'analytics', 'navigate', context),
+    ).toEqual({ kind: 'in-place' });
+  });
+
+  it('opens same-tab GitHub links in a foreground tab', () => {
+    expect(route('https://github.com/o/r', 'analytics', 'navigate', context)).toEqual({
+      kind: 'gh-tab',
+      background: false,
+    });
+  });
+
+  it('keeps same-tab external hops in place and opens popups externally', () => {
+    expect(route('https://okta.example.com/sso', 'analytics', 'navigate', context)).toEqual({
+      kind: 'in-place',
+    });
+    expect(route('https://example.org/x', 'analytics', 'new-window', context)).toEqual({
+      kind: 'external',
+    });
+  });
+});
+
 describe('link rules', () => {
   const linkRule = (overrides: Partial<LinkRule> = {}): LinkRule => ({
     id: 'r1',

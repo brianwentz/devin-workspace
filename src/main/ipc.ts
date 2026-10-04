@@ -29,6 +29,7 @@ import {
 } from '../shared/ipc';
 import { fieldErrorsFromIssues } from '../core/settingsDraft';
 import { sanitizeMessage } from '../core/devinApi';
+import { analyticsUrl } from '../core/sessions';
 import { settingsFlushDone } from './settingsFlush';
 import { identityResolver } from './identity';
 import { log } from './log';
@@ -84,6 +85,10 @@ export function applySettingsPatch(patch: SettingsPatch): Settings {
     log('shell', 'tenant-changed', { url: next.tenantUrl });
     state.devinView?.webContents.loadURL(next.tenantUrl).catch((error: unknown) => {
       log('devin', 'load-error', { url: next.tenantUrl, detail: { message: String(error) } });
+    });
+    const analytics = analyticsUrl(next.tenantUrl);
+    state.analyticsView?.webContents.loadURL(analytics).catch((error: unknown) => {
+      log('analytics', 'load-error', { url: analytics, detail: { message: String(error) } });
     });
   }
   applyLayout();

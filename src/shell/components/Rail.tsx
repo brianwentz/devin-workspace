@@ -1,4 +1,4 @@
-import { Bell } from 'lucide-react';
+import { BarChart3, Bell } from 'lucide-react';
 import { RAIL_WIDTH, TITLE_BAR_HEIGHT } from '../../core/layout';
 import { useShellState } from '../store';
 import { requestSurface } from '../surface';
@@ -93,6 +93,17 @@ export function Rail({
         onClick={() => void requestSurface('local')}
       >
         ⌘
+      </button>
+      <button
+        id="analyticsButton"
+        type="button"
+        aria-label="Analytics"
+        aria-pressed={surface === 'analytics'}
+        title="Analytics"
+        className={`${buttonClass} flex items-center justify-center`}
+        onClick={() => void requestSurface('analytics')}
+      >
+        <BarChart3 size={18} strokeWidth={1.8} />
       </button>
       <button
         id="settingsButton"

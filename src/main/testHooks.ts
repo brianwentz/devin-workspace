@@ -74,6 +74,7 @@ export function registerTestHooks(): void {
       },
       getTabBounds: (id: string) => state.tabManager?.getView(id)?.getBounds() ?? null,
       getDevinBounds: () => state.devinView?.getBounds() ?? null,
+      getAnalyticsBounds: () => state.analyticsView?.getBounds() ?? null,
       // Native view layering check: every contentView child with its bounds.
       childViews: () =>
         state.windowRef?.contentView.children.map((view) => ({

@@ -293,6 +293,15 @@ export async function startFixtureServers(): Promise<FixtureServers> {
       );
       return;
     }
+    if (url.pathname === '/analytics' || url.pathname.startsWith('/analytics/')) {
+      html(
+        response,
+        `<title>Fixture Devin analytics</title><main>Analytics ${url.pathname}
+         <a id="sessionLink" href="${devinUrl}/sessions/A">Session A</a>
+         <a id="ghLink" href="${githubUrl}/page/from-analytics">GitHub link</a></main>`,
+      );
+      return;
+    }
     if (url.pathname !== '/') {
       html(
         response,

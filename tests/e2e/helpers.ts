@@ -7,7 +7,7 @@ export type PublicState = {
   paneOpen: boolean;
   paneFraction: number;
   paneCollapsed: boolean;
-  surface: 'cloud' | 'local' | 'settings';
+  surface: 'cloud' | 'local' | 'settings' | 'analytics';
   currentSessionId: string | null;
   localSessionId: string | null;
   credentials: Array<{

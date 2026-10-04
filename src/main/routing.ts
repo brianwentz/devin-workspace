@@ -32,6 +32,7 @@ export function routeContext(): RouteContext {
 
 export function sourceOf(view: ViewName): RouteSource {
   if (view === 'devin') return 'devin';
+  if (view === 'analytics') return 'analytics';
   if (view === 'shell') return 'shell';
   return 'github';
 }
