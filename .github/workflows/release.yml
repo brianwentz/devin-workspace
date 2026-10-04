@@ -102,7 +102,7 @@ jobs:
         shell: pwsh
         run: gh release upload $env:TAG dist/DevinWorkspaces-Setup-*.exe dist/DevinWorkspaces-Setup-*.exe.blockmap dist/latest.yml --clobber
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: devin-workspaces-${{ github.event.release.tag_name }}
@@ -172,7 +172,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$TAG" "dist/DevinWorkspaces-${{ needs.prepare.outputs.version }}-arm64.dmg" "dist/DevinWorkspaces-${{ needs.prepare.outputs.version }}-arm64.zip" "dist/DevinWorkspaces-${{ needs.prepare.outputs.version }}-arm64.zip.blockmap" dist/latest-mac.yml --clobber
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: devin-workspaces-macos-${{ github.event.release.tag_name }}
