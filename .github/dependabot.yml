@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    versioning-strategy: increase
+    groups:
+      electron:
+        patterns:
+          - electron
+      dev-tooling:
+        dependency-type: development
+        exclude-patterns:
+          - electron
+      runtime:
+        dependency-type: production
+    ignore:
+      # @types/node must track the Node line bundled by Electron (44.x -> Node 24), not latest.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # electron-builder is tracked on the v26 dist-tag; 27 is alpha.
+      - dependency-name: electron-builder
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

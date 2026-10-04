@@ -22,7 +22,7 @@ P5 (test mode only): `DEVIN_WORKSPACES_API_BASE` (overrides `settings.apiBase` f
 `DEVIN_WORKSPACES_TEST_TERMINAL_CMD` (test mode only, e.g. `node out/fixtures/fakePty.cjs`) replaces the command the embedded terminal spawns — for both `devin`-kind (Local panel) and `shell`-kind (dock) ptys.
 
 ## Versions
-Requires Node ≥ 22.12; currently developed on Node 24.x. All deps are pinned exact — package.json is the source of truth.
+Requires Node ≥ 22.12; currently developed on Node 24.x. All deps are pinned exact — package.json is the source of truth. Couplings: `@types/node` must stay on the Node major bundled by the current Electron (Electron 44 → Node 24), not `latest`; `electron-builder` tracks the `v26` npm dist-tag (its `latest` tag lags behind). Dependabot (`.github/dependabot.yml`) opens weekly PRs with a 7-day cooldown; CI runs `npm audit --audit-level=high` after `npm ci`.
 
 ## Layout & settings (F-features)
 - Frame: `titleBarStyle: 'hidden'` + `titleBarOverlay` on the BaseWindow, `Menu.setApplicationMenu(null)`; the shell's `TitleBar.tsx` renders the drag region and the GitHub tab strip. Zoom (Ctrl+= / Ctrl+- / Ctrl+0) and detached DevTools (F12 / Ctrl+Shift+I, dev only) live in `src/main/shortcuts.ts`; Ctrl+` toggles the terminal dock.
