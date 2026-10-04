@@ -7,7 +7,7 @@ import type { TabManager } from './tabs';
 import type { DevinSession } from '../core/devinApi';
 import type { SecretStore } from './secrets';
 
-export type ViewName = 'shell' | 'devin' | 'local' | `gh:${string}`;
+export type ViewName = 'shell' | 'devin' | 'analytics' | 'local' | `gh:${string}`;
 
 export const testMode = process.env.DEVIN_WORKSPACES_TEST === '1';
 export const fixtureOrigins = (testMode ? process.env.DEVIN_WORKSPACES_TEST_GITHUB_ORIGINS ?? '' : '')
@@ -28,6 +28,7 @@ export const state = {
   windowRef: null as BaseWindow | null,
   shellView: null as WebContentsView | null,
   devinView: null as WebContentsView | null,
+  analyticsView: null as WebContentsView | null,
   tabManager: null as TabManager | null,
   settings: null as SettingsStore | null,
   credentials: null as CredentialStore | null,

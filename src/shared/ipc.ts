@@ -100,7 +100,7 @@ export const IpcChannels = {
   clipboardWriteText: 'clipboard:writeText',
 } as const;
 
-export const SurfaceSchema = z.enum(['cloud', 'local', 'settings']);
+export const SurfaceSchema = z.enum(['cloud', 'local', 'settings', 'analytics']);
 export type Surface = z.infer<typeof SurfaceSchema>;
 
 const RoutingFields = { allowExternal: z.boolean() };

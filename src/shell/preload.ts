@@ -198,7 +198,12 @@ const api = {
     }
   },
   setSurface: (surface: Surface) => {
-    if (surface === 'cloud' || surface === 'local' || surface === 'settings') {
+    if (
+      surface === 'cloud' ||
+      surface === 'local' ||
+      surface === 'settings' ||
+      surface === 'analytics'
+    ) {
       ipcRenderer.send(IpcChannels.surfaceSet, surface);
     }
   },

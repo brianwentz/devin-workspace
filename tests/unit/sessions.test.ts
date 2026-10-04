@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { newSessionUrl, parseSessionId, sessionUrl } from '../../src/core/sessions';
+import {
+  analyticsUrl,
+  isAnalyticsUrl,
+  newSessionUrl,
+  parseSessionId,
+  sessionUrl,
+} from '../../src/core/sessions';
 
 const tenant = 'https://cloudbeds.devinenterprise.com';
 
@@ -41,5 +47,30 @@ describe('session URLs (P5)', () => {
     expect(sessionUrl('https://acme.devinenterprise.com', 'abc 1')).toBe(
       'https://acme.devinenterprise.com/sessions/abc%201',
     );
+  });
+});
+
+describe('analyticsUrl / isAnalyticsUrl', () => {
+  it('builds the analytics URL from the tenant', () => {
+    expect(analyticsUrl(tenant)).toBe(`${tenant}/analytics`);
+    expect(analyticsUrl(`${tenant}/sessions/x`)).toBe(`${tenant}/analytics`);
+  });
+
+  it('matches the analytics path and deeper chart routes', () => {
+    expect(isAnalyticsUrl(`${tenant}/analytics`, tenant)).toBe(true);
+    expect(isAnalyticsUrl(`${tenant}/analytics/usage?range=7d#top`, tenant)).toBe(true);
+  });
+
+  it('rejects other tenant paths and sibling prefixes', () => {
+    expect(isAnalyticsUrl(`${tenant}/`, tenant)).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}/sessions/abc`, tenant)).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}/analytics2`, tenant)).toBe(false);
+  });
+
+  it('rejects other hosts and ports', () => {
+    expect(isAnalyticsUrl('https://evil.example.com/analytics', tenant)).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}:8443/analytics`, tenant)).toBe(false);
+    expect(isAnalyticsUrl('not a url', tenant)).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}/analytics`, 'not a url')).toBe(false);
   });
 });

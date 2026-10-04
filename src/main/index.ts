@@ -139,12 +139,14 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
     const contents = [
       state.shellView?.webContents,
       state.devinView?.webContents,
+      state.analyticsView?.webContents,
       ...(state.tabManager?.getViews().map((view) => view.webContents) ?? []),
     ].filter((item): item is Electron.WebContents => Boolean(item && !item.isDestroyed()));
     const before = webContents.getAllWebContents().length;
     log('shell', 'window-close-start', { detail: { webContentsCount: before } });
     state.tabManager?.dispose();
     detachView(state.devinView);
+    detachView(state.analyticsView);
     detachView(state.shellView);
     for (const item of contents) {
       if (!item.isDestroyed()) item.close();

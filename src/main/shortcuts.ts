@@ -24,7 +24,9 @@ export function historyAction(
 export function navigationTarget(): Electron.WebContents | null {
   return (
     (state.paneOpen ? state.tabManager?.activeWebContents : null) ??
-    state.devinView?.webContents ??
+    (state.surface === 'analytics'
+      ? state.analyticsView?.webContents
+      : state.devinView?.webContents) ??
     null
   );
 }
@@ -38,6 +40,7 @@ function webContentsForFocusedView(): Electron.WebContents | null {
   const all = [
     state.shellView?.webContents,
     state.devinView?.webContents,
+    state.analyticsView?.webContents,
     ...(state.tabManager?.getViews().map((view) => view.webContents) ?? []),
   ].filter((contents): contents is Electron.WebContents =>
     Boolean(contents && !contents.isDestroyed()),
@@ -52,6 +55,7 @@ export function focusVisibleContents(contents: Electron.WebContents | null): voi
   if (
     contents === state.shellView?.webContents ||
     (state.surface === 'cloud' && contents === state.devinView?.webContents) ||
+    (state.surface === 'analytics' && contents === state.analyticsView?.webContents) ||
     visibleTab
   ) {
     contents.focus();

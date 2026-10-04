@@ -52,6 +52,7 @@ export function fromHostedView(
   if (!sender || sender.isDestroyed()) return false;
   const hosted =
     (state.devinView !== null && sender === state.devinView.webContents) ||
+    (state.analyticsView !== null && sender === state.analyticsView.webContents) ||
     (state.tabManager?.getViews().some((view) => view.webContents === sender) ?? false);
   if (!hosted) return false;
   const frame = event.senderFrame;

@@ -16,6 +16,7 @@ import { unreadPrCount, visiblePrs } from '../core/prPanelModel';
 import { effectiveScope } from '../core/tabModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 
+import { ensureAnalyticsView } from './analytics';
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
@@ -217,7 +218,7 @@ export function overlayOpen(): boolean {
 export function lowerShell(): void {
   // See raiseShell — never restack during shutdown.
   if (state.shuttingDown) return;
-  const { windowRef, shellView, devinView, tabManager } = state;
+  const { windowRef, shellView, devinView, analyticsView, tabManager } = state;
   if (!windowRef || !shellView) return;
   shellView.setBackgroundColor('#111827');
   const children = [...windowRef.contentView.children];
@@ -225,6 +226,7 @@ export function lowerShell(): void {
     if (
       child === shellView ||
       child === devinView ||
+      child === analyticsView ||
       tabManager?.getViews().includes(child as WebContentsView)
     ) {
       windowRef.contentView.removeChildView(child);
@@ -232,6 +234,8 @@ export function lowerShell(): void {
   }
   windowRef.contentView.addChildView(shellView, 0);
   if (state.surface === 'cloud' && devinView) windowRef.contentView.addChildView(devinView);
+  if (state.surface === 'analytics' && analyticsView)
+    windowRef.contentView.addChildView(analyticsView);
   if (state.paneOpen && !state.paneCollapsed) addAtTop(tabManager?.activeView ?? null);
 }
 
@@ -258,12 +262,19 @@ export function applyLayout(): void {
   } else {
     devinView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   }
+  if (state.surface === 'analytics') {
+    ensureAnalyticsView().setBounds(nativeBounds(bounds.devin));
+  } else if (state.analyticsView) {
+    state.analyticsView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  }
   const paneVisible = state.paneOpen && !bounds.paneCollapsed;
   tabManager.setBounds(paneVisible ? nativeBounds(bounds.ghTab) : null);
   if (!state.dragging) {
     ensureShellBottom();
     if (state.surface === 'cloud') ensureAttached(devinView);
     else detachView(devinView);
+    if (state.surface === 'analytics') ensureAttached(state.analyticsView);
+    else detachView(state.analyticsView);
     const activeTabView = paneVisible ? tabManager.activeView : null;
     if (activeTabView) ensureAttached(activeTabView);
     else if (tabManager.activeView) detachView(tabManager.activeView);
