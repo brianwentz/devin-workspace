@@ -27,7 +27,7 @@ export function SettingsTabs({ active, onSelect }: SettingsTabsProps) {
   };
 
   return (
-    <div id="settingsTabs" role="tablist" className="flex gap-1 mb-6" onKeyDown={onKeyDown}>
+    <div id="settingsTabs" role="tablist" className="mb-6 flex gap-6 border-b border-[#39475a]" onKeyDown={onKeyDown}>
       {TABS.map((tab) => (
         <button
           key={tab.id}
@@ -36,7 +36,7 @@ export function SettingsTabs({ active, onSelect }: SettingsTabsProps) {
           data-settings-tab={tab.id}
           aria-selected={active === tab.id}
           type="button"
-          className="px-3 py-1.5 rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] text-sm aria-selected:bg-[#31455f] aria-selected:border-[#54749c]"
+          className="-mb-px border-b-2 border-transparent bg-transparent px-1 pb-2 text-sm text-[#7f8ca0] hover:text-[#e8edf5] aria-selected:border-[#83b6ff] aria-selected:text-[#e8edf5]"
           onClick={() => onSelect(tab.id)}
         >
           {tab.label}
