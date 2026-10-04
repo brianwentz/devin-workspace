@@ -3,6 +3,7 @@ import type { SettingsTabId } from '../../../core/settingsDraft';
 
 const TABS: { id: SettingsTabId; label: string }[] = [
   { id: 'general', label: 'General' },
+  { id: 'links', label: 'Link Handling' },
   { id: 'passwords', label: 'Passwords' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'updates', label: 'Updates' },

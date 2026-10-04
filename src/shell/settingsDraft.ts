@@ -87,6 +87,7 @@ const FIELD_INPUT: Record<DraftField, string> = {
   terminalShell: 'terminalShellInput',
   userId: 'userIdInput',
   orgId: 'orgIdInput',
+  linkRules: 'linkRuleAdd',
 };
 
 function focusErrorField(errors: DraftErrors): void {

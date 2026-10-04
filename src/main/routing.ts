@@ -2,10 +2,13 @@ import { shell } from 'electron';
 import {
   route,
   routeUrl,
+  type RouteContext,
   type RouteDecision,
   type RouteDisposition,
   type RouteSource,
 } from '../core/linkRouter';
+import { compileLinkRules, matchLinkRule, type CompiledRule } from '../core/linkRules';
+import type { LinkRule } from '../shared/ipc';
 import { log } from './log';
 import { allowExternalEnabled } from './settings';
 import { fixtureOrigins, state, type ViewName } from './state';
@@ -13,8 +16,18 @@ import { GLOBAL } from '../core/tabModel';
 import { applyLayout, notifyShell, setPaneOpen } from './window';
 import { handleShortcut } from './shortcuts';
 
-export function routeContext(): { tenantUrl: string; githubOrigins: string[] } {
-  return { tenantUrl: state.tenantUrl, githubOrigins: fixtureOrigins };
+// Compiled rules are memoized on array identity — SettingsStore replaces the
+// routing object on every commit, so identity changes exactly when rules do.
+let lastRules: readonly LinkRule[] | null = null;
+let lastCompiled: readonly CompiledRule[] = [];
+
+export function routeContext(): RouteContext {
+  const rules = state.settings?.current.routing.rules ?? [];
+  if (rules !== lastRules) {
+    lastRules = rules;
+    lastCompiled = compileLinkRules(rules);
+  }
+  return { tenantUrl: state.tenantUrl, githubOrigins: fixtureOrigins, rules: lastCompiled };
 }
 
 export function sourceOf(view: ViewName): RouteSource {
@@ -28,8 +41,9 @@ export function recordDecision(
   event: string,
   url: string,
   decision: string,
+  detail?: Record<string, unknown>,
 ): void {
-  log(view, event, { url, decision });
+  log(view, event, detail ? { url, decision, detail } : { url, decision });
 }
 
 export function openExternal(
@@ -68,20 +82,41 @@ export function loadInDevinView(url: string): void {
 }
 
 // Apply a LinkRouter decision. Returns the decision so callers can preventDefault etc.
-// Decision labels in the log: github-tab | github-tab-background | allow-in-view | devin |
-// external | mailto | deny (the e2e matrix asserts on these).
+// Decision labels in the log: github-tab | github-tab-background | rule-tab |
+// rule-tab-background | allow-in-view | devin | external | mailto | deny (the
+// e2e matrix asserts on these).
 export function applyDecision(
   rawUrl: string,
   view: ViewName,
   event: string,
   disposition: RouteDisposition,
 ): RouteDecision {
-  const decision = route(rawUrl, sourceOf(view), disposition, routeContext());
+  const context = routeContext();
+  const decision = route(rawUrl, sourceOf(view), disposition, context);
   switch (decision.kind) {
-    case 'gh-tab':
+    case 'gh-tab': {
       openGitHubTab(rawUrl, decision.background);
-      recordDecision(view, event, rawUrl, decision.background ? 'github-tab-background' : 'github-tab');
+      // A gh-tab decision reached via a user link rule logs distinctly and
+      // carries the matched rule id/kind — never the pattern text.
+      const matched =
+        routeUrl(rawUrl, context) === 'rule'
+          ? matchLinkRule(rawUrl, context.rules ?? [])
+          : null;
+      recordDecision(
+        view,
+        event,
+        rawUrl,
+        matched
+          ? decision.background
+            ? 'rule-tab-background'
+            : 'rule-tab'
+          : decision.background
+            ? 'github-tab-background'
+            : 'github-tab',
+        matched ? { ruleId: matched.id, ruleKind: matched.kind } : undefined,
+      );
       break;
+    }
     case 'in-place':
       recordDecision(view, event, rawUrl, 'allow-in-view');
       break;
