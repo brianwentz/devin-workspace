@@ -60,7 +60,7 @@ test('analytics rail button swaps the main column to the tenant analytics view',
 
     await expect
       .poll(async () =>
-        (await h.childViews()).some((view) => view.url?.endsWith('/analytics')),
+        (await h.childViews()).some((view) => view.url?.endsWith('/settings/my-analytics')),
       )
       .toBe(true);
 
@@ -71,7 +71,7 @@ test('analytics rail button swaps the main column to the tenant analytics view',
     expect((await h.getAnalyticsBounds())?.width ?? -1).toBe(0);
     await expect
       .poll(async () =>
-        (await h.childViews()).some((view) => view.url?.endsWith('/analytics')),
+        (await h.childViews()).some((view) => view.url?.endsWith('/settings/my-analytics')),
       )
       .toBe(false);
   } finally {

@@ -167,10 +167,10 @@ describe('route from the analytics surface', () => {
 
   it('keeps same-tab analytics routes in place', () => {
     expect(
-      route('https://cloudbeds.devinenterprise.com/analytics/usage', 'analytics', 'navigate', context),
+      route('https://cloudbeds.devinenterprise.com/settings/my-analytics/usage', 'analytics', 'navigate', context),
     ).toEqual({ kind: 'in-place' });
     expect(
-      route('https://cloudbeds.devinenterprise.com/analytics', 'analytics', 'navigate', context),
+      route('https://cloudbeds.devinenterprise.com/settings/my-analytics', 'analytics', 'navigate', context),
     ).toEqual({ kind: 'in-place' });
   });
 

@@ -40,7 +40,7 @@ export function sessionUrl(tenantUrl: string, sessionId: string): string {
   return new URL(`/sessions/${encodeURIComponent(sessionId)}`, tenantUrl).toString();
 }
 
-export const ANALYTICS_PATH = '/analytics';
+export const ANALYTICS_PATH = '/settings/my-analytics';
 
 export function analyticsUrl(tenantUrl: string): string {
   return new URL(ANALYTICS_PATH, tenantUrl).toString();

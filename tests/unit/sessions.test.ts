@@ -52,25 +52,26 @@ describe('session URLs (P5)', () => {
 
 describe('analyticsUrl / isAnalyticsUrl', () => {
   it('builds the analytics URL from the tenant', () => {
-    expect(analyticsUrl(tenant)).toBe(`${tenant}/analytics`);
-    expect(analyticsUrl(`${tenant}/sessions/x`)).toBe(`${tenant}/analytics`);
+    expect(analyticsUrl(tenant)).toBe(`${tenant}/settings/my-analytics`);
+    expect(analyticsUrl(`${tenant}/sessions/x`)).toBe(`${tenant}/settings/my-analytics`);
   });
 
   it('matches the analytics path and deeper chart routes', () => {
-    expect(isAnalyticsUrl(`${tenant}/analytics`, tenant)).toBe(true);
-    expect(isAnalyticsUrl(`${tenant}/analytics/usage?range=7d#top`, tenant)).toBe(true);
+    expect(isAnalyticsUrl(`${tenant}/settings/my-analytics`, tenant)).toBe(true);
+    expect(isAnalyticsUrl(`${tenant}/settings/my-analytics/usage?range=7d#top`, tenant)).toBe(true);
   });
 
   it('rejects other tenant paths and sibling prefixes', () => {
     expect(isAnalyticsUrl(`${tenant}/`, tenant)).toBe(false);
     expect(isAnalyticsUrl(`${tenant}/sessions/abc`, tenant)).toBe(false);
-    expect(isAnalyticsUrl(`${tenant}/analytics2`, tenant)).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}/settings/my-analytics2`, tenant)).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}/settings`, tenant)).toBe(false);
   });
 
   it('rejects other hosts and ports', () => {
-    expect(isAnalyticsUrl('https://evil.example.com/analytics', tenant)).toBe(false);
-    expect(isAnalyticsUrl(`${tenant}:8443/analytics`, tenant)).toBe(false);
+    expect(isAnalyticsUrl('https://evil.example.com/settings/my-analytics', tenant)).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}:8443/settings/my-analytics`, tenant)).toBe(false);
     expect(isAnalyticsUrl('not a url', tenant)).toBe(false);
-    expect(isAnalyticsUrl(`${tenant}/analytics`, 'not a url')).toBe(false);
+    expect(isAnalyticsUrl(`${tenant}/settings/my-analytics`, 'not a url')).toBe(false);
   });
 });
