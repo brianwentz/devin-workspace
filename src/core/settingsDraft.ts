@@ -1,5 +1,6 @@
 import { isAllowedAppUrl } from './sessions';
-import type { Settings, SettingsPatch } from '../shared/ipc';
+import { validateLinkRule } from './linkRules';
+import type { LinkRule, Settings, SettingsPatch } from '../shared/ipc';
 
 export interface SettingsDraft {
   tenantUrl: string;
@@ -12,11 +13,12 @@ export interface SettingsDraft {
   terminalShell: string;
   userId: string;
   orgId: string;
+  linkRules: LinkRule[];
 }
 
 export type DraftField = keyof SettingsDraft;
 
-export type SettingsTabId = 'general' | 'passwords' | 'notifications' | 'updates';
+export type SettingsTabId = 'general' | 'links' | 'passwords' | 'notifications' | 'updates';
 
 export const DRAFT_TAB: Record<DraftField, SettingsTabId> = {
   tenantUrl: 'general',
@@ -29,6 +31,7 @@ export const DRAFT_TAB: Record<DraftField, SettingsTabId> = {
   terminalShell: 'general',
   userId: 'notifications',
   orgId: 'notifications',
+  linkRules: 'links',
 };
 
 const FIELD_ORDER = Object.keys(DRAFT_TAB) as DraftField[];
@@ -47,7 +50,17 @@ export function draftFromSettings(settings: Settings): SettingsDraft {
     terminalShell: settings.terminal.shell,
     userId: settings.notifications.userId,
     orgId: settings.notifications.orgId,
+    linkRules: settings.routing.rules.map((rule) => ({ ...rule })),
   };
+}
+
+function linkRulesEqual(a: LinkRule, b: LinkRule): boolean {
+  return (
+    a.id === b.id &&
+    a.kind === b.kind &&
+    a.pattern.trim() === b.pattern.trim() &&
+    a.enabled === b.enabled
+  );
 }
 
 export function isDraftDirty(draft: SettingsDraft, settings: Settings): boolean {
@@ -63,7 +76,9 @@ export function isDraftDirty(draft: SettingsDraft, settings: Settings): boolean 
     draft.terminalAllSurfaces !== base.terminalAllSurfaces ||
     draft.terminalShell.trim() !== base.terminalShell ||
     draft.userId.trim() !== base.userId ||
-    draft.orgId.trim() !== base.orgId
+    draft.orgId.trim() !== base.orgId ||
+    draft.linkRules.length !== base.linkRules.length ||
+    draft.linkRules.some((rule, index) => !linkRulesEqual(rule, base.linkRules[index]!))
   );
 }
 
@@ -87,6 +102,18 @@ export function validateDraft(
   if (!Number.isInteger(maxLive) || maxLive < 1 || maxLive > 40) {
     errors.maxLiveTabs = 'Max live tabs must be a whole number between 1 and 40';
   }
+  for (const [index, rule] of draft.linkRules.entries()) {
+    const pattern = rule.pattern.trim();
+    if (!pattern) {
+      errors.linkRules = `Rule ${index + 1}: pattern is required`;
+      break;
+    }
+    const invalid = validateLinkRule({ kind: rule.kind, pattern });
+    if (invalid) {
+      errors.linkRules = `Rule ${index + 1}: ${invalid}`;
+      break;
+    }
+  }
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
@@ -94,7 +121,10 @@ export function validateDraft(
       tenantUrl,
       apiBase,
       workspaces: draft.workspaces,
-      routing: { allowExternal: draft.allowExternal },
+      routing: {
+        allowExternal: draft.allowExternal,
+        rules: draft.linkRules.map((rule) => ({ ...rule, pattern: rule.pattern.trim() })),
+      },
       tabs: { keepAliveHours: keepAlive, maxLiveTabs: maxLive },
       terminal: { allSurfaces: draft.terminalAllSurfaces, shell: draft.terminalShell.trim() },
       notifications: { userId: draft.userId.trim(), orgId: draft.orgId.trim() },
@@ -107,6 +137,7 @@ const PATH_TO_FIELD: Record<string, DraftField> = {
   apiBase: 'apiBase',
   workspaces: 'workspaces',
   'routing.allowExternal': 'allowExternal',
+  'routing.rules': 'linkRules',
   'tabs.keepAliveHours': 'keepAliveHours',
   'tabs.maxLiveTabs': 'maxLiveTabs',
   'terminal.allSurfaces': 'terminalAllSurfaces',

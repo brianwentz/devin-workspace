@@ -32,7 +32,10 @@ describe('draftFromSettings', () => {
       tenantUrl: 'https://tenant.example.com',
       apiBase: 'https://api.example.com',
       workspaces: ['C:\\work'],
-      routing: { allowExternal: false },
+      routing: {
+        allowExternal: false,
+        rules: [{ id: 'r1', kind: 'prefix', pattern: 'https://x.example/', enabled: true }],
+      },
       tabs: { keepAliveHours: 48, maxLiveTabs: 3 },
       terminal: { allSurfaces: true, shell: 'pwsh.exe' },
       notifications: { userId: 'user-1', orgId: 'org-2' },
@@ -48,6 +51,7 @@ describe('draftFromSettings', () => {
       terminalShell: 'pwsh.exe',
       userId: 'user-1',
       orgId: 'org-2',
+      linkRules: [{ id: 'r1', kind: 'prefix', pattern: 'https://x.example/', enabled: true }],
     });
   });
 });
@@ -90,7 +94,7 @@ describe('validateDraft', () => {
       tenantUrl: defaults.tenantUrl,
       apiBase: defaults.apiBase,
       workspaces: [],
-      routing: { allowExternal: true },
+      routing: { allowExternal: true, rules: [] },
       tabs: { keepAliveHours: 24, maxLiveTabs: 8 },
       terminal: { allSurfaces: false, shell: 'pwsh.exe -l' },
       notifications: { userId: 'u1', orgId: 'o1' },
@@ -184,5 +188,65 @@ describe('DRAFT_TAB / firstErrorField', () => {
     expect(firstErrorField({})).toBeNull();
     expect(firstErrorField({ maxLiveTabs: 'x', tenantUrl: 'y' })).toBe('tenantUrl');
     expect(firstErrorField({ orgId: 'x', userId: 'y' })).toBe('userId');
+  });
+});
+
+describe('link rules draft field', () => {
+  const linkRule = (overrides = {}) => ({
+    id: 'r1',
+    kind: 'prefix' as const,
+    pattern: 'https://jira.example.com/browse/',
+    enabled: true,
+    ...overrides,
+  });
+
+  it('is dirty when rules are added, removed, or edited', () => {
+    expect(isDraftDirty(draft({ linkRules: [linkRule()] }), defaults)).toBe(true);
+    const withRule = mergeSettings(defaults, { routing: { rules: [linkRule()] } });
+    expect(isDraftDirty(draftFromSettings(withRule), withRule)).toBe(false);
+    expect(
+      isDraftDirty(
+        { ...draftFromSettings(withRule), linkRules: [linkRule({ enabled: false })] },
+        withRule,
+      ),
+    ).toBe(true);
+    expect(isDraftDirty({ ...draftFromSettings(withRule), linkRules: [] }, withRule)).toBe(true);
+  });
+
+  it('treats whitespace-only pattern changes as clean', () => {
+    const withRule = mergeSettings(defaults, { routing: { rules: [linkRule()] } });
+    const dirty = { ...draftFromSettings(withRule) };
+    dirty.linkRules = [linkRule({ pattern: '  https://jira.example.com/browse/  ' })];
+    expect(isDraftDirty(dirty, withRule)).toBe(false);
+  });
+
+  it('validates each rule and reports the first failure with its index', () => {
+    const result = validateDraft(
+      draft({
+        linkRules: [
+          linkRule({ id: 'a' }),
+          linkRule({ id: 'b', kind: 'regex', pattern: '([' }),
+        ],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.linkRules).toMatch(/^Rule 2: Invalid regular expression: /);
+  });
+
+  it('requires a non-empty pattern', () => {
+    const result = validateDraft(draft({ linkRules: [linkRule({ pattern: '   ' })] }));
+    expect(result).toEqual({ ok: false, errors: { linkRules: 'Rule 1: pattern is required' } });
+  });
+
+  it('emits trimmed rules in the patch', () => {
+    const result = validateDraft(
+      draft({ linkRules: [linkRule({ pattern: '  https://x.example/  ' })] }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.patch.routing?.rules).toEqual([
+      linkRule({ pattern: 'https://x.example/' }),
+    ]);
   });
 });
