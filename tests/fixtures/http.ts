@@ -293,7 +293,10 @@ export async function startFixtureServers(): Promise<FixtureServers> {
       );
       return;
     }
-    if (url.pathname === '/analytics' || url.pathname.startsWith('/analytics/')) {
+    if (
+      url.pathname === '/settings/my-analytics' ||
+      url.pathname.startsWith('/settings/my-analytics/')
+    ) {
       html(
         response,
         `<title>Fixture Devin analytics</title><main>Analytics ${url.pathname}
