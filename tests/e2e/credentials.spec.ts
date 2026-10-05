@@ -185,7 +185,7 @@ test('migrates a v1 credentials.json and manages passwords from Settings', async
 
     await evaluateInShell(app, `window.devinworkspaces.setSurface('settings')`);
     await evaluateInShell(app, `document.querySelector('[data-settings-tab="passwords"]').click()`);
-    const rowSelector = `li[data-credential-id="${id}"]`;
+    const rowSelector = `tr[data-credential-id="${id}"]`;
     await expect
       .poll(async () =>
         evaluateInShell(app, `Boolean(document.querySelector('${rowSelector}'))`),
