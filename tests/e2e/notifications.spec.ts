@@ -839,10 +839,11 @@ test('notification panel: badge, banner, open/read/delete, update entry, restart
       .toBe(false);
     await expect.poll(async () => shell(`Boolean(document.getElementById('notificationsPanel'))`)).toBe(true); // still open
 
-    // Push a second + update entries; body click opens the session notification.
+    // Push a blocked + update entries; body click opens the session notification.
+    // The blocked entry supersedes the read waiting one for the same session.
     await h.pushNotification({ kind: 'blocked', sessionId: 'sess-1', sessionTitle: 'Fix login bug', title: 'Fix login bug', body: 'Blocked — needs your input' });
     await h.simulateUpdate('9.9.9');
-    await expect.poll(async () => (await h.notifications()).then ? 0 : ((await h.notifications()) as any[]).length).toBe(3);
+    await expect.poll(async () => (await h.notifications()).then ? 0 : ((await h.notifications()) as any[]).length).toBe(2);
     const entries = (await h.notifications()) as { id: string; kind: string; title: string }[];
     expect(entries.find((e) => e.kind === 'update')?.title).toBe('Update v9.9.9 ready');
     const blocked = entries.find((e) => e.kind === 'blocked')!;
@@ -862,9 +863,10 @@ test('notification panel: badge, banner, open/read/delete, update entry, restart
     await waitForEvent(logFile, 'update-install');
     await expect.poll(async () => ((await h.notifications()) as any[]).filter((e) => e.kind === 'update').length).toBe(0);
 
-    // Mark all read / clear all via panel buttons.
-    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', sessionTitle: 's', title: 'w1', body: 'b' });
-    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', sessionTitle: 's', title: 'w2', body: 'b2' });
+    // Mark all read / clear all via panel buttons. The waiting pushes use
+    // distinct sessions so neither supersedes the blocked entry or each other.
+    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-2', sessionTitle: 's', title: 'w1', body: 'b' });
+    await h.pushNotification({ kind: 'waiting', sessionId: 'sess-3', sessionTitle: 's', title: 'w2', body: 'b2' });
     await evaluateInShell(app, `window.devinworkspaces.notificationsPanel(true)`);
     await expect.poll(async () => shell(`document.querySelectorAll('[data-notification-id]').length`)).toBe(3);
     await shell(`document.getElementById('markAllRead').click()`);
@@ -880,7 +882,7 @@ test('notification panel: badge, banner, open/read/delete, update entry, restart
     // Push two entries that must survive restart, plus one update entry that
     // must not (runtime-only kind). Wait past the 300 ms debounced save.
     await h.pushNotification({ kind: 'waiting', sessionId: 'sess-1', ownerUserId: 'user-fixture', sessionTitle: 's1', title: 'Persist me 1', body: 'b' });
-    await h.pushNotification({ kind: 'blocked', sessionId: 'sess-1', ownerUserId: 'user-fixture', sessionTitle: 's1', title: 'Persist me 2', body: 'b' });
+    await h.pushNotification({ kind: 'blocked', sessionId: 'sess-2', ownerUserId: 'user-fixture', sessionTitle: 's1', title: 'Persist me 2', body: 'b' });
     await h.simulateUpdate('9.9.8');
     await new Promise((resolve) => setTimeout(resolve, 600));
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
@@ -901,6 +903,61 @@ test('notification panel: badge, banner, open/read/delete, update entry, restart
   } finally {
     await app.close().catch(() => undefined);
     rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('a pr-completed supersedes the pr-opened entry for the same PR', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-supersede-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  const prUrl = `${fixtures.githubUrl}/acme/widgets/pull/42`;
+  const sess = (prs: { pr_url: string; pr_state: string | null }[]) => ({
+    session_id: 'sess-pr',
+    title: 'PR session',
+    status: 'running',
+    status_detail: 'working',
+    updated_at: 3,
+    pull_requests: prs,
+  });
+  try {
+    // Baseline: the session exists with no PRs.
+    fixtures.api.setSessions([sess([])]);
+    await h.setPat(PAT);
+    await expect.poll(async () => (await state(app)).notifications.lastPollAt).not.toBeNull();
+    await h.pollNow();
+
+    // A new PR appears → pr-opened.
+    fixtures.api.setSessions([sess([{ pr_url: prUrl, pr_state: 'open' }])]);
+    await h.pollNow();
+    await expect
+      .poll(async () =>
+        ((await h.notifications()) as { kind: string; prUrl?: string }[]).filter(
+          (e) => e.prUrl === prUrl,
+        ).length,
+      )
+      .toBe(1);
+    let entries = (await h.notifications()) as { kind: string; prUrl?: string }[];
+    expect(entries.find((e) => e.prUrl === prUrl)?.kind).toBe('pr-opened');
+
+    // The same PR merges → pr-completed replaces the pr-opened entry.
+    fixtures.api.setSessions([sess([{ pr_url: prUrl, pr_state: 'merged' }])]);
+    await h.pollNow();
+    await expect.poll(async () => {
+      entries = (await h.notifications()) as { kind: string; prUrl?: string }[];
+      return entries.filter((e) => e.prUrl === prUrl).map((e) => e.kind).join(',');
+    }).toBe('pr-completed');
+    const forPr = ((await h.notifications()) as { kind: string; prUrl?: string; readAt: number | null }[]).filter(
+      (e) => e.prUrl === prUrl,
+    );
+    expect(forPr).toHaveLength(1);
+    expect(forPr[0]).toMatchObject({ kind: 'pr-completed', readAt: null });
+    const superseded = (await readEvents(logFile)).filter((e) => e.event === 'notification-superseded');
+    expect(superseded.length).toBeGreaterThanOrEqual(1);
+    expect((superseded.at(-1)?.detail as { kind: string; count: number }).count).toBe(1);
+    expect((superseded.at(-1)?.detail as { kind: string; count: number }).kind).toBe('pr-completed');
+  } finally {
+    await quit(app, profile);
   }
 });
 

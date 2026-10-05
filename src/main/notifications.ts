@@ -7,6 +7,7 @@ import { badgeDataUrl } from '../core/badgePng';
 import {
   addNotification,
   clearNotifications,
+  collapseSuperseded,
   markAllRead,
   markRead,
   MAX_NOTIFICATIONS,
@@ -56,7 +57,7 @@ export class NotificationStore {
       const parsed = AppNotificationSchema.array().safeParse(
         JSON.parse(readFileSync(this.file, 'utf8')),
       );
-      this.list = parsed.success ? parsed.data.slice(0, MAX_NOTIFICATIONS) : [];
+      this.list = parsed.success ? collapseSuperseded(parsed.data).slice(0, MAX_NOTIFICATIONS) : [];
     } catch {
       this.list = [];
     }
@@ -67,17 +68,17 @@ export class NotificationStore {
   }
 
   add(next: NewNotification): AppNotification {
-    this.list = addNotification(this.list, next, randomUUID());
-    // Dedupe either prepended or refreshed in place — the entry is the unread
-    // one matching the identity tuple either way.
-    const entry = this.list.find(
-      (item) =>
-        item.readAt === null &&
-        item.kind === next.kind &&
-        item.sessionId === next.sessionId &&
-        (item.prUrl ?? null) === (next.prUrl ?? null) &&
-        (item.version ?? null) === (next.version ?? null),
-    )!;
+    const id = randomUUID();
+    const before = this.list;
+    this.list = addNotification(before, next, id);
+    // Supersession always prepends the new entry — find it by its fresh id.
+    const entry = this.list.find((item) => item.id === id)!;
+    const removed = Math.max(0, before.length - (this.list.length - 1));
+    if (removed > 0) {
+      log('shell', 'notification-superseded', {
+        detail: { kind: entry.kind, count: removed },
+      });
+    }
     this.persist();
     this.changed();
     this.updateBadge();
