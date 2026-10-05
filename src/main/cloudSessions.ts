@@ -25,8 +25,11 @@ import { parseSessionId } from '../core/sessions';
 import { originOf, state, testMode } from './state';
 import { applyLayout, notifyShell } from './window';
 
-const TOKEN_RETRY_MS = 20_000;
+const TOKEN_BACKOFF_MIN_MS = 2_000;
+const TOKEN_BACKOFF_MAX_MS = 20_000;
+const TOKEN_GRACE_MS = 90_000;
 const REQUEST_TIMEOUT_MS = 20_000;
+const LIST_TIMEOUT_MS = 30_000;
 const TOKEN_TIMEOUT_MS = 15_000;
 const POLL_FOCUSED_MS = 15_000;
 const POLL_IDLE_MS = 60_000;
@@ -71,6 +74,11 @@ class CloudSessions {
   private fixtureFile: string | null = null;
   private folderOffsets = new Map<string, number>();
   private unsubActiveNavigate: (() => void) | null = null;
+  private tokenInFlight: Promise<void> | null = null;
+  private tokenBackoffMs = TOKEN_BACKOFF_MIN_MS;
+  private firstTokenAttemptAt: number | null = null;
+  private listInFlight = false;
+  private listDirty: string | null = null;
   private readonly onViewReady = () => {
     if (!this.token) void this.obtainToken();
   };
@@ -145,7 +153,7 @@ class CloudSessions {
       folder,
       rootsOffset,
     });
-    void this.request('session/list', params)
+    void this.request('session/list', params, LIST_TIMEOUT_MS)
       .then((message) => {
         const result = parseListResult(message.result, this.orgId!);
         const seen = new Set(this.sessions.map((s) => s.id));
@@ -215,8 +223,17 @@ class CloudSessions {
 
   // --- token acquisition --------------------------------------------------
 
-  private async obtainToken(): Promise<void> {
-    if (testMode) return; // no devinDebug on the fixture tenant
+  private obtainToken(): Promise<void> {
+    if (testMode) return Promise.resolve(); // no devinDebug on the fixture tenant
+    if (this.tokenInFlight) return this.tokenInFlight;
+    const work = this.obtainTokenInner().finally(() => {
+      this.tokenInFlight = null;
+    });
+    this.tokenInFlight = work;
+    return work;
+  }
+
+  private async obtainTokenInner(): Promise<void> {
     // A did-navigate-triggered call must not race a pending retry timer —
     // whoever runs first clears it so connect() can't fire twice.
     if (this.retryTimer) {
@@ -231,6 +248,7 @@ class CloudSessions {
     ) {
       return;
     }
+    this.firstTokenAttemptAt ??= Date.now();
     const contents = state.devinView?.webContents;
     const tenantOrigin = originOf(state.tenantUrl);
     if (
@@ -239,10 +257,7 @@ class CloudSessions {
       contents.isLoading() ||
       originOf(contents.getURL()) !== tenantOrigin
     ) {
-      this.setStatus('no-token');
-      log('cloud', 'cloud-token', { detail: { ok: false } });
-      this.scheduleRetry(TOKEN_RETRY_MS);
-      this.emit();
+      this.onTokenFailure('view-not-ready');
       return;
     }
     try {
@@ -257,25 +272,60 @@ class CloudSessions {
       const token = credentials?.[0] ?? null;
       const orgId = credentials?.[1] ?? null;
       if (!token || !orgId) {
-        this.setStatus('no-token');
-        log('cloud', 'cloud-token', { detail: { ok: false } });
-        this.scheduleRetry(TOKEN_RETRY_MS);
-        this.emit();
+        this.onTokenFailure(credentials === null ? 'no-devindebug' : 'login-required');
         return;
       }
       this.token = token;
       this.lastToken = token;
       this.orgId = orgId;
       this.backoffMs = BACKOFF_MIN_MS;
+      this.tokenBackoffMs = TOKEN_BACKOFF_MIN_MS;
+      this.firstTokenAttemptAt = null;
       log('cloud', 'cloud-token', { detail: { ok: true } });
       this.emit();
       this.connect();
     } catch (error) {
-      this.onError('token', error);
-      this.setStatus('no-token');
-      this.scheduleRetry(TOKEN_RETRY_MS);
-      this.emit();
+      const message = String(error);
+      this.onTokenFailure(
+        message === 'Error: token timeout'
+          ? 'timeout'
+          : /login required/i.test(message)
+            ? 'login-required'
+            : 'error',
+      );
     }
+  }
+
+  // Every obtainToken failure path funnels here. Never clobber a live or
+  // handshaking connection's status; 'no-token' means signed out — a still-
+  // bootstrapping tenant page is 'connecting', not 'no-token'.
+  private onTokenFailure(
+    reason: 'view-not-ready' | 'no-devindebug' | 'login-required' | 'timeout' | 'error',
+  ): void {
+    if (
+      this.token &&
+      (this.socket?.readyState === WebSocket.OPEN ||
+        this.socket?.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    const contents = state.devinView?.webContents;
+    const viewOrigin =
+      contents && !contents.isDestroyed() ? originOf(contents.getURL()) : null;
+    const tenantOrigin = originOf(state.tenantUrl);
+    // Sitting on an external login page (Okta/auth.devin.ai) is a real
+    // signed-out signal; about:blank ('null' origin) and the tenant origin are
+    // just "still bootstrapping".
+    const externalLogin =
+      viewOrigin !== null && viewOrigin !== 'null' && viewOrigin !== tenantOrigin;
+    const graceExpired =
+      this.firstTokenAttemptAt !== null &&
+      Date.now() - this.firstTokenAttemptAt > TOKEN_GRACE_MS;
+    this.setStatus(externalLogin || graceExpired ? 'no-token' : 'connecting');
+    log('cloud', 'cloud-token', { detail: { ok: false, reason } });
+    this.scheduleRetry(this.tokenBackoffMs);
+    this.tokenBackoffMs = Math.min(this.tokenBackoffMs * 2, TOKEN_BACKOFF_MAX_MS);
+    this.emit();
   }
 
   // --- websocket ----------------------------------------------------------
@@ -389,18 +439,41 @@ class CloudSessions {
 
   private async list(reason: string): Promise<void> {
     if (!this.orgId) return;
+    // Coalesce: a queued list just marks dirty and one follow-up runs after.
+    if (this.listInFlight) {
+      this.listDirty = reason;
+      return;
+    }
+    this.listInFlight = true;
+    try {
+      await this.listOnce(reason);
+    } finally {
+      this.listInFlight = false;
+      if (this.listDirty !== null) {
+        const next = this.listDirty;
+        this.listDirty = null;
+        // The failed list closed the socket — the reconnect path re-lists
+        // ('connect') anyway, so don't fire a doomed request.
+        if (this.socket?.readyState === WebSocket.OPEN) void this.list(next);
+      }
+    }
+  }
+
+  private async listOnce(reason: string): Promise<void> {
+    const orgId = this.orgId!;
     const startedAt = Date.now();
     try {
       const message = await this.request(
         'session/list',
-        buildListParams({ orgId: this.orgId, userId: this.userId }),
+        buildListParams({ orgId, userId: this.userId }),
+        LIST_TIMEOUT_MS,
       );
       if (message.error) {
         const rpcError = message.error as { code?: unknown; message?: unknown };
         this.onRpcError('list', rpcError);
         return;
       }
-      const result: CloudListResult = parseListResult(message.result, this.orgId);
+      const result: CloudListResult = parseListResult(message.result, orgId);
       this.sessions = result.sessions;
       this.folders = result.folders;
       this.folderTotals = result.folderTotals;
@@ -433,7 +506,11 @@ class CloudSessions {
     }
   }
 
-  private request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const socket = this.socket;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -444,7 +521,7 @@ class CloudSessions {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error('request timeout'));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
     });
