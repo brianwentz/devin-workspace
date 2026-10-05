@@ -105,7 +105,19 @@ export const IpcChannels = {
   cloudLoadMore: 'cloud:loadMore',
   cloudPanel: 'cloud:panel',
   cloudPrefetch: 'cloud:prefetch',
+  // Taskbar badge: main asks the shell to render, the shell sends back a PNG.
+  badgeRender: 'badge:render',
+  badgeRendered: 'badge:rendered',
 } as const;
+
+export const BadgeRenderSchema = z.object({
+  count: z.number().int().min(0).max(99),
+  size: z.number().int().min(16).max(64),
+});
+export type BadgeRender = z.infer<typeof BadgeRenderSchema>;
+export const BadgeRenderedSchema = z.object({
+  dataUrl: z.string().regex(/^data:image\/png;base64,/).max(200_000).nullable(),
+});
 
 export const SurfaceSchema = z.enum(['cloud', 'local', 'settings', 'analytics']);
 export type Surface = z.infer<typeof SurfaceSchema>;
@@ -520,6 +532,7 @@ export const ShellStateSchema = z.object({
   }),
   notifications: NotificationsStateSchema,
   cloud: CloudStateSchema,
+  cloudZoomFactor: z.number(),
   update: UpdateStateSchema,
   // F5 terminal dock
   terminalOpen: z.boolean(),

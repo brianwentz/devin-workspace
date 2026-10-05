@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { computeBounds, DEFAULT_TERMINAL_HEIGHT, RAIL_WIDTH } from '../core/layout';
+import { renderBadgeDataUrl } from './badge';
 import { handleSettingsFlush } from './settingsDraft';
 import { useShellState } from './store';
 import { Rail } from './components/Rail';
@@ -49,6 +50,26 @@ export function App() {
   // Quit-time implicit save: main sends settings:flush inside shutdown().
   useEffect(() => window.devinworkspaces.onSettingsFlush(handleSettingsFlush), []);
 
+  // Taskbar badge: render the requested PNG here (canvas) and reply until the
+  // acknowledged count matches — the reply re-converges a late-mounting shell.
+  useEffect(() => {
+    let stopped = false;
+    const send = async (dataUrl: string | null): Promise<void> => {
+      const want = await window.devinworkspaces.badgeRendered(dataUrl);
+      if (stopped) return;
+      const rendered = renderBadgeDataUrl(want.count, want.size);
+      if (rendered !== dataUrl) await send(rendered);
+    };
+    const off = window.devinworkspaces.onBadgeRender((request) => {
+      void send(renderBadgeDataUrl(request.count, request.size));
+    });
+    void send(null);
+    return () => {
+      stopped = true;
+      off();
+    };
+  }, []);
+
   if (!state) return null;
   const terminalVisible =
     state.terminalOpen && (state.surface === 'cloud' || state.settings.terminal.allSurfaces);
@@ -71,8 +92,6 @@ export function App() {
         paneCollapsed={bounds.paneCollapsed}
         terminalOpen={state.terminalOpen}
         terminalAllSurfaces={state.settings.terminal.allSurfaces}
-        sessionsOpen={state.sessionsOpen}
-        sessionsCollapsed={bounds.sessionsCollapsed}
       />
       {state.surface === 'cloud' && bounds.sessions && <SessionSidebar rect={bounds.sessions} />}
       {bounds.sessionsSplitter && (

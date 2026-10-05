@@ -141,11 +141,11 @@ test('cloud session sidebar: data, sections, interactions, geometry', async () =
       page.locator(`[data-session-id="${target.id}"]`),
     ).toHaveAttribute('data-current', 'true');
 
-    // --- (5) rail toggle hides the column and shifts devin.x --------------
-    await page.locator('#sessionsToggle').click();
+    // --- (5) sessions column toggle hides the column and shifts devin.x ---
+    await h.setSessionsOpen(false);
     await expect.poll(async () => (await h.layoutRects()).sessions).toBeNull();
     expect((await h.layoutRects()).devin.x).toBe(RAIL_WIDTH);
-    await page.locator('#sessionsToggle').click();
+    await h.setSessionsOpen(true);
     await expect
       .poll(async () => (await h.layoutRects()).devin.x)
       .toBe(RAIL_WIDTH + DEFAULT_SESSIONS_WIDTH + SPLITTER_WIDTH);

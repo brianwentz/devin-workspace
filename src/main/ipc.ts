@@ -38,13 +38,13 @@ import { refreshAnalyticsView } from './analytics';
 import { settingsFlushDone } from './settingsFlush';
 import { identityResolver } from './identity';
 import { log } from './log';
-import { notificationStore } from './notifications';
+import { badgeIconSize, notificationStore } from './notifications';
 import { notifier, openNotification, openPr, openPrs } from './notifier';
 import { prStore } from './prs';
 import { handleLink } from './routing';
 import { checkForUpdatesNow, hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
-import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
+import { BadgeRenderedSchema, NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import { cloudSessions } from './cloudSessions';
@@ -370,6 +370,13 @@ function setupExtrasIpc(): void {
   guardedOn(IpcChannels.notificationsPanel, (_e, arg: unknown) => {
     const parsed = NotificationPanelArg.safeParse(arg);
     if (parsed.success) setNotificationsPanel(parsed.data.open);
+  });
+  // Shell-rendered taskbar badge; the reply is the current desired spec so a
+  // shell that mounted late can re-render and converge.
+  guardedHandle(IpcChannels.badgeRendered, (_e, arg: unknown) => {
+    const parsed = BadgeRenderedSchema.parse(arg);
+    notificationStore().applyBadgeIcon(parsed.dataUrl);
+    return { count: notificationStore().unread(), size: badgeIconSize() };
   });
   // Service-user identity: read the resolved source + masked id; reset clears
   // identity.json and re-runs resolution (never returns the raw user id).

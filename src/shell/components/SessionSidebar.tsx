@@ -124,26 +124,28 @@ function Row({
           data-status-enum={s.statusEnum ?? s.status}
           data-live={liveIds.has(s.id)}
           title={s.title || 'Untitled session'}
-          className="session-row flex-1 min-w-0 flex items-center gap-1.5 px-1.5 py-1 rounded text-left text-[13px] text-[#c9d4e3] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[current=true]:bg-[#1f2f42] data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
+          className="session-row flex-1 min-w-0 flex items-center gap-1.5 px-1.5 h-[30px] rounded text-left text-[13px] leading-[18px] tracking-[-0.005em] text-[#c9d4e3] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[current=true]:bg-[#1f2f42] data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
           onMouseEnter={() => prefetch.onEnter(s.id)}
           onMouseLeave={prefetch.onLeave}
           onClick={() => window.devinworkspaces.cloudOpen(s.id)}
         >
-          <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: statusColor(s.statusEnum, s.status) }}
-          />
+          <span className="w-[18px] h-[18px] shrink-0 flex items-center justify-center">
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: statusColor(s.statusEnum, s.status) }}
+            />
+          </span>
           <span
             className={`flex-1 min-w-0 truncate ${s.isUnread ? 'font-semibold text-white' : ''}`}
           >
             {s.title || 'Untitled session'}
           </span>
           {s.prCount > 0 && (
-            <span className="shrink-0 text-[10px] px-1 rounded bg-[#31455f] text-[#9fc4ea]">
+            <span className="shrink-0 text-[11px] leading-[14px] tracking-[0.01em] px-1 rounded bg-[#31455f] text-[#9fc4ea]">
               {s.prCount} PR
             </span>
           )}
-          <span className="shrink-0 text-[10px] text-[#8b9bb0]">
+          <span className="shrink-0 text-[11px] leading-[14px] tracking-[0.01em] text-[#8b9bb0]">
             {relativeTime(s.updatedAt, Date.now())}
           </span>
         </button>
@@ -262,7 +264,10 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
           className="w-full h-7 px-2 rounded bg-[#141d29] border border-[#2c3949] text-[12px] placeholder-[#5c6b80] focus:outline-none focus:border-[#54749c]"
         />
       </div>
-      <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+      <div
+        className="flex-1 overflow-y-auto px-1.5 pb-2"
+        style={{ zoom: state!.cloudZoomFactor }}
+      >
         {q ? (
           filtered.length === 0 ? (
             <div className="px-2 py-3 text-[12px] text-[#5c6b80]">No matches</div>
@@ -279,21 +284,23 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 data-status-enum={s.statusEnum ?? s.status}
                 data-live={liveIds.has(s.id)}
                 title={s.title || 'Untitled session'}
-                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left text-[13px] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
+                className="w-full flex items-center gap-1.5 px-1.5 h-[30px] rounded text-left text-[13px] leading-[18px] tracking-[-0.005em] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
                 onMouseEnter={() => prefetch.onEnter(s.id)}
                 onMouseLeave={prefetch.onLeave}
                 onClick={() => window.devinworkspaces.cloudOpen(s.id)}
               >
-                <span
-                  className="w-2 h-2 rounded-full shrink-0"
-                  style={{ backgroundColor: statusColor(s.statusEnum, s.status) }}
-                />
+                <span className="w-[18px] h-[18px] shrink-0 flex items-center justify-center">
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: statusColor(s.statusEnum, s.status) }}
+                  />
+                </span>
                 <span
                   className={`flex-1 min-w-0 truncate ${s.isUnread ? 'font-semibold text-white' : ''}`}
                 >
                   {s.title || 'Untitled session'}
                 </span>
-                <span className="shrink-0 text-[10px] text-[#8b9bb0]">
+                <span className="shrink-0 text-[11px] leading-[14px] tracking-[0.01em] text-[#8b9bb0]">
                   {relativeTime(s.updatedAt, Date.now())}
                 </span>
               </button>
@@ -303,12 +310,12 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
           <div className="px-2 py-3 text-[12px] text-[#5c6b80]">No sessions yet</div>
         ) : (
           tree.sections.map((sectionItem) => (
-            <div key={`${sectionItem.kind}:${sectionItem.name}`} className="mb-1">
+            <div key={`${sectionItem.kind}:${sectionItem.name}`} className="mb-px">
               <button
                 type="button"
                 data-section-kind={sectionItem.kind}
                 data-section-name={sectionItem.name}
-                className="w-full flex items-center gap-1 px-1 py-1 text-[11px] uppercase tracking-wide text-[#8b9bb0] hover:text-[#c9d4e3]"
+                className="w-full flex items-center gap-1 px-1 py-1 text-[12px] leading-[16px] font-medium text-[#8b9bb0] hover:text-[#c9d4e3]"
                 onClick={() => toggleFolder(sectionItem.name)}
               >
                 {sectionItem.collapsed ? (
@@ -319,7 +326,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 <span className="flex-1 text-left truncate">
                   {SECTION_LABELS[sectionItem.name] ?? sectionItem.name}
                 </span>
-                <span className="text-[10px] text-[#5c6b80]">
+                <span className="text-[11px] leading-[14px] tracking-[0.01em] text-[#5c6b80]">
                   {sectionItem.total !== null
                     ? `${sectionItem.nodes.length} / ${sectionItem.total}`
                     : sectionItem.nodes.length}

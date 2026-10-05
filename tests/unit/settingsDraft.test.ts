@@ -48,6 +48,7 @@ describe('draftFromSettings', () => {
       allowExternal: false,
       keepAliveHours: '48',
       maxLiveTabs: '3',
+      sessionsOpen: true,
       sessionsMaxLiveViews: '4',
       sessionsKeepAliveHours: '12',
       terminalAllSurfaces: true,
@@ -99,7 +100,7 @@ describe('validateDraft', () => {
       workspaces: [],
       routing: { allowExternal: true, rules: [] },
       tabs: { keepAliveHours: 24, maxLiveTabs: 8 },
-      sessions: { maxLiveViews: 6, keepAliveHours: 24 },
+      sessions: { open: true, maxLiveViews: 6, keepAliveHours: 24 },
       terminal: { allSurfaces: false, shell: 'pwsh.exe -l' },
       notifications: { userId: 'u1', orgId: 'o1' },
     });

@@ -3,6 +3,7 @@ import type { AppNotification } from '../core/notificationModel';
 import type { CredentialEntry } from '../core/credentials';
 import {
   IpcChannels,
+  type BadgeRender,
   type IdentityInfo,
   type SessionPr,
   type LocalResult,
@@ -313,6 +314,19 @@ const api = {
       ipcRenderer.send(IpcChannels.cloudPrefetch, { sessionId });
     }
   },
+  // Taskbar badge: main asks the shell to render, replies get {count,size}.
+  onBadgeRender: (callback: (request: BadgeRender) => void) => {
+    const listener = (_event: unknown, request: BadgeRender) => callback(request);
+    ipcRenderer.on(IpcChannels.badgeRender, listener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.badgeRender, listener);
+    };
+  },
+  badgeRendered: (dataUrl: string | null) =>
+    ipcRenderer.invoke(IpcChannels.badgeRendered, { dataUrl }) as Promise<{
+      count: number;
+      size: number;
+    }>,
   updateCheck: (source: 'settings' | 'manual') =>
     ipcRenderer.send(IpcChannels.updateCheck, { source }),
   releaseNotes: () =>

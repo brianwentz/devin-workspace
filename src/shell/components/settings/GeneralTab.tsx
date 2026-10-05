@@ -182,6 +182,15 @@ export function GeneralTab() {
       </label>
       <label className="flex items-center gap-2 text-sm">
         <input
+          id="sessionsColumnToggle"
+          type="checkbox"
+          checked={draft.sessionsOpen}
+          onChange={(event) => updateDraft({ sessionsOpen: event.target.checked })}
+        />
+        <span>Show the Cloud sessions column</span>
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
           id="terminalAllSurfacesInput"
           type="checkbox"
           checked={draft.terminalAllSurfaces}

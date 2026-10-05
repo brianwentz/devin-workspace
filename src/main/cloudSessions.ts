@@ -35,7 +35,10 @@ const POLL_FOCUSED_MS = 15_000;
 const POLL_IDLE_MS = 60_000;
 const BACKOFF_MIN_MS = 2_000;
 const BACKOFF_MAX_MS = 60_000;
+const ORG_SYNC_DEBOUNCE_MS = 2_000;
 const FOLDER_PAGE_SIZE = 20;
+
+type TokenFailReason = 'view-not-ready' | 'no-devindebug' | 'login-required' | 'timeout' | 'error';
 
 const FixtureSchema = z.object({
   sessions: z.array(CloudSessionSchema),
@@ -79,8 +82,18 @@ class CloudSessions {
   private firstTokenAttemptAt: number | null = null;
   private listInFlight = false;
   private listDirty: string | null = null;
+  private syncInFlight: Promise<void> | null = null;
+  private lastOrgSyncAt = 0;
+  private emptyListSynced = false;
   private readonly onViewReady = () => {
-    if (!this.token) void this.obtainToken();
+    if (!this.token) {
+      void this.obtainToken();
+      return;
+    }
+    // Follow the page's current org — the view may switch tenants.
+    if (Date.now() - this.lastOrgSyncAt < ORG_SYNC_DEBOUNCE_MS) return;
+    this.lastOrgSyncAt = Date.now();
+    void this.syncOrg('navigate');
   };
 
   snapshot(): CloudState {
@@ -135,9 +148,15 @@ class CloudSessions {
       void this.obtainToken();
       return;
     }
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      void this.list(reason);
-    }
+    void (async () => {
+      // The page may have switched orgs — a reconnect re-lists via the
+      // handshake, so only list when we're still on the same socket.
+      const socketBefore = this.socket;
+      await this.syncOrg(reason);
+      if (this.socket === socketBefore && this.socket?.readyState === WebSocket.OPEN) {
+        void this.list(reason);
+      }
+    })();
   }
 
   loadMore(folder: string): void {
@@ -249,6 +268,31 @@ class CloudSessions {
       return;
     }
     this.firstTokenAttemptAt ??= Date.now();
+    let failReason: TokenFailReason | null = null;
+    const identity = await this.readPageIdentity((reason) => {
+      failReason = reason;
+    });
+    if (!identity) {
+      this.onTokenFailure(failReason ?? 'error');
+      return;
+    }
+    this.token = identity.token;
+    this.lastToken = identity.token;
+    this.orgId = identity.orgId;
+    this.backoffMs = BACKOFF_MIN_MS;
+    this.tokenBackoffMs = TOKEN_BACKOFF_MIN_MS;
+    this.firstTokenAttemptAt = null;
+    log('cloud', 'cloud-token', { detail: { ok: true } });
+    this.emit();
+    this.connect();
+  }
+
+  // Reads the page's CURRENT token + org — devinDebug.getOrgId() reports
+  // whichever org the web app has selected, which can change after startup
+  // for multi-org users. onFail carries the fixed failure reason.
+  private async readPageIdentity(
+    onFail?: (reason: TokenFailReason) => void,
+  ): Promise<{ token: string; orgId: string } | null> {
     const contents = state.devinView?.webContents;
     const tenantOrigin = originOf(state.tenantUrl);
     if (
@@ -257,8 +301,8 @@ class CloudSessions {
       contents.isLoading() ||
       originOf(contents.getURL()) !== tenantOrigin
     ) {
-      this.onTokenFailure('view-not-ready');
-      return;
+      onFail?.('view-not-ready');
+      return null;
     }
     try {
       const credentials = (await Promise.race([
@@ -272,36 +316,63 @@ class CloudSessions {
       const token = credentials?.[0] ?? null;
       const orgId = credentials?.[1] ?? null;
       if (!token || !orgId) {
-        this.onTokenFailure(credentials === null ? 'no-devindebug' : 'login-required');
-        return;
+        onFail?.(credentials === null ? 'no-devindebug' : 'login-required');
+        return null;
       }
-      this.token = token;
-      this.lastToken = token;
-      this.orgId = orgId;
-      this.backoffMs = BACKOFF_MIN_MS;
-      this.tokenBackoffMs = TOKEN_BACKOFF_MIN_MS;
-      this.firstTokenAttemptAt = null;
-      log('cloud', 'cloud-token', { detail: { ok: true } });
-      this.emit();
-      this.connect();
+      return { token, orgId };
     } catch (error) {
       const message = String(error);
-      this.onTokenFailure(
+      onFail?.(
         message === 'Error: token timeout'
           ? 'timeout'
           : /login required/i.test(message)
             ? 'login-required'
             : 'error',
       );
+      return null;
+    }
+  }
+
+  private syncOrg(reason: string): Promise<void> {
+    if (this.syncInFlight) return this.syncInFlight;
+    const work = this.syncOrgInner(reason).finally(() => {
+      this.syncInFlight = null;
+    });
+    this.syncInFlight = work;
+    return work;
+  }
+
+  private async syncOrgInner(reason: string): Promise<void> {
+    if (!this.started || testMode || this.fixtureFile) return;
+    const identity = await this.readPageIdentity();
+    if (!identity) return;
+    if (identity.orgId !== this.orgId && (this.socket !== null || this.token !== null)) {
+      // The ws url carries org_id — a reconnect is required, and the new
+      // handshake's list('connect') re-fills the sidebar.
+      this.token = identity.token;
+      this.lastToken = identity.token;
+      this.orgId = identity.orgId;
+      this.sessions = [];
+      this.folders = [];
+      this.folderTotals = {};
+      this.folderOffsets.clear();
+      this.emptyListSynced = false;
+      log('cloud', 'cloud-org-change', { detail: { reason } });
+      this.connect();
+      this.emit();
+      return;
+    }
+    if (identity.token !== this.token) {
+      // Rotated token on the same org — keep the socket, refresh the copy.
+      this.token = identity.token;
+      this.lastToken = identity.token;
     }
   }
 
   // Every obtainToken failure path funnels here. Never clobber a live or
   // handshaking connection's status; 'no-token' means signed out — a still-
   // bootstrapping tenant page is 'connecting', not 'no-token'.
-  private onTokenFailure(
-    reason: 'view-not-ready' | 'no-devindebug' | 'login-required' | 'timeout' | 'error',
-  ): void {
+  private onTokenFailure(reason: TokenFailReason): void {
     if (
       this.token &&
       (this.socket?.readyState === WebSocket.OPEN ||
@@ -333,6 +404,7 @@ class CloudSessions {
   private connect(): void {
     if (!this.token || !this.orgId) return;
     this.closeSocket();
+    this.emptyListSynced = false;
     this.setStatus('connecting');
     this.emit();
     const socket = new WebSocket(acpWsUrl(state.tenantUrl, this.token, this.orgId));
@@ -499,6 +571,12 @@ class CloudSessions {
         },
       });
       this.emit();
+      // A totally empty result usually means the page is on another org for
+      // multi-org users — re-read devinDebug.getOrgId() once per connection.
+      if (result.sessions.length === 0 && result.folders.length === 0 && !this.emptyListSynced) {
+        this.emptyListSynced = true;
+        void this.syncOrg('empty-list');
+      }
     } catch (error) {
       this.onError('list', error);
       this.closeSocket();

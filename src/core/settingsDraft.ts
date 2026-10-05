@@ -9,6 +9,7 @@ export interface SettingsDraft {
   allowExternal: boolean;
   keepAliveHours: string;
   maxLiveTabs: string;
+  sessionsOpen: boolean;
   sessionsMaxLiveViews: string;
   sessionsKeepAliveHours: string;
   terminalAllSurfaces: boolean;
@@ -29,6 +30,7 @@ export const DRAFT_TAB: Record<DraftField, SettingsTabId> = {
   allowExternal: 'general',
   keepAliveHours: 'general',
   maxLiveTabs: 'general',
+  sessionsOpen: 'general',
   sessionsMaxLiveViews: 'general',
   sessionsKeepAliveHours: 'general',
   terminalAllSurfaces: 'general',
@@ -50,6 +52,7 @@ export function draftFromSettings(settings: Settings): SettingsDraft {
     allowExternal: settings.routing.allowExternal,
     keepAliveHours: String(settings.tabs.keepAliveHours),
     maxLiveTabs: String(settings.tabs.maxLiveTabs),
+    sessionsOpen: settings.sessions.open,
     sessionsMaxLiveViews: String(settings.sessions.maxLiveViews),
     sessionsKeepAliveHours: String(settings.sessions.keepAliveHours),
     terminalAllSurfaces: settings.terminal.allSurfaces,
@@ -79,6 +82,7 @@ export function isDraftDirty(draft: SettingsDraft, settings: Settings): boolean 
     draft.allowExternal !== base.allowExternal ||
     Number(draft.keepAliveHours) !== Number(base.keepAliveHours) ||
     Number(draft.maxLiveTabs) !== Number(base.maxLiveTabs) ||
+    draft.sessionsOpen !== base.sessionsOpen ||
     Number(draft.sessionsMaxLiveViews) !== Number(base.sessionsMaxLiveViews) ||
     Number(draft.sessionsKeepAliveHours) !== Number(base.sessionsKeepAliveHours) ||
     draft.terminalAllSurfaces !== base.terminalAllSurfaces ||
@@ -149,6 +153,7 @@ export function validateDraft(
       },
       tabs: { keepAliveHours: keepAlive, maxLiveTabs: maxLive },
       sessions: {
+        open: draft.sessionsOpen,
         maxLiveViews: sessionsMaxLive,
         keepAliveHours: sessionsKeepAlive,
       },
@@ -166,6 +171,7 @@ const PATH_TO_FIELD: Record<string, DraftField> = {
   'routing.rules': 'linkRules',
   'tabs.keepAliveHours': 'keepAliveHours',
   'tabs.maxLiveTabs': 'maxLiveTabs',
+  'sessions.open': 'sessionsOpen',
   'sessions.maxLiveViews': 'sessionsMaxLiveViews',
   'sessions.keepAliveHours': 'sessionsKeepAliveHours',
   'terminal.allSurfaces': 'terminalAllSurfaces',
