@@ -37,6 +37,7 @@ describe('draftFromSettings', () => {
         rules: [{ id: 'r1', kind: 'prefix', pattern: 'https://x.example/', enabled: true }],
       },
       tabs: { keepAliveHours: 48, maxLiveTabs: 3 },
+      sessions: { maxLiveViews: 4, keepAliveHours: 12 },
       terminal: { allSurfaces: true, shell: 'pwsh.exe' },
       notifications: { userId: 'user-1', orgId: 'org-2' },
     });
@@ -47,6 +48,8 @@ describe('draftFromSettings', () => {
       allowExternal: false,
       keepAliveHours: '48',
       maxLiveTabs: '3',
+      sessionsMaxLiveViews: '4',
+      sessionsKeepAliveHours: '12',
       terminalAllSurfaces: true,
       terminalShell: 'pwsh.exe',
       userId: 'user-1',
@@ -96,6 +99,7 @@ describe('validateDraft', () => {
       workspaces: [],
       routing: { allowExternal: true, rules: [] },
       tabs: { keepAliveHours: 24, maxLiveTabs: 8 },
+      sessions: { maxLiveViews: 6, keepAliveHours: 24 },
       terminal: { allSurfaces: false, shell: 'pwsh.exe -l' },
       notifications: { userId: 'u1', orgId: 'o1' },
     });

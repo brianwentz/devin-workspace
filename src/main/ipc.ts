@@ -10,6 +10,7 @@ import {
   CloudLoadMoreArg,
   CloudOpenArg,
   CloudPanelArg,
+  CloudPrefetchArg,
   DragCancelReasonArg,
   DragPosArg,
   DragStartArg,
@@ -46,6 +47,7 @@ import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlAr
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import { cloudSessions } from './cloudSessions';
+import { cloudKeepAliveMs, cloudViews } from './cloudViews';
 import {
   applyLayout,
   beginDrag,
@@ -90,12 +92,14 @@ export function applySettingsPatch(patch: SettingsPatch): Settings {
   state.surface = next.surface;
   state.tabManager?.setKeepAliveMs(keepAliveMs(next.tabs.keepAliveHours));
   state.tabManager?.setMaxLiveTabs(next.tabs.maxLiveTabs);
+  cloudViews().setLimits({
+    maxLiveViews: next.sessions.maxLiveViews,
+    keepAliveMs: cloudKeepAliveMs(next.sessions.keepAliveHours),
+  });
   if (next.tenantUrl !== previousTenant) {
     state.tenantUrl = next.tenantUrl;
     log('shell', 'tenant-changed', { url: next.tenantUrl });
-    state.devinView?.webContents.loadURL(next.tenantUrl).catch((error: unknown) => {
-      log('devin', 'load-error', { url: next.tenantUrl, detail: { message: String(error) } });
-    });
+    cloudViews().reset(next.tenantUrl);
     const analytics = analyticsUrl(next.tenantUrl);
     state.analyticsView?.webContents.loadURL(analytics).catch((error: unknown) => {
       log('analytics', 'load-error', { url: analytics, detail: { message: String(error) } });
@@ -248,6 +252,10 @@ export function setupIpc(): void {
   guardedOn(IpcChannels.cloudPanel, (_event, payload: unknown) => {
     const parsed = CloudPanelArg.safeParse(payload);
     if (parsed.success) setSessionsOpen(parsed.data.open, 'rail');
+  });
+  guardedOn(IpcChannels.cloudPrefetch, (_event, payload: unknown) => {
+    const parsed = CloudPrefetchArg.safeParse(payload);
+    if (parsed.success) cloudSessions().prefetchSession(parsed.data.sessionId);
   });
   // Credentials: never log IPC payloads (they may carry secrets).
   guardedHandle(IpcChannels.credentialsList, () => state.credentials?.list() ?? []);

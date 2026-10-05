@@ -3,7 +3,8 @@ import { cloudSessions } from './cloudSessions';
 import { computeBounds } from '../core/layout';
 import { clampFraction01, clampTerminalHeight } from '../core/layout';
 import { auditCookies } from './cookieAudit';
-import { fromShell } from './ipcGuard';
+import { cloudViews } from './cloudViews';
+import { fromHostedView, fromShell } from './ipcGuard';
 import { terminalHost } from './local/terminalHost';
 import type { Surface } from '../shared/ipc';
 import { identityResolver } from './identity';
@@ -101,12 +102,37 @@ export function registerTestHooks(): void {
         state.credentials?.update(id, patch) ?? null,
       deleteCredential: (id: string) => state.credentials?.delete(id) ?? false,
       // F4: would a foreign webContents (the devin view) pass the IPC guard?
-      ipcProbe: () => ({
-        foreign: fromShell({ sender: state.devinView?.webContents, senderFrame: null } as never),
-        shell: state.shellView
-          ? fromShell({ sender: state.shellView.webContents, senderFrame: null } as never)
-          : null,
-      }),
+      ipcProbe: () => {
+        // A pooled NON-active Cloud view — must still pass the hosted-view
+        // guard (a detached view's webContents is just as privileged).
+        const pooled = cloudViews()
+          .views()
+          .map((v) => v.webContents)
+          .find((wc) => wc !== state.devinView?.webContents);
+        return {
+          foreign: fromShell({ sender: state.devinView?.webContents, senderFrame: null } as never),
+          shell: state.shellView
+            ? fromShell({ sender: state.shellView.webContents, senderFrame: null } as never)
+            : null,
+          pooled: pooled
+            ? fromHostedView({ sender: pooled, senderFrame: pooled.mainFrame } as never)
+            : null,
+        };
+      },
+      cloudViewsInfo: () => cloudViews().debugInfo(),
+      // Load an arbitrary URL inside a pooled background view (bypasses the
+      // router like loadURL does) — for probing ipc guards on a github-origin
+      // fixture page, which the http fixture tenant can't satisfy.
+      cloudViewLoadUrl: async (key: string, url: string) => {
+        const target = cloudViews().viewForKey(key);
+        if (!target) return false;
+        await target.webContents.loadURL(url).catch(() => undefined);
+        return true;
+      },
+      cloudShow: (id: string) => cloudSessions().openSession(id),
+      cloudPrefetchHook: (id: string) => cloudSessions().prefetchSession(id),
+      cloudIdleSweep: () => cloudViews().runIdleSweep('idle'),
+      setCloudKeepAliveMs: (ms: number) => cloudViews().setKeepAliveMs(ms),
       auditCookies: () => auditCookies(),
       closeWindow: () => shutdown(),
       getTabWebContents: (id: string) => state.tabManager?.getView(id)?.webContents ?? null,

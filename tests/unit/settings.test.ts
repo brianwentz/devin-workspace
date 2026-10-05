@@ -330,15 +330,33 @@ describe('routing.rules', () => {
 describe('sessions settings', () => {
   it('defaults to open, width 260, no collapsed folders', () => {
     const settings = SettingsSchema.parse({});
-    expect(settings.sessions).toEqual({ open: true, width: 260, collapsedFolders: [] });
+    expect(settings.sessions).toEqual({
+      open: true,
+      width: 260,
+      collapsedFolders: [],
+      maxLiveViews: 6,
+      keepAliveHours: 24,
+    });
   });
 
   it('parses explicit values and rejects out-of-range width', () => {
     const { settings, dropped } = parseSettingsFile({
-      sessions: { open: false, width: 320, collapsedFolders: ['Alpha'] },
+      sessions: {
+        open: false,
+        width: 320,
+        collapsedFolders: ['Alpha'],
+        maxLiveViews: 4,
+        keepAliveHours: 2,
+      },
     });
     expect(dropped).toEqual([]);
-    expect(settings.sessions).toEqual({ open: false, width: 320, collapsedFolders: ['Alpha'] });
+    expect(settings.sessions).toEqual({
+      open: false,
+      width: 320,
+      collapsedFolders: ['Alpha'],
+      maxLiveViews: 4,
+      keepAliveHours: 2,
+    });
     expect(
       parseSettingsFile({ sessions: { width: 9999 } }).settings.sessions.width,
     ).toBe(260);
@@ -347,15 +365,32 @@ describe('sessions settings', () => {
   it('patches collapsedFolders without touching open/width', () => {
     const base: Settings = {
       ...SettingsSchema.parse({}),
-      sessions: { open: false, width: 300, collapsedFolders: [] },
+      sessions: { open: false, width: 300, collapsedFolders: [], maxLiveViews: 6, keepAliveHours: 24 },
     };
     const next = mergeSettings(base, {
-      sessions: { collapsedFolders: ['Alpha', 'pinned'] },
+      sessions: { collapsedFolders: ['Alpha', 'pinned'], maxLiveViews: 3 },
     });
     expect(next.sessions).toEqual({
       open: false,
       width: 300,
       collapsedFolders: ['Alpha', 'pinned'],
+      maxLiveViews: 3,
+      keepAliveHours: 24,
     });
+  });
+
+  it('rejects out-of-range pool fields', () => {
+    expect(
+      SettingsPatchSchema.safeParse({ sessions: { maxLiveViews: 0 } }).success,
+    ).toBe(false);
+    expect(
+      SettingsPatchSchema.safeParse({ sessions: { maxLiveViews: 21 } }).success,
+    ).toBe(false);
+    expect(
+      SettingsPatchSchema.safeParse({ sessions: { keepAliveHours: -1 } }).success,
+    ).toBe(false);
+    expect(
+      SettingsPatchSchema.safeParse({ sessions: { keepAliveHours: 168 } }).success,
+    ).toBe(true);
   });
 });

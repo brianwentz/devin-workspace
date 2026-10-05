@@ -20,7 +20,7 @@ import {
 import { CloudSessionSchema, type CloudState } from '../shared/ipc';
 import { z } from 'zod';
 import { log } from './log';
-import { loadInDevinView } from './routing';
+import { cloudViews } from './cloudViews';
 import { parseSessionId } from '../core/sessions';
 import { originOf, state, testMode } from './state';
 import { applyLayout, notifyShell } from './window';
@@ -70,6 +70,7 @@ class CloudSessions {
   private started = false;
   private fixtureFile: string | null = null;
   private folderOffsets = new Map<string, number>();
+  private unsubActiveNavigate: (() => void) | null = null;
   private readonly onViewReady = () => {
     if (!this.token) void this.obtainToken();
   };
@@ -82,6 +83,7 @@ class CloudSessions {
       folders: this.folders,
       folderTotals: this.folderTotals,
       sessions: this.sessions,
+      liveSessionIds: cloudViews().publicInfo().liveSessionIds,
     };
   }
 
@@ -100,12 +102,9 @@ class CloudSessions {
       return;
     }
     this.setStatus('connecting');
-    const contents = state.devinView?.webContents;
-    if (contents && !contents.isDestroyed()) {
-      contents.on('did-navigate', this.onViewReady);
-      contents.on('did-finish-load', this.onViewReady);
-      contents.on('did-navigate-in-page', this.onViewReady);
-    }
+    // The pool fires this on every active-view navigation/finish-load AND on
+    // each activation — the token re-read gates itself on the tenant URL.
+    this.unsubActiveNavigate = cloudViews().onActiveNavigate(this.onViewReady);
     this.emit();
     void this.obtainToken();
   }
@@ -113,12 +112,8 @@ class CloudSessions {
   stop(): void {
     this.started = false;
     this.clearTimers();
-    const contents = state.devinView?.webContents;
-    if (contents && !contents.isDestroyed()) {
-      contents.off('did-navigate', this.onViewReady);
-      contents.off('did-finish-load', this.onViewReady);
-      contents.off('did-navigate-in-page', this.onViewReady);
-    }
+    this.unsubActiveNavigate?.();
+    this.unsubActiveNavigate = null;
     this.closeSocket();
   }
 
@@ -180,9 +175,16 @@ class CloudSessions {
       return;
     }
     state.surface = 'cloud';
-    loadInDevinView(session.url);
+    cloudViews().show(sessionId, session.url);
     applyLayout();
     log('cloud', 'cloud-open', { detail: { sessionId } });
+  }
+
+  prefetchSession(sessionId: string): void {
+    if (this.status !== 'ready') return;
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session || parseSessionId(session.url, state.tenantUrl) !== sessionId) return;
+    cloudViews().prefetch(sessionId, session.url);
   }
 
   // --- fixture mode -------------------------------------------------------

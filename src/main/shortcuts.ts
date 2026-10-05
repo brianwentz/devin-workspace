@@ -1,6 +1,8 @@
 import { app } from 'electron';
 import { clampPaneWidth, fractionFromPx, paneWidthPx } from '../core/layout';
 import { newSessionUrl } from '../core/sessions';
+import { HOME_KEY } from '../core/viewPool';
+import { cloudViews } from './cloudViews';
 import { log } from './log';
 import { state, testMode, type ViewName } from './state';
 import { applyLayout, cancelDrag, setPaneOpen, setSessionsOpen } from './window';
@@ -39,7 +41,7 @@ function focusedContents(): Electron.WebContents | null {
 function webContentsForFocusedView(): Electron.WebContents | null {
   const all = [
     state.shellView?.webContents,
-    state.devinView?.webContents,
+    ...cloudViews().views().map((view) => view.webContents),
     state.analyticsView?.webContents,
     ...(state.tabManager?.getViews().map((view) => view.webContents) ?? []),
   ].filter((contents): contents is Electron.WebContents =>
@@ -62,19 +64,16 @@ export function focusVisibleContents(contents: Electron.WebContents | null): voi
   }
 }
 
-// P5: Ctrl+N — show the Cloud surface and navigate devinView to the tenant's
-// create-session surface (NEW_SESSION_PATH in core/sessions.ts).
+// P5: Ctrl+N — show the Cloud surface and navigate the pooled home view to
+// the tenant's create-session surface (NEW_SESSION_PATH in core/sessions.ts).
 export function openNewSession(): void {
   const url = newSessionUrl(state.tenantUrl);
   state.surface = 'cloud';
+  cloudViews().show(HOME_KEY, url, { reload: true });
   applyLayout();
-  const contents = state.devinView?.webContents;
-  if (!contents || contents.isDestroyed()) return;
-  contents.loadURL(url).catch((error: unknown) => {
-    log('devin', 'load-error', { url, detail: { message: String(error) } });
-  });
   log('devin', 'new-session', { url });
-  contents.focus();
+  const contents = state.devinView?.webContents;
+  if (contents && !contents.isDestroyed()) contents.focus();
 }
 
 export function handleShortcut(

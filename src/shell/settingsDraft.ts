@@ -83,6 +83,8 @@ const FIELD_INPUT: Record<DraftField, string> = {
   allowExternal: 'allowExternalInput',
   keepAliveHours: 'keepAliveInput',
   maxLiveTabs: 'maxLiveTabsInput',
+  sessionsMaxLiveViews: 'sessionsMaxLiveViews',
+  sessionsKeepAliveHours: 'sessionsKeepAliveHours',
   terminalAllSurfaces: 'terminalAllSurfacesInput',
   terminalShell: 'terminalShellInput',
   userId: 'userIdInput',

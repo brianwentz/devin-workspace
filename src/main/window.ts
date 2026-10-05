@@ -20,6 +20,7 @@ import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 
 import { ensureAnalyticsView } from './analytics';
 import { cloudSessions } from './cloudSessions';
+import { cloudViews } from './cloudViews';
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
@@ -237,14 +238,16 @@ export function overlayOpen(): boolean {
 export function lowerShell(): void {
   // See raiseShell — never restack during shutdown.
   if (state.shuttingDown) return;
-  const { windowRef, shellView, devinView, analyticsView, tabManager } = state;
+  const { windowRef, shellView, analyticsView, tabManager } = state;
   if (!windowRef || !shellView) return;
   shellView.setBackgroundColor('#111827');
+  const pooled = cloudViews().views();
+  const active = cloudViews().activeView();
   const children = [...windowRef.contentView.children];
   for (const child of children) {
     if (
       child === shellView ||
-      child === devinView ||
+      pooled.includes(child as WebContentsView) ||
       child === analyticsView ||
       tabManager?.getViews().includes(child as WebContentsView)
     ) {
@@ -252,7 +255,7 @@ export function lowerShell(): void {
     }
   }
   windowRef.contentView.addChildView(shellView, 0);
-  if (state.surface === 'cloud' && devinView) windowRef.contentView.addChildView(devinView);
+  if (state.surface === 'cloud' && active) windowRef.contentView.addChildView(active);
   if (state.surface === 'analytics' && analyticsView)
     windowRef.contentView.addChildView(analyticsView);
   if (state.paneOpen && !state.paneCollapsed) addAtTop(tabManager?.activeView ?? null);
@@ -269,7 +272,8 @@ export function syncScope(): void {
 }
 
 export function applyLayout(): void {
-  const { windowRef, shellView, devinView, tabManager } = state;
+  const { windowRef, shellView, tabManager } = state;
+  const devinView = state.devinView;
   if (!windowRef || !shellView || !devinView || !tabManager) return;
   syncScope();
   const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
@@ -277,10 +281,14 @@ export function applyLayout(): void {
   state.sessionsCollapsed = bounds.sessionsCollapsed;
   const size = windowRef.getContentBounds();
   shellView.setBounds({ x: 0, y: 0, width: size.width, height: size.height });
-  if (state.surface === 'cloud') {
-    devinView.setBounds(nativeBounds(bounds.devin));
-  } else {
-    devinView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  // Only the ACTIVE pooled view is laid out/attached; every other pooled view
+  // gets zero bounds and stays detached.
+  for (const view of cloudViews().views()) {
+    if (view === devinView && state.surface === 'cloud') {
+      view.setBounds(nativeBounds(bounds.devin));
+    } else {
+      view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    }
   }
   if (state.surface === 'analytics') {
     ensureAnalyticsView().setBounds(nativeBounds(bounds.devin));
@@ -291,8 +299,10 @@ export function applyLayout(): void {
   tabManager.setBounds(paneVisible ? nativeBounds(bounds.ghTab) : null);
   if (!state.dragging) {
     ensureShellBottom();
-    if (state.surface === 'cloud') ensureAttached(devinView);
-    else detachView(devinView);
+    for (const view of cloudViews().views()) {
+      if (view === devinView && state.surface === 'cloud') ensureAttached(view);
+      else detachView(view);
+    }
     if (state.surface === 'analytics') ensureAttached(state.analyticsView);
     else detachView(state.analyticsView);
     const activeTabView = paneVisible ? tabManager.activeView : null;

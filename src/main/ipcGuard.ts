@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { normalizeOrigin } from '../core/credentials';
+import { cloudViews } from './cloudViews';
 import { log } from './log';
 import { fixtureOrigins, state } from './state';
 
@@ -51,7 +52,9 @@ export function fromHostedView(
   const sender = event.sender;
   if (!sender || sender.isDestroyed()) return false;
   const hosted =
-    (state.devinView !== null && sender === state.devinView.webContents) ||
+    (cloudViews()
+      .views()
+      .some((view) => view.webContents === sender)) ||
     (state.analyticsView !== null && sender === state.analyticsView.webContents) ||
     (state.tabManager?.getViews().some((view) => view.webContents === sender) ?? false);
   if (!hosted) return false;

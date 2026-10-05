@@ -52,16 +52,45 @@ function useCloud() {
   return useShellState()!.cloud;
 }
 
+// Hovering a row for 300 ms prefetches the session's pooled view so a click
+// lands on an already-loaded page.
+function usePrefetch(): {
+  onEnter: (id: string) => void;
+  onLeave: () => void;
+} {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancel = () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+  return {
+    onEnter: (id: string) => {
+      cancel();
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        window.devinworkspaces.cloudPrefetch(id);
+      }, 300);
+    },
+    onLeave: cancel,
+  };
+}
+
 function Row({
   node,
   collapsedChildren,
   onToggleChildren,
   registerRow,
+  liveIds,
+  prefetch,
 }: {
   node: SessionTreeNode;
   collapsedChildren: Set<string>;
   onToggleChildren: (id: string) => void;
   registerRow: (el: HTMLButtonElement | null) => void;
+  liveIds: Set<string>;
+  prefetch: ReturnType<typeof usePrefetch>;
 }) {
   const s = node.session;
   const hasChildren = node.children.length > 0 || s.directChildrenCount > 0;
@@ -93,8 +122,11 @@ function Row({
           data-current={node.current}
           data-unread={s.isUnread}
           data-status-enum={s.statusEnum ?? s.status}
+          data-live={liveIds.has(s.id)}
           title={s.title || 'Untitled session'}
-          className="session-row flex-1 min-w-0 flex items-center gap-1.5 px-1.5 py-1 rounded text-left text-[13px] text-[#c9d4e3] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[current=true]:bg-[#1f2f42]"
+          className="session-row flex-1 min-w-0 flex items-center gap-1.5 px-1.5 py-1 rounded text-left text-[13px] text-[#c9d4e3] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[current=true]:bg-[#1f2f42] data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
+          onMouseEnter={() => prefetch.onEnter(s.id)}
+          onMouseLeave={prefetch.onLeave}
           onClick={() => window.devinworkspaces.cloudOpen(s.id)}
         >
           <span
@@ -124,6 +156,8 @@ function Row({
             collapsedChildren={collapsedChildren}
             onToggleChildren={onToggleChildren}
             registerRow={registerRow}
+            liveIds={liveIds}
+            prefetch={prefetch}
           />
         ))}
     </>
@@ -132,12 +166,14 @@ function Row({
 
 export function SessionSidebar({ rect }: { rect: Rect }) {
   const state = useShellState();
+  const prefetch = usePrefetch();
   const [query, setQuery] = useState('');
   const [collapsedChildren, setCollapsedChildren] = useState<Set<string>>(new Set());
   const rowRefs = useRef<HTMLButtonElement[]>([]);
   rowRefs.current = [];
 
   const cloud = state!.cloud;
+  const liveIds = useMemo(() => new Set(cloud.liveSessionIds), [cloud.liveSessionIds]);
   const collapsedFolders = state!.settings.sessions.collapsedFolders;
   const tree = useMemo(
     () =>
@@ -241,8 +277,11 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 data-current={s.id === state!.currentSessionId}
                 data-unread={s.isUnread}
                 data-status-enum={s.statusEnum ?? s.status}
+                data-live={liveIds.has(s.id)}
                 title={s.title || 'Untitled session'}
-                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left text-[13px] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none"
+                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left text-[13px] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
+                onMouseEnter={() => prefetch.onEnter(s.id)}
+                onMouseLeave={prefetch.onLeave}
                 onClick={() => window.devinworkspaces.cloudOpen(s.id)}
               >
                 <span
@@ -298,6 +337,8 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                         collapsedChildren={collapsedChildren}
                         onToggleChildren={toggleChildren}
                         registerRow={registerRow}
+                        liveIds={liveIds}
+                        prefetch={prefetch}
                       />
                     ))
                   )}

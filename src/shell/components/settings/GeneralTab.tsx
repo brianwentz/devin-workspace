@@ -140,6 +140,46 @@ export function GeneralTab() {
           at is exempt.
         </span>
       </label>
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-[#aeb9c8]">Cloud sessions kept loaded</span>
+        <input
+          id="sessionsMaxLiveViews"
+          className={fieldInputClass(errors, 'sessionsMaxLiveViews')}
+          type="number"
+          min={1}
+          max={20}
+          step={1}
+          value={draft.sessionsMaxLiveViews}
+          aria-invalid={errors.sessionsMaxLiveViews ? 'true' : undefined}
+          onChange={(event) => updateDraft({ sessionsMaxLiveViews: event.target.value })}
+        />
+        <FieldError inputId="sessionsMaxLiveViews" message={errors.sessionsMaxLiveViews} />
+        <span className="text-xs text-[#7f8ca0]">
+          Pooled Cloud views — the session you're looking at is exempt.
+        </span>
+      </label>
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-[#aeb9c8]">
+          Keep hidden Cloud sessions live for (hours, 0 = discard on switch)
+        </span>
+        <input
+          id="sessionsKeepAliveHours"
+          className={fieldInputClass(errors, 'sessionsKeepAliveHours')}
+          type="number"
+          min={0}
+          max={168}
+          step={1}
+          value={draft.sessionsKeepAliveHours}
+          aria-invalid={errors.sessionsKeepAliveHours ? 'true' : undefined}
+          onChange={(event) =>
+            updateDraft({ sessionsKeepAliveHours: event.target.value })
+          }
+        />
+        <FieldError inputId="sessionsKeepAliveHours" message={errors.sessionsKeepAliveHours} />
+        <span className="text-xs text-[#7f8ca0]">
+          Switched-away Cloud sessions reload after this long.
+        </span>
+      </label>
       <label className="flex items-center gap-2 text-sm">
         <input
           id="terminalAllSurfacesInput"

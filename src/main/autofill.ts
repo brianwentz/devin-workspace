@@ -8,6 +8,7 @@ import {
   IpcChannels,
 } from '../shared/ipc';
 import { guardedOn, hostedHandle, hostedOn } from './ipcGuard';
+import { cloudViews } from './cloudViews';
 import { log } from './log';
 import { fixtureOrigins, state, testMode } from './state';
 import { applyLayout, lowerShell, notifyShell, overlayOpen, raiseShell } from './window';
@@ -89,6 +90,8 @@ export function disposeAutofill(): void {
 // view that is no longer the active tab. A devin-view-anchored overlay (e.g.
 // a capture pending through an SSO redirect that flips the scope) survives.
 export function closeAutofillOverlaysForInactiveTabs(): void {
+  // Only the ACTIVE pooled Cloud view counts as live — overlays anchored to a
+  // pooled background view are stale.
   const devin = state.devinView?.webContents ?? null;
   const active = state.tabManager?.activeWebContents ?? null;
   const stale = (sender: Electron.WebContents) => sender !== devin && sender !== active;
@@ -97,7 +100,10 @@ export function closeAutofillOverlaysForInactiveTabs(): void {
 }
 
 function senderView(sender: Electron.WebContents): Electron.WebContentsView | null {
-  if (state.devinView?.webContents === sender) return state.devinView;
+  const pooled = cloudViews()
+    .views()
+    .find((v) => v.webContents === sender);
+  if (pooled) return pooled;
   return state.tabManager?.getViews().find((v) => v.webContents === sender) ?? null;
 }
 

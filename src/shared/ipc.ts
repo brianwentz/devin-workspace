@@ -103,6 +103,7 @@ export const IpcChannels = {
   cloudRefresh: 'cloud:refresh',
   cloudLoadMore: 'cloud:loadMore',
   cloudPanel: 'cloud:panel',
+  cloudPrefetch: 'cloud:prefetch',
 } as const;
 
 export const SurfaceSchema = z.enum(['cloud', 'local', 'settings', 'analytics']);
@@ -184,6 +185,9 @@ const SessionsFields = {
   open: z.boolean(),
   width: z.number().int().min(200).max(480),
   collapsedFolders: z.array(z.string().max(256)).max(200),
+  // Pooled Cloud views: how many session views stay loaded, and for how long.
+  maxLiveViews: z.number().int().min(1).max(20),
+  keepAliveHours: z.number().min(0).max(168),
 };
 const TerminalFields = {
   allSurfaces: z.boolean(),
@@ -260,8 +264,16 @@ export const SettingsObject = z.object({
       open: SessionsFields.open.default(true),
       width: SessionsFields.width.default(260),
       collapsedFolders: SessionsFields.collapsedFolders.default([]),
+      maxLiveViews: SessionsFields.maxLiveViews.default(6),
+      keepAliveHours: SessionsFields.keepAliveHours.default(24),
     })
-    .default({ open: true, width: 260, collapsedFolders: [] }),
+    .default({
+      open: true,
+      width: 260,
+      collapsedFolders: [],
+      maxLiveViews: 6,
+      keepAliveHours: 24,
+    }),
   terminal: z
     .object({
       allSurfaces: TerminalFields.allSurfaces.default(false),
@@ -377,6 +389,8 @@ export const CloudStateSchema = z.object({
   folders: z.array(z.string()),
   folderTotals: z.record(z.string(), z.number()),
   sessions: z.array(CloudSessionSchema),
+  // Bare-hex ids of sessions with a live pooled view (for sidebar markers).
+  liveSessionIds: z.array(z.string()),
 });
 export type CloudState = z.infer<typeof CloudStateSchema>;
 
@@ -561,6 +575,7 @@ export const PrUrlArg = z.object({ url: z.string().url() });
 export const PrOpenArg = z.object({ sessionId: z.string().min(1), url: z.string().url() });
 export const PrPanelArg = z.object({ open: z.boolean() });
 export const CloudOpenArg = z.object({ sessionId: z.string().min(1).max(128) });
+export const CloudPrefetchArg = z.object({ sessionId: z.string().min(1).max(128) });
 export const CloudLoadMoreArg = z.object({ folder: z.string().min(1).max(256) });
 export const CloudPanelArg = z.object({ open: z.boolean() });
 

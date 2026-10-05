@@ -8,6 +8,7 @@ import type { IdentitySource, Surface } from '../shared/ipc';
 import type { CredentialStore } from './credentials';
 import type { SettingsStore } from './settings';
 import type { TabManager } from './tabs';
+import type { CloudViewPool } from './cloudViews';
 import type { DevinSession } from '../core/devinApi';
 import type { SecretStore } from './secrets';
 
@@ -31,7 +32,12 @@ export function originOf(value: string): string | null {
 export const state = {
   windowRef: null as BaseWindow | null,
   shellView: null as WebContentsView | null,
-  devinView: null as WebContentsView | null,
+  // The active pooled Cloud view — `devinView` reads through to it so the many
+  // existing readers keep working; only the pool assigns views.
+  cloudViewsRef: null as CloudViewPool | null,
+  get devinView(): WebContentsView | null {
+    return state.cloudViewsRef?.activeView() ?? null;
+  },
   analyticsView: null as WebContentsView | null,
   tabManager: null as TabManager | null,
   settings: null as SettingsStore | null,

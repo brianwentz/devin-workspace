@@ -13,8 +13,8 @@ import { terminalHost } from './local/terminalHost';
 import { log, logFile } from './log';
 import { setPermissions } from './permissions';
 import { installProtocol } from './protocol';
-import { attachSessionTracking } from './sessions';
 import { cloudSessions } from './cloudSessions';
+import { cloudKeepAliveMs, cloudViews } from './cloudViews';
 import { SettingsStore } from './settings';
 import { fixtureOrigins, state, testMode } from './state';
 import { registerTestHooks } from './testHooks';
@@ -151,14 +151,14 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
     }
     const contents = [
       state.shellView?.webContents,
-      state.devinView?.webContents,
+      ...cloudViews().views().map((view) => view.webContents),
       state.analyticsView?.webContents,
       ...(state.tabManager?.getViews().map((view) => view.webContents) ?? []),
     ].filter((item): item is Electron.WebContents => Boolean(item && !item.isDestroyed()));
     const before = webContents.getAllWebContents().length;
     log('shell', 'window-close-start', { detail: { webContentsCount: before } });
     state.tabManager?.dispose();
-    detachView(state.devinView);
+    for (const view of cloudViews().views()) detachView(view);
     detachView(state.analyticsView);
     detachView(state.shellView);
     for (const item of contents) {
@@ -179,7 +179,13 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
     );
     const after = webContents.getAllWebContents().length;
     log('shell', 'window-close-complete', {
-      detail: { webContentsCountBefore: before, webContentsCountAfter: after },
+      detail: {
+        webContentsCountBefore: before,
+        webContentsCountAfter: after,
+        survivors: webContents
+          .getAllWebContents()
+          .map((w) => ({ url: w.getURL(), type: w.getType() })),
+      },
     });
     state.windowRef?.destroy();
     state.windowRef = null;
@@ -281,24 +287,17 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
     },
   });
-  state.devinView = new WebContentsView({
-    webPreferences: {
-      partition: 'persist:devin',
-      preload: resolve(app.getAppPath(), 'out', 'autofill-preload.cjs'),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      spellcheck: false,
-    },
-  });
   state.shellView.setBackgroundColor('#111827');
-  state.devinView.setBackgroundColor('#111827');
   state.windowRef.contentView.addChildView(state.shellView);
-  state.windowRef.contentView.addChildView(state.devinView);
   attachRouting(state.shellView.webContents, 'shell');
   attachContextMenu(state.shellView.webContents);
-  attachRouting(state.devinView.webContents, 'devin');
-  attachSessionTracking(state.devinView.webContents);
+  // Pooled Cloud views replace the single devinView — init creates the 'home'
+  // view (keyed by the session URL it currently shows) and loads the tenant.
+  cloudViews().init(state.tenantUrl);
+  cloudViews().setLimits({
+    maxLiveViews: saved.sessions.maxLiveViews,
+    keepAliveMs: cloudKeepAliveMs(saved.sessions.keepAliveHours),
+  });
   cloudSessions().start();
 
   state.tabManager = new TabManager({
@@ -353,9 +352,6 @@ async function createWindow(): Promise<void> {
   state.tabManager.preloadVisibleScope();
   applyLayout();
   await state.shellView.webContents.loadURL('app://shell/index.html');
-  state.devinView.webContents.loadURL(state.tenantUrl).catch((error: unknown) => {
-    log('devin', 'load-error', { url: state.tenantUrl, detail: { message: String(error) } });
-  });
   registerTestHooks();
   startCookieAudit();
   notifier.start();
