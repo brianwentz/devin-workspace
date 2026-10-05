@@ -252,6 +252,7 @@ export async function startFixtureServers(): Promise<FixtureServers> {
   let githubAltUrl = '';
   let idpUrl = '';
   const prTitles = new Map<number, string>();
+  let analyticsLoads = 0;
 
   const devin = createServer((request, response) => {
     const url = new URL(request.url ?? '/', devinUrl);
@@ -297,9 +298,11 @@ export async function startFixtureServers(): Promise<FixtureServers> {
       url.pathname === '/settings/my-analytics' ||
       url.pathname.startsWith('/settings/my-analytics/')
     ) {
+      analyticsLoads += 1;
       html(
         response,
         `<title>Fixture Devin analytics</title><main>Analytics ${url.pathname}
+         <span id="analyticsLoadCount">${analyticsLoads}</span>
          <a id="sessionLink" href="${devinUrl}/sessions/A">Session A</a>
          <a id="ghLink" href="${githubUrl}/page/from-analytics">GitHub link</a></main>`,
       );

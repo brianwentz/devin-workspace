@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { closeApp, launchApp, shellPage, state } from './helpers';
+import { closeApp, launchApp, pageFor, shellPage, state, waitForEventCount } from './helpers';
 
 type Rect = { x: number; y: number; width: number; height: number };
 interface G {
@@ -64,6 +64,10 @@ test('analytics rail button swaps the main column to the tenant analytics view',
       )
       .toBe(true);
 
+    // First entry loads the page once — no refresh fires for the creation load.
+    const firstPage = await pageFor(app, `${fixtures.devinUrl}/settings/my-analytics`);
+    await expect(firstPage.locator('#analyticsLoadCount')).toHaveText('1');
+
     // Switching back restores the devin view and parks analytics (it stays loaded).
     await shell.locator('#cloudButton').click();
     await expect.poll(async () => (await state(app)).surface).toBe('cloud');
@@ -74,6 +78,18 @@ test('analytics rail button swaps the main column to the tenant analytics view',
         (await h.childViews()).some((view) => view.url?.endsWith('/settings/my-analytics')),
       )
       .toBe(false);
+
+    // Re-entering the surface reloads the analytics view in place.
+    await shell.locator('#analyticsButton').click();
+    await expect.poll(async () => (await state(app)).surface).toBe('analytics');
+    const page = await pageFor(app, `${fixtures.devinUrl}/settings/my-analytics`);
+    await expect(page.locator('#analyticsLoadCount')).toHaveText('2');
+    await waitForEventCount(logFile, 'analytics-refresh', 1);
+    await shell.waitForTimeout(500);
+    const refreshCount = readFileSync(logFile, 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"analytics-refresh"')).length;
+    expect(refreshCount).toBe(1);
   } finally {
     await closeApp(app);
     rmSync(profile, { recursive: true, force: true });
