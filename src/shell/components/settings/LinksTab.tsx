@@ -55,6 +55,15 @@ export function LinksTab() {
         Links matching these rules open as tabs in the GitHub pane instead of the system browser.
         GitHub and your Devin tenant are always handled first.
       </p>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          id="allowExternalInput"
+          type="checkbox"
+          checked={draft.allowExternal}
+          onChange={(event) => updateDraft({ allowExternal: event.target.checked })}
+        />
+        <span>Open non-GitHub links in system browser</span>
+      </label>
       <ul id="linkRulesList" className="flex flex-col gap-3">
         {rules.map((rule) => {
           const invalid = rule.pattern.trim()

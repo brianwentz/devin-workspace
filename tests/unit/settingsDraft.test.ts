@@ -182,6 +182,7 @@ describe('DRAFT_TAB / firstErrorField', () => {
     expect(DRAFT_TAB.userId).toBe('notifications');
     expect(DRAFT_TAB.orgId).toBe('notifications');
     expect(DRAFT_TAB.tenantUrl).toBe('general');
+    expect(DRAFT_TAB.allowExternal).toBe('links');
   });
 
   it('returns the first erroring field in SettingsDraft key order', () => {
