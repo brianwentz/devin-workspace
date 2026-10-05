@@ -38,9 +38,9 @@ import { notificationStore } from './notifications';
 import { notifier, openNotification, openPr, openPrs } from './notifier';
 import { prStore } from './prs';
 import { handleLink } from './routing';
-import { hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
+import { checkForUpdatesNow, hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
-import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg } from '../shared/ipc';
+import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import {
@@ -348,6 +348,10 @@ function setupExtrasIpc(): void {
   });
   guardedOn(IpcChannels.updateInstall, () => {
     if (hasDownloadedUpdate()) installUpdate();
+  });
+  guardedOn(IpcChannels.updateCheck, (_e, arg: unknown) => {
+    const parsed = UpdateCheckArg.safeParse(arg);
+    if (parsed.success) checkForUpdatesNow(parsed.data.source);
   });
   guardedHandle(IpcChannels.updateReleaseNotes, () => releaseNotesReply());
 }
