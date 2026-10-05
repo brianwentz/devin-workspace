@@ -5,6 +5,7 @@ import { AgentBadge, MessageView, PermissionCard, PlanList, buttonClass } from '
 import { TerminalView } from './TerminalView';
 import { useShellState } from '../store';
 import { useLocalState } from './store';
+import { clearDraft, getDraft, setDraft as setStoredDraft } from './drafts';
 
 type Session = LocalStatePublic['sessions'][string];
 
@@ -36,7 +37,11 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
     () => shell?.localSessionId ?? null,
   );
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraftState] = useState(() => getDraft(shell?.localSessionId ?? null));
+  const setDraft = (text: string) => {
+    setDraftState(text);
+    if (sessionId) setStoredDraft(sessionId, text);
+  };
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
@@ -66,6 +71,11 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   // survives surface switches (this panel unmounts when leaving Local).
   useEffect(() => {
     window.devinworkspaces.localActiveSession(sessionId);
+  }, [sessionId]);
+
+  // Swap in the newly selected session's stored draft.
+  useEffect(() => {
+    setDraftState(getDraft(sessionId));
   }, [sessionId]);
 
   useEffect(() => {
@@ -173,6 +183,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
         return next;
       });
       if (sessionId === id) setSessionId(null);
+      clearDraft(id);
     }
   };
 
@@ -191,6 +202,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
         for (const id of gone) delete next[id];
         return next;
       });
+      for (const id of gone) clearDraft(id);
       if (sessionId && gone.has(sessionId)) setSessionId(null);
     }
   };
@@ -207,7 +219,8 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
   const send = () => {
     const text = draft.trim();
     if (!text || !session || session.running) return;
-    setDraft('');
+    setDraftState('');
+    clearDraft(session.id);
     setError(null);
     void window.devinworkspaces.localPrompt(session.id, text).then((result) => {
       if (!result.ok) setError(result.error);
