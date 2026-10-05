@@ -391,18 +391,20 @@ export function finishPrompt(
   state: LocalState,
   sessionId: string,
   stopReason: StopReason,
-  error?: string,
-  now?: string,
-  usage?: PromptUsage,
+  options: { error?: string; now?: string; usage?: PromptUsage | undefined } = {},
 ): LocalState {
   const session = state.sessions[sessionId];
   if (!session) return state;
   const next: LocalSession = { ...session, running: false, lastStopReason: stopReason };
   delete next.pendingPermission;
-  if (now && session.promptStartedAt) {
-    next.lastTurnMs = Math.max(0, Date.parse(now) - Date.parse(session.promptStartedAt));
+  if (options.now && session.promptStartedAt) {
+    next.lastTurnMs = Math.max(
+      0,
+      Date.parse(options.now) - Date.parse(session.promptStartedAt),
+    );
   }
   delete next.promptStartedAt;
+  const usage = options.usage;
   if (usage) {
     const merged = { ...(session.usage ?? emptyUsage()) };
     for (const key of [
@@ -418,7 +420,7 @@ export function finishPrompt(
     }
     next.usage = merged;
   }
-  if (error) next.error = error;
+  if (options.error) next.error = options.error;
   else delete next.error;
   return replaceSession(state, next);
 }

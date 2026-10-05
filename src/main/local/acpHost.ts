@@ -85,6 +85,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const nowIso = () => new Date().toISOString();
+
+// The terminal handoff restarts the workspace agent (the CLI lock is
+// process-wide) — refused while any session in the workspace is busy.
+export class TerminalHandoffRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TerminalHandoffRefused';
+  }
+}
+
+// Rejected on handle.exit when the agent is restarted deliberately —
+// in-flight prompts resolve 'cancelled' instead of 'error'.
+class AgentRestarted extends Error {
+  constructor(reason: string) {
+    super(`agent restarted: ${reason}`);
+    this.name = 'AgentRestarted';
+  }
+}
+
 // Text worth PR-link scanning from a session update: agent message chunks and
 // tool call titles/content/rawOutput. Never user_message_chunk.
 function collectAgentOutputText(update: Record<string, unknown>, kind: string): string[] {
@@ -427,7 +447,7 @@ export class DevinLocalHost {
       let next = state;
       for (const session of sessionsFor(state, workspace)) {
         if (session.running)
-          next = finishPrompt(next, session.id, 'error', reason, new Date().toISOString());
+          next = finishPrompt(next, session.id, 'error', { error: reason, now: nowIso() });
         else if (session.pendingPermission) next = clearPermission(next, session.id);
       }
       if (!stillTracked) return next;
@@ -475,7 +495,7 @@ export class DevinLocalHost {
       let next = state;
       for (const session of sessionsFor(state, normalized)) {
         if (session.running) {
-          next = finishPrompt(next, session.id, 'cancelled', undefined, new Date().toISOString());
+          next = finishPrompt(next, session.id, 'cancelled', { now: nowIso() });
         } else if (session.pendingPermission) {
           next = clearPermission(next, session.id);
         }
@@ -489,7 +509,7 @@ export class DevinLocalHost {
     handle.connection = null;
     handle.backoffMs = BACKOFF_MIN_MS;
     handle.nextRestartAt = 0;
-    handle.exit.reject(new Error(`agent restarted: ${reason}`));
+    handle.exit.reject(new AgentRestarted(reason));
     handle.exit = deferred();
     handle.ready = this.start(handle);
     await handle.ready;
@@ -497,9 +517,21 @@ export class DevinLocalHost {
 
   // Terminal handoff: mark the session owned by its `devin -r` pty and release
   // the CLI lock by restarting the workspace agent (the lock lives in-process).
+  // Refused while any session in the workspace is busy — the restart would
+  // cancel it mid-turn.
   async releaseSessionForTerminal(sessionId: string): Promise<void> {
     const session = getLocalState().sessions[sessionId];
     if (!session) return;
+    const busy = sessionsFor(getLocalState(), session.workspace).filter(
+      (entry) => entry.running || entry.pendingPermission,
+    );
+    if (busy.length > 0) {
+      throw new TerminalHandoffRefused(
+        busy.length === 1 && busy[0]!.id === sessionId
+          ? 'This session is still running — wait for it to finish or cancel it before opening the terminal.'
+          : 'A session in this workspace is still running — wait for it to finish or cancel it before opening the terminal.',
+      );
+    }
     update((state) => setTerminalOwned(state, sessionId, true));
     const handle = this.agents.get(session.workspace);
     if (handle?.child && this.bindings.has(sessionId)) {
@@ -511,12 +543,33 @@ export class DevinLocalHost {
   // (which now includes the turns made in the terminal).
   async reclaimSessionFromTerminal(sessionId: string): Promise<void> {
     update((state) => setTerminalOwned(state, sessionId, false));
-    const session = getLocalState().sessions[sessionId];
-    if (!session || this.disposed) return;
+    // The session may have been deleted (or its workspace removed) while the
+    // pty was alive — re-check after every await and bail silently.
+    const live = () => {
+      const session = getLocalState().sessions[sessionId];
+      return session && this.agents.has(session.workspace) ? session : null;
+    };
+    if (!live() || this.disposed) return;
     try {
+      const session = live()!;
       const handle = await this.ensureAgent(session.workspace);
+      if (!live() || this.disposed) return;
       if (handle.capabilities.loadSession) {
-        await this.loadSession(session.workspace, sessionId);
+        // The pty process may still be releasing the lock — `session/load`
+        // fails session_locked (retryable) while it drains.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            await this.loadSession(session.workspace, sessionId);
+            break;
+          } catch (error) {
+            const kind = (error as { data?: Record<string, unknown> }).data?.[
+              'cognition.ai/errorKind'
+            ];
+            if (kind !== 'session_locked' || attempt === 2) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            if (!live() || this.disposed) return;
+          }
+        }
       }
     } catch (error) {
       log('local', 'session-reclaim-error', {
@@ -723,7 +776,7 @@ export class DevinLocalHost {
     const binding = await this.bind(handle, this.requireSession(sessionId));
     const connection = handle.connection;
     if (!connection) throw new Error('agent not connected');
-    update((state) => startPrompt(state, sessionId, text, new Date().toISOString()));
+    update((state) => startPrompt(state, sessionId, text, nowIso()));
     const entry = this.index.find((item) => item.id === sessionId);
     if (entry && !entry.title) {
       entry.title = titleFromPrompt(text);
@@ -738,21 +791,23 @@ export class DevinLocalHost {
       const stopReason = response.stopReason as StopReason;
       handle.backoffMs = BACKOFF_MIN_MS;
       update((state) =>
-        finishPrompt(
-          state,
-          sessionId,
-          stopReason,
-          undefined,
-          new Date().toISOString(),
-          response.usage ?? undefined,
-        ),
+        finishPrompt(state, sessionId, stopReason, {
+          now: nowIso(),
+          usage: response.usage ?? undefined,
+        }),
       );
       this.flushPrLinks(sessionId);
       log('local', 'prompt-finish', { detail: { sessionId, stopReason } });
       return stopReason;
     } catch (error) {
+      if (error instanceof AgentRestarted) {
+        // restartAgent already finished this prompt as cancelled — a terminal
+        // handoff is not a prompt failure.
+        log('local', 'prompt-finish', { detail: { sessionId, stopReason: 'cancelled' } });
+        return 'cancelled';
+      }
       const message = errorMessage(error);
-      update((state) => finishPrompt(state, sessionId, 'error', message, new Date().toISOString()));
+      update((state) => finishPrompt(state, sessionId, 'error', { error: message, now: nowIso() }));
       this.flushPrLinks(sessionId);
       log('local', 'prompt-error', { detail: { sessionId, message } });
       throw error;

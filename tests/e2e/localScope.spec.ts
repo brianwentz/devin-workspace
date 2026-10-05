@@ -244,7 +244,13 @@ test('local sessions get their own GitHub tab scope and devin terminal', async (
       ),
     ).toBe(true);
     expect(events.some((e) => e.event === 'terminal-close')).toBe(true);
-    expect(events.some((e) => e.event === 'tabs-scope-closed')).toBe(true);
+    // forgetDeletedSession closes the scope asynchronously after the state
+    // update — poll the log instead of a one-shot read.
+    await expect
+      .poll(async () =>
+        (await readEvents(logFile)).some((e) => e.event === 'tabs-scope-closed'),
+      )
+      .toBe(true);
     await expect
       .poll(async () =>
         (await app.evaluate(() => (globalThis as G).__devinworkspaces.listScopes())).map(

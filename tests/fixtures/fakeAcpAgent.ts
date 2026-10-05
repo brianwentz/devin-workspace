@@ -120,9 +120,9 @@ function createAgent(connection: AgentSideConnection): Agent {
     },
     async deleteSession(params) {
       if (!supportsDelete) throw new Error('session/delete not supported');
-      if (!sessions.delete(params.sessionId)) {
-        throw new Error(`unknown session ${params.sessionId}`);
-      }
+      // Idempotent: after a restart we know nothing about older sessions, but
+      // the real CLI persists them — deleting one we forgot still succeeds.
+      sessions.delete(params.sessionId);
       return {};
     },
     async cancel(params) {

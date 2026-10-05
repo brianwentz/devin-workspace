@@ -9,11 +9,12 @@ export function ThinkingIndicator({ startedAt }: { startedAt: string | undefined
   }, []);
   const elapsed = startedAt ? formatElapsed(Date.now() - Date.parse(startedAt)) : null;
   return (
-    <div id="thinking" className="flex items-center gap-2 text-xs text-[#7f8ca0]" aria-live="polite">
-      <span className="thinking-dot" />
-      <span className="thinking-dot" />
-      <span className="thinking-dot" />
-      <span>Thinking…{elapsed ? ` ${elapsed}` : ''}</span>
+    <div id="thinking" className="flex items-center gap-2 text-xs text-[#7f8ca0]">
+      <span className="thinking-dot" aria-hidden="true" />
+      <span className="thinking-dot" aria-hidden="true" />
+      <span className="thinking-dot" aria-hidden="true" />
+      <span aria-live="polite">Thinking…</span>
+      {elapsed && <span aria-hidden="true">{` ${elapsed}`}</span>}
     </div>
   );
 }

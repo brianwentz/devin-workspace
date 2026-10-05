@@ -270,7 +270,12 @@ describe('localModel reducers', () => {
       expect(session.pendingPermission).toBeUndefined();
       expect(session.error).toBeUndefined();
     }
-    const failed = finishPrompt(startPrompt(withSession(), SID, 'go', '2026-10-01T00:00:01Z'), SID, 'error', 'agent crashed');
+    const failed = finishPrompt(
+      startPrompt(withSession(), SID, 'go', '2026-10-01T00:00:01Z'),
+      SID,
+      'error',
+      { error: 'agent crashed' },
+    );
     expect(failed.sessions[SID]!.lastStopReason).toBe('error');
     expect(failed.sessions[SID]!.error).toBe('agent crashed');
   });
@@ -357,14 +362,10 @@ describe('thinking indicator + token usage', () => {
 
   it('finishPrompt computes lastTurnMs and merges prompt-response usage', () => {
     const started = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
-    const state = finishPrompt(
-      started,
-      SID,
-      'end_turn',
-      undefined,
-      '2026-10-01T00:00:03.500Z',
-      { totalTokens: 1234, inputTokens: 1000, outputTokens: 234 },
-    );
+    const state = finishPrompt(started, SID, 'end_turn', {
+      now: '2026-10-01T00:00:03.500Z',
+      usage: { totalTokens: 1234, inputTokens: 1000, outputTokens: 234 },
+    });
     const session = state.sessions[SID]!;
     expect(session.running).toBe(false);
     expect(session.promptStartedAt).toBeUndefined();
@@ -405,7 +406,7 @@ describe('thinking indicator + token usage', () => {
       size: 200000,
     });
     const started = startPrompt(state, SID, 'hi', '2026-10-01T00:00:01Z');
-    state = finishPrompt(started, SID, 'end_turn', undefined, '2026-10-01T00:00:02Z');
+    state = finishPrompt(started, SID, 'end_turn', { now: '2026-10-01T00:00:02Z' });
     expect(state.sessions[SID]!.usage).toMatchObject({ used: 100, size: 200000 });
     expect(state.sessions[SID]!.lastTurnMs).toBe(1000);
     expect(

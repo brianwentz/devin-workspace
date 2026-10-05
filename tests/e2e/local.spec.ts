@@ -748,7 +748,9 @@ test('terminal handoff: devin -r takes the session lock; closing reclaims it', a
   const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
   const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
     DEVIN_WORKSPACES_LOCAL_AGENT_CMD: FAKE_AGENT_CMD,
+    DEVIN_WORKSPACES_TEST_TERMINAL_CMD: 'node out/fixtures/fakePty.cjs',
     FAKE_ACP_LOAD: '1',
+    FAKE_ACP_PROMPT_DELAY_MS: '4000',
   });
   try {
     await waitForHooks(app);
@@ -756,12 +758,40 @@ test('terminal handoff: devin -r takes the session lock; closing reclaims it', a
     const ws = await addWorkspace(app, workspace);
     await expect.poll(async () => (await localState(app)).agents[ws]?.status).toBe('ready');
     const sessionId = await newSession(app, ws);
+    const secondId = await newSession(app, ws);
     await expect
       .poll(() => shellCount(app, `.session-item[data-session-id="${sessionId}"]`))
       .toBe(1);
     await shellClick(app, `.session-item[data-session-id="${sessionId}"]`);
     const pidBefore = await agentPid(app, ws);
     expect(pidBefore).toBeGreaterThan(0);
+
+    // Refusal: the handoff restarts the workspace agent, so it is refused
+    // while ANY session in the workspace is still running.
+    await promptNoWait(app, secondId, 'slow turn');
+    await expect
+      .poll(async () => (await localState(app)).sessions[secondId]?.running)
+      .toBe(true);
+    expect(await shellClick(app, '#view-terminal')).toBe(true);
+    await expect
+      .poll(async () =>
+        evaluateInShell(
+          app,
+          `document.getElementById('terminalPane')?.textContent ?? ''`,
+        ),
+      )
+      .toContain('still running');
+    await expect
+      .poll(async () => (await localState(app)).sessions[sessionId]?.terminalOwned ?? false)
+      .toBe(false);
+    expect(
+      (await readEvents(logFile)).some((entry) => entry.event === 'agent-restart'),
+    ).toBe(false);
+
+    // Once the busy session finishes the open succeeds.
+    await expect
+      .poll(async () => (await localState(app)).sessions[secondId]?.running)
+      .toBe(false);
 
     // Opening a devin terminal for the session: agent restarts to release the
     // CLI's per-session lock; chat is disabled while the pty owns it.

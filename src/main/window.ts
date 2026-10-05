@@ -341,21 +341,29 @@ export function moveDrag(pos: number): void {
   if (!state.dragging || !windowRef) return;
   state.dragLastX = pos;
   const content = windowRef.getContentBounds();
+  let changed = false;
   if (state.dragAxis === 'x') {
     // Pointer → pane px (guarded) → stored as a fraction of the available width.
     const panePx = clampPaneWidth(content.width - pos - SPLITTER_WIDTH, content.width);
-    state.paneFraction = fractionFromPx(panePx, content.width);
+    const next = fractionFromPx(panePx, content.width);
+    changed = next !== state.paneFraction;
+    state.paneFraction = next;
   } else {
-    state.terminalHeight = clampTerminalHeight(
+    const next = clampTerminalHeight(
       content.height - pos - SPLITTER_WIDTH / 2,
       content.height,
     );
+    changed = next !== state.terminalHeight;
+    state.terminalHeight = next;
   }
   // Live-resize the hosted views — no shell raise (see OVERLAY_TRANSPARENT).
-  applyBounds(computeBounds(content, layoutState()), content);
-  // Push the new geometry to the shell without persisting — notifyShell's
-  // syncFromState would write settings.json on every pointermove.
-  state.shellView?.webContents.send(IpcChannels.stateUpdate, publicState());
+  // Skip no-op moves: the clamps make most pointermoves a wash.
+  if (changed) {
+    applyBounds(computeBounds(content, layoutState()), content);
+    // Push the new geometry to the shell without persisting — notifyShell's
+    // syncFromState would write settings.json on every pointermove.
+    state.shellView?.webContents.send(IpcChannels.stateUpdate, publicState());
+  }
   log('shell', 'drag-move', {
     detail: { axis: state.dragAxis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
   });
