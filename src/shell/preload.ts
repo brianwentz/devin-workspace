@@ -314,6 +314,52 @@ const api = {
       ipcRenderer.send(IpcChannels.cloudPrefetch, { sessionId });
     }
   },
+  // Cloud sidebar mutations + native context menus.
+  cloudFolderCreate: (name: string) => {
+    const trimmed = name.trim();
+    if (trimmed.length >= 1 && trimmed.length <= 100) {
+      ipcRenderer.send(IpcChannels.cloudFolderCreate, { name: trimmed });
+    }
+  },
+  cloudFolderRename: (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (isString(oldName) && trimmed.length >= 1 && trimmed.length <= 100) {
+      ipcRenderer.send(IpcChannels.cloudFolderRename, { oldName, newName: trimmed });
+    }
+  },
+  cloudFolderDelete: (name: string) => {
+    if (isString(name)) ipcRenderer.send(IpcChannels.cloudFolderDelete, { name });
+  },
+  cloudFolderReorder: (names: string[]) => {
+    if (Array.isArray(names)) ipcRenderer.send(IpcChannels.cloudFolderReorder, { names });
+  },
+  cloudSessionMove: (sessionId: string, folder: string | null) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudSessionMove, { sessionId, folder });
+    }
+  },
+  cloudSessionArchive: (sessionId: string, archive: boolean) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudSessionArchive, { sessionId, archive });
+    }
+  },
+  cloudCopyLink: (sessionId: string) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudCopyLink, { sessionId });
+    }
+  },
+  cloudContextMenu: (request: {
+    kind: 'session' | 'folder' | 'header';
+    sessionId?: string;
+    name?: string;
+    x: number;
+    y: number;
+  }) =>
+    ipcRenderer.invoke(IpcChannels.cloudContextMenu, request) as Promise<{
+      action: 'rename' | 'new-folder' | null;
+    }>,
+  cloudShowArchived: (value: boolean) =>
+    ipcRenderer.send(IpcChannels.cloudShowArchived, { value }),
   // Taskbar badge: main asks the shell to render, replies get {count,size}.
   onBadgeRender: (callback: (request: BadgeRender) => void) => {
     const listener = (_event: unknown, request: BadgeRender) => callback(request);

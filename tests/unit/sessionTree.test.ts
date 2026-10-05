@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { CloudListResult, CloudSession } from '../../src/core/cloudAcp';
-import { buildSessionTree } from '../../src/core/sessionTree';
+import {
+  addFolder,
+  buildSessionTree,
+  moveSession,
+  removeFolder,
+  renameFolder,
+  reorderFolders,
+  setArchived,
+} from '../../src/core/sessionTree';
 
 let seq = 0;
 function session(partial: Partial<CloudSession> & { id: string }): CloudSession {
@@ -18,7 +26,8 @@ function session(partial: Partial<CloudSession> & { id: string }): CloudSession 
     isStarred: false,
     directChildrenCount: 0,
     hasMoreChildren: false,
-    prCount: 0,
+    prs: { open: 0, queued: 0, draft: 0, merged: 0, closed: 0 },
+    isArchived: false,
     updatedAt: 1000 + seq++,
     ...partial,
   };
@@ -166,5 +175,56 @@ describe('buildSessionTree', () => {
     };
     const t = tree(result);
     expect(t.sections.map((s) => s.name)).toEqual(['Alpha']);
+  });
+});
+
+describe('optimistic mutations', () => {
+  const data = () => ({
+    folders: ['Alpha', 'pinned', 'Beta'],
+    folderTotals: { Alpha: 2, Beta: 1 },
+    sessions: [
+      session({ id: 'a', folder: 'Alpha' }),
+      session({ id: 'b', folder: 'Beta' }),
+      session({ id: 'c' }),
+    ],
+  });
+
+  it('moveSession sets/clears the folder', () => {
+    expect(moveSession(data(), 'c', 'Alpha').sessions[2]!.folder).toBe('Alpha');
+    expect(moveSession(data(), 'a', null).sessions[0]!.folder).toBeNull();
+    // Unknown id is a no-op.
+    const d = data();
+    expect(moveSession(d, 'zz', 'Alpha').sessions).toEqual(d.sessions);
+  });
+
+  it('reorderFolders reorders user folders and keeps stragglers', () => {
+    const next = reorderFolders(data(), ['Beta', 'Alpha']);
+    expect(next.folders).toEqual(['Beta', 'Alpha']);
+    // 'pinned' can never be reintroduced into the folder order.
+    expect(reorderFolders(data(), ['pinned', 'Alpha']).folders).toEqual(['Alpha', 'Beta']);
+  });
+
+  it('addFolder appends once', () => {
+    expect(addFolder(data(), 'Gamma').folders).toEqual(['Alpha', 'pinned', 'Beta', 'Gamma']);
+    expect(addFolder(data(), 'Alpha').folders).toEqual(data().folders);
+  });
+
+  it('renameFolder renames folder, sessions and totals', () => {
+    const next = renameFolder(data(), 'Alpha', 'Greek');
+    expect(next.folders).toEqual(['Greek', 'pinned', 'Beta']);
+    expect(next.sessions[0]!.folder).toBe('Greek');
+    expect(next.folderTotals).toEqual({ Greek: 2, Beta: 1 });
+  });
+
+  it('removeFolder unfolders sessions and drops totals', () => {
+    const next = removeFolder(data(), 'Alpha');
+    expect(next.folders).toEqual(['pinned', 'Beta']);
+    expect(next.sessions[0]!.folder).toBeNull();
+    expect(next.folderTotals).toEqual({ Beta: 1 });
+  });
+
+  it('setArchived toggles the flag', () => {
+    expect(setArchived(data(), 'a', true).sessions[0]!.isArchived).toBe(true);
+    expect(setArchived(data(), 'a', false).sessions[0]!.isArchived).toBe(false);
   });
 });

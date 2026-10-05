@@ -44,7 +44,7 @@ import { prStore } from './prs';
 import { handleLink } from './routing';
 import { checkForUpdatesNow, hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
-import { BadgeRenderedSchema, NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
+import { BadgeRenderedSchema, CloudContextMenuArg, CloudCopyLinkArg, CloudFolderCreateArg, CloudFolderDeleteArg, CloudFolderRenameArg, CloudFolderReorderArg, CloudSessionArchiveArg, CloudSessionMoveArg, CloudShowArchivedArg, NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import { cloudSessions } from './cloudSessions';
@@ -259,6 +259,45 @@ export function setupIpc(): void {
   guardedOn(IpcChannels.cloudPrefetch, (_event, payload: unknown) => {
     const parsed = CloudPrefetchArg.safeParse(payload);
     if (parsed.success) cloudSessions().prefetchSession(parsed.data.sessionId);
+  });
+  // Cloud sidebar mutations — REST ops live in cloudSessions; log ids/names
+  // nowhere (handlers stay zod-safeParse + void).
+  guardedOn(IpcChannels.cloudFolderCreate, (_event, payload: unknown) => {
+    const parsed = CloudFolderCreateArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderCreate(parsed.data.name);
+  });
+  guardedOn(IpcChannels.cloudFolderRename, (_event, payload: unknown) => {
+    const parsed = CloudFolderRenameArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderRename(parsed.data.oldName, parsed.data.newName);
+  });
+  guardedOn(IpcChannels.cloudFolderDelete, (_event, payload: unknown) => {
+    const parsed = CloudFolderDeleteArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderDelete(parsed.data.name);
+  });
+  guardedOn(IpcChannels.cloudFolderReorder, (_event, payload: unknown) => {
+    const parsed = CloudFolderReorderArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderReorder(parsed.data.names);
+  });
+  guardedOn(IpcChannels.cloudSessionMove, (_event, payload: unknown) => {
+    const parsed = CloudSessionMoveArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().sessionMove(parsed.data.sessionId, parsed.data.folder);
+  });
+  guardedOn(IpcChannels.cloudSessionArchive, (_event, payload: unknown) => {
+    const parsed = CloudSessionArchiveArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().sessionArchive(parsed.data.sessionId, parsed.data.archive);
+  });
+  guardedOn(IpcChannels.cloudCopyLink, (_event, payload: unknown) => {
+    const parsed = CloudCopyLinkArg.safeParse(payload);
+    if (parsed.success) cloudSessions().copyLink(parsed.data.sessionId);
+  });
+  guardedHandle(IpcChannels.cloudContextMenu, (_event, payload: unknown) => {
+    const parsed = CloudContextMenuArg.safeParse(payload);
+    if (!parsed.success) return { action: null };
+    return cloudSessions().contextMenu(parsed.data);
+  });
+  guardedOn(IpcChannels.cloudShowArchived, (_event, payload: unknown) => {
+    const parsed = CloudShowArchivedArg.safeParse(payload);
+    if (parsed.success) cloudSessions().setShowArchived(parsed.data.value);
   });
   // Credentials: never log IPC payloads (they may carry secrets).
   guardedHandle(IpcChannels.credentialsList, () => state.credentials?.list() ?? []);

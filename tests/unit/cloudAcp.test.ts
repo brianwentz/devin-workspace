@@ -116,7 +116,15 @@ const RAW_SESSION = {
     'cognition.ai/proposedByDevinId': 'devin-bbbb0000000000000000000000000002',
     'cognition.ai/directChildrenCount': 3,
     'cognition.ai/hasMoreChildren': true,
-    'cognition.ai/sessionPRs': [{ url: 'https://github.com/x/y/pull/1' }, {}],
+    'cognition.ai/sessionPRs': [
+      { url: 'https://github.com/x/y/pull/1', state: 'open' },
+      { url: 'https://github.com/x/y/pull/2', state: 'open', draft: true },
+      { url: 'https://github.com/x/y/pull/3', state: 'open', queued: true },
+      { url: 'https://github.com/x/y/pull/4', state: 'merged' },
+      { url: 'https://github.com/x/y/pull/5', state: 'closed' },
+      { url: 'https://github.com/x/y/pull/6', state: 'bogus' },
+      'junk',
+    ],
     'cognition.ai/sortUpdatedAt': '2026-10-02T12:45:44.533751+00:00',
   },
 };
@@ -132,7 +140,7 @@ describe('parseListResult', () => {
         updatedAt: '2026-10-04T00:00:00Z',
         _meta: { 'cognition.ai/sessionStatus': 'suspended' },
       },
-      // Archived sessions are dropped.
+      // Archived sessions parse with isArchived (show-archived opt-in).
       {
         sessionId: 'devin-dddd0000000000000000000000000004',
         _meta: { 'cognition.ai/isArchived': true, 'cognition.ai/sessionStatus': 'exit' },
@@ -149,7 +157,7 @@ describe('parseListResult', () => {
 
   it('maps wire sessions to CloudSession', () => {
     const result = parseListResult(raw, ORG);
-    expect(result.sessions).toHaveLength(2);
+    expect(result.sessions).toHaveLength(3);
     const s = result.sessions[0]!;
     expect(s.id).toBe('aaaa0000000000000000000000000001');
     expect(s.acpId).toBe('devin-aaaa0000000000000000000000000001');
@@ -163,7 +171,8 @@ describe('parseListResult', () => {
     expect(s.isUnread).toBe(true);
     expect(s.directChildrenCount).toBe(3);
     expect(s.hasMoreChildren).toBe(true);
-    expect(s.prCount).toBe(2);
+    expect(s.prs).toEqual({ open: 1, queued: 1, draft: 1, merged: 1, closed: 1 });
+    expect(s.isArchived).toBe(false);
     expect(s.updatedAt).toBe(Date.parse('2026-10-05T09:58:32.215079+00:00'));
   });
 
@@ -173,6 +182,7 @@ describe('parseListResult', () => {
     expect(result.folderTotals).toEqual({ 'Activity Log': 2, participated: 5 });
     expect(result.nextCursor).toBe('cursor-9');
     expect(result.sessions[1]!.folder).toBeNull();
+    expect(result.sessions[2]!.isArchived).toBe(true);
     expect(result.sessions[1]!.parentId).toBeNull();
   });
 

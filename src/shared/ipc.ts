@@ -105,6 +105,16 @@ export const IpcChannels = {
   cloudLoadMore: 'cloud:loadMore',
   cloudPanel: 'cloud:panel',
   cloudPrefetch: 'cloud:prefetch',
+  // Cloud sidebar mutations (folders, archive, context menus).
+  cloudFolderCreate: 'cloud:folderCreate',
+  cloudFolderRename: 'cloud:folderRename',
+  cloudFolderDelete: 'cloud:folderDelete',
+  cloudFolderReorder: 'cloud:folderReorder',
+  cloudSessionMove: 'cloud:sessionMove',
+  cloudSessionArchive: 'cloud:sessionArchive',
+  cloudCopyLink: 'cloud:copyLink',
+  cloudContextMenu: 'cloud:contextMenu',
+  cloudShowArchived: 'cloud:showArchived',
   // Taskbar badge: main asks the shell to render, the shell sends back a PNG.
   badgeRender: 'badge:render',
   badgeRendered: 'badge:rendered',
@@ -390,7 +400,14 @@ export const CloudSessionSchema = z.object({
   isStarred: z.boolean(),
   directChildrenCount: z.number().int(),
   hasMoreChildren: z.boolean(),
-  prCount: z.number().int(),
+  prs: z.object({
+    open: z.number().int(),
+    queued: z.number().int(),
+    draft: z.number().int(),
+    merged: z.number().int(),
+    closed: z.number().int(),
+  }),
+  isArchived: z.boolean(),
   updatedAt: z.number().finite(),
 });
 export type CloudSessionState = z.infer<typeof CloudSessionSchema>;
@@ -404,6 +421,9 @@ export const CloudStateSchema = z.object({
   sessions: z.array(CloudSessionSchema),
   // Bare-hex ids of sessions with a live pooled view (for sidebar markers).
   liveSessionIds: z.array(z.string()),
+  showArchived: z.boolean(),
+  // Transient mutation failure; cleared by the next successful list.
+  lastError: z.object({ op: z.string(), message: z.string() }).nullable(),
 });
 export type CloudState = z.infer<typeof CloudStateSchema>;
 export const UpdateCheckSourceSchema = z.enum([
@@ -607,6 +627,34 @@ export const CloudOpenArg = z.object({ sessionId: z.string().min(1).max(128) });
 export const CloudPrefetchArg = z.object({ sessionId: z.string().min(1).max(128) });
 export const CloudLoadMoreArg = z.object({ folder: z.string().min(1).max(256) });
 export const CloudPanelArg = z.object({ open: z.boolean() });
+const CloudFolderName = z.string().trim().min(1).max(100);
+const CloudSessionId = z.string().min(1).max(128);
+export const CloudFolderCreateArg = z.object({ name: CloudFolderName });
+export const CloudFolderRenameArg = z.object({
+  oldName: CloudFolderName,
+  newName: CloudFolderName,
+});
+export const CloudFolderDeleteArg = z.object({ name: CloudFolderName });
+export const CloudFolderReorderArg = z.object({
+  names: z.array(CloudFolderName).max(200),
+});
+export const CloudSessionMoveArg = z.object({
+  sessionId: CloudSessionId,
+  folder: CloudFolderName.nullable(),
+});
+export const CloudSessionArchiveArg = z.object({
+  sessionId: CloudSessionId,
+  archive: z.boolean(),
+});
+export const CloudCopyLinkArg = z.object({ sessionId: CloudSessionId });
+export const CloudContextMenuArg = z.object({
+  kind: z.enum(['session', 'folder', 'header']),
+  sessionId: CloudSessionId.optional(),
+  name: CloudFolderName.optional(),
+  x: z.number().finite(),
+  y: z.number().finite(),
+});
+export const CloudShowArchivedArg = z.object({ value: z.boolean() });
 
 // Arg schemas for ipcMain.on channels (safeParse; invalid payloads ignored).
 export const TabIdArg = z.string();

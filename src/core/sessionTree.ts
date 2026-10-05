@@ -115,3 +115,62 @@ export function buildSessionTree(
 
   return { sections };
 }
+
+// --- optimistic sidebar mutations ----------------------------------------
+// Applied to a local copy while the REST call is in flight; the next
+// cloud.list (success or recorded error) replaces them.
+
+export type CloudListData = Pick<
+  CloudListResult,
+  'sessions' | 'folders' | 'folderTotals'
+>;
+
+const withoutSessions = (data: CloudListData, patch: (s: CloudSession) => CloudSession): CloudListData => ({
+  ...data,
+  sessions: data.sessions.map(patch),
+});
+
+export function moveSession(data: CloudListData, id: string, folder: string | null): CloudListData {
+  return withoutSessions(data, (s) => (s.id === id ? { ...s, folder } : s));
+}
+
+export function reorderFolders(data: CloudListData, names: string[]): CloudListData {
+  const next = names.filter((name) => name !== PINNED);
+  const missing = data.folders.filter((name) => name !== PINNED && !next.includes(name));
+  return { ...data, folders: [...next, ...missing] };
+}
+
+export function addFolder(data: CloudListData, name: string): CloudListData {
+  if (data.folders.includes(name)) return data;
+  return { ...data, folders: [...data.folders, name] };
+}
+
+export function renameFolder(data: CloudListData, oldName: string, newName: string): CloudListData {
+  if (oldName === newName) return data;
+  const totals = { ...data.folderTotals };
+  if (oldName in totals) {
+    totals[newName] = totals[oldName]!;
+    delete totals[oldName];
+  }
+  return {
+    ...data,
+    folders: data.folders.map((f) => (f === oldName ? newName : f)),
+    folderTotals: totals,
+    sessions: data.sessions.map((s) => (s.folder === oldName ? { ...s, folder: newName } : s)),
+  };
+}
+
+export function removeFolder(data: CloudListData, name: string): CloudListData {
+  const totals = { ...data.folderTotals };
+  delete totals[name];
+  return {
+    ...data,
+    folders: data.folders.filter((f) => f !== name),
+    folderTotals: totals,
+    sessions: data.sessions.map((s) => (s.folder === name ? { ...s, folder: null } : s)),
+  };
+}
+
+export function setArchived(data: CloudListData, id: string, archived: boolean): CloudListData {
+  return withoutSessions(data, (s) => (s.id === id ? { ...s, isArchived: archived } : s));
+}

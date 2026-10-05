@@ -180,6 +180,9 @@ export function registerTestHooks(): void {
       pollNow: () => notifier.pollNow(),
       // Cloud session sidebar data layer.
       cloudState: () => cloudSessions().snapshot(),
+      cloudMutations: () => cloudSessions().mutationLog(),
+      cloudMenuItems: () => cloudSessions().menuItems(),
+      cloudMenuClick: (id: string) => cloudSessions().clickMenuItem(id), // returns {action}
       cloudRefresh: () => cloudSessions().refresh('test'),
       listPrs: () => openPrs(),
       openSessionPr: (sessionId: string, url: string) => openSessionPr(sessionId, url),

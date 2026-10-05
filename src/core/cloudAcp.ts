@@ -26,9 +26,47 @@ export interface CloudSession {
   isStarred: boolean;
   directChildrenCount: number;
   hasMoreChildren: boolean;
-  prCount: number;
+  prs: SessionPrCounts;
+  isArchived: boolean;
   /** ms epoch. */
   updatedAt: number;
+}
+
+// _meta['cognition.ai/sessionPRs'] buckets, classified like the web sidebar:
+// open with draft → 'draft', open with queued → 'queued', else the raw
+// 'open'|'merged'|'closed' state; unknown states are ignored.
+export interface SessionPrCounts {
+  open: number;
+  queued: number;
+  draft: number;
+  merged: number;
+  closed: number;
+}
+
+export function prTotal(prs: SessionPrCounts): number {
+  return prs.open + prs.queued + prs.draft + prs.merged + prs.closed;
+}
+
+export function parseSessionPrs(raw: unknown): SessionPrCounts {
+  const counts: SessionPrCounts = { open: 0, queued: 0, draft: 0, merged: 0, closed: 0 };
+  if (!Array.isArray(raw)) return counts;
+  for (const entry of raw) {
+    const item = asRecord(entry);
+    if (!item) continue;
+    const state = str(item.state);
+    const kind =
+      state === 'open'
+        ? bool(item.draft)
+          ? 'draft'
+          : bool(item.queued)
+            ? 'queued'
+            : 'open'
+        : state === 'merged' || state === 'closed'
+          ? state
+          : null;
+    if (kind) counts[kind] += 1;
+  }
+  return counts;
 }
 
 export interface CloudListResult {
@@ -51,9 +89,10 @@ export function buildInitializeParams(version: string): Record<string, unknown> 
 export function buildListParams(options: {
   orgId: string;
   userId: string | null;
+  archivedStatus?: 'ACTIVE' | 'ALL';
 }): Record<string, unknown> {
   const meta: Record<string, unknown> = {
-    [`${META}archivedStatus`]: 'ACTIVE',
+    [`${META}archivedStatus`]: options.archivedStatus ?? 'ACTIVE',
     [`${META}orgIds`]: [options.orgId],
     [`${META}hideCodeScans`]: true,
     [`${META}foldersExcludeArchived`]: true,
@@ -162,7 +201,6 @@ export function parseListResult(raw: unknown, orgId: string): CloudListResult {
     const item = asRecord(entry);
     if (!item) continue;
     const itemMeta = asRecord(item._meta) ?? {};
-    if (itemMeta[`${META}isArchived`] === true) continue;
     const acpId = str(item.sessionId) ?? str(item.id);
     if (!acpId) continue;
     const proposedBy = str(itemMeta[`${META}proposedByDevinId`]);
@@ -181,9 +219,8 @@ export function parseListResult(raw: unknown, orgId: string): CloudListResult {
       isStarred: bool(itemMeta[`${META}isStarred`]),
       directChildrenCount: num(itemMeta[`${META}directChildrenCount`]),
       hasMoreChildren: bool(itemMeta[`${META}hasMoreChildren`]),
-      prCount: Array.isArray(itemMeta[`${META}sessionPRs`])
-        ? (itemMeta[`${META}sessionPRs`] as unknown[]).length
-        : 0,
+      prs: parseSessionPrs(itemMeta[`${META}sessionPRs`]),
+      isArchived: bool(itemMeta[`${META}isArchived`]),
       updatedAt:
         timestampMs(item.updatedAt) || timestampMs(itemMeta[`${META}sortUpdatedAt`]),
     });

@@ -3,7 +3,7 @@
 // read inside the devinView via executeJavaScript and never leaves this
 // class. No titles/folder names/user ids/tokens are ever logged.
 
-import { app, net } from 'electron';
+import { app, clipboard, dialog, Menu, net, shell } from 'electron';
 import { readFileSync } from 'node:fs';
 import {
   acpWsUrl,
@@ -17,6 +17,15 @@ import {
   type CloudListResult,
   type CloudSession,
 } from '../core/cloudAcp';
+import {
+  addFolder,
+  moveSession,
+  removeFolder,
+  renameFolder,
+  reorderFolders,
+  setArchived,
+  type CloudListData,
+} from '../core/sessionTree';
 import { CloudSessionSchema, type CloudState } from '../shared/ipc';
 import { z } from 'zod';
 import { log } from './log';
@@ -85,6 +94,10 @@ class CloudSessions {
   private syncInFlight: Promise<void> | null = null;
   private lastOrgSyncAt = 0;
   private emptyListSynced = false;
+  private showArchived = false;
+  private lastError: { op: string; message: string } | null = null;
+  // Test mode records every mutation ({op, method, path, body}) — no network.
+  private mutations: { op: string; payload: Record<string, unknown> }[] = [];
   private readonly onViewReady = () => {
     if (!this.token) {
       void this.obtainToken();
@@ -105,6 +118,8 @@ class CloudSessions {
       folderTotals: this.folderTotals,
       sessions: this.sessions,
       liveSessionIds: cloudViews().publicInfo().liveSessionIds,
+      showArchived: this.showArchived,
+      lastError: this.lastError,
     };
   }
 
@@ -212,6 +227,338 @@ class CloudSessions {
     const session = this.sessions.find((s) => s.id === sessionId);
     if (!session || parseSessionId(session.url, state.tenantUrl) !== sessionId) return;
     cloudViews().prefetch(sessionId, session.url);
+  }
+
+  // --- mutations (folders / move / archive) -------------------------------
+  // Same REST base + headers as users/info. Log only {op, ok, status} —
+  // never names or ids. `applyLocal` models the change for test mode (the
+  // fake backend) while real calls re-list on success.
+
+  private async mutate(
+    op: string,
+    method: 'POST' | 'DELETE',
+    path: string,
+    body: unknown,
+    applyLocal: (data: CloudListData) => CloudListData,
+  ): Promise<void> {
+    if (testMode) {
+      this.mutations.push({ op, payload: { method, path, body } });
+      if (this.fixtureFile) {
+        const next = applyLocal({
+          sessions: this.sessions,
+          folders: this.folders,
+          folderTotals: this.folderTotals,
+        });
+        this.sessions = next.sessions;
+        this.folders = next.folders;
+        this.folderTotals = next.folderTotals;
+        this.lastSyncAt = new Date().toISOString();
+        this.emit();
+      }
+      log('cloud', 'cloud-mutate', { detail: { op, ok: true, status: 0 } });
+      return;
+    }
+    const url = `${state.tenantUrl.replace(/\/+$/, '')}/api/${path}`;
+    const send = () =>
+      net.fetch(url, {
+        method,
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          'x-cog-org-id': this.orgId ?? '',
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    try {
+      let response = await send();
+      if (response.status === 401) {
+        // Stale token — re-read once through the single-flight path, retry once.
+        this.token = null;
+        await this.obtainToken();
+        if (this.token) response = await send();
+      }
+      const ok = response.status >= 200 && response.status < 300;
+      log('cloud', 'cloud-mutate', { detail: { op, ok, status: response.status } });
+      if (!ok) {
+        this.setMutationError(op, `HTTP ${response.status}`);
+        return;
+      }
+      this.lastError = null;
+      if (this.socket?.readyState === WebSocket.OPEN) void this.list('mutate');
+    } catch {
+      log('cloud', 'cloud-mutate', { detail: { op, ok: false, status: -1 } });
+      this.setMutationError(op, 'network');
+    }
+  }
+
+  private setMutationError(op: string, message: string): void {
+    this.lastError = { op, message };
+    this.emit();
+  }
+
+  mutationLog(): { op: string; payload: Record<string, unknown> }[] {
+    return this.mutations;
+  }
+
+  // Test-mode menu seam (see contextMenu): last popup description + click.
+  private pendingMenu = new Map<string, Electron.MenuItemConstructorOptions>();
+  private lastMenuDesc: Record<string, unknown>[] = [];
+  private pendingAction: 'rename' | 'new-folder' | null = null;
+
+  menuItems(): Record<string, unknown>[] {
+    return this.lastMenuDesc;
+  }
+
+  clickMenuItem(id: string): { action: 'rename' | 'new-folder' | null } {
+    const item = this.pendingMenu.get(id);
+    if (!item?.click) return { action: null };
+    // Native checkboxes toggle before firing click — mirror that.
+    const next = !(item.checked ?? false);
+    item.checked = next;
+    item.click(
+      { checked: next } as Electron.MenuItem,
+      state.windowRef!,
+      {} as Electron.KeyboardEvent,
+    );
+    const action = this.pendingAction;
+    this.pendingAction = null;
+    return { action };
+  }
+
+  private userFolders(): string[] {
+    return this.folders.filter((f) => f !== 'pinned' && f !== 'participated');
+  }
+
+  folderCreate(name: string): Promise<void> {
+    return this.mutate('folder-create', 'POST', 'sessions/folder/create', { folder: name }, (d) =>
+      addFolder(d, name),
+    );
+  }
+
+  folderRename(oldName: string, newName: string): Promise<void> {
+    return this.mutate(
+      'folder-rename',
+      'POST',
+      'sessions/folder/rename',
+      { old_name: oldName, new_name: newName },
+      (d) => renameFolder(d, oldName, newName),
+    );
+  }
+
+  folderDelete(name: string): Promise<void> {
+    return this.mutate(
+      'folder-delete',
+      'DELETE',
+      `sessions/folder?name=${encodeURIComponent(name)}`,
+      undefined,
+      (d) => removeFolder(d, name),
+    );
+  }
+
+  folderReorder(names: string[]): Promise<void> {
+    const userFolders = names.filter((n) => n !== 'pinned' && n !== 'participated');
+    return this.mutate(
+      'folder-reorder',
+      'POST',
+      'sessions/folder/reorder',
+      { folder_names: userFolders },
+      (d) => reorderFolders(d, userFolders),
+    );
+  }
+
+  sessionMove(sessionId: string, folder: string | null): Promise<void> {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) return Promise.resolve();
+    if (folder === null) {
+      return this.mutate(
+        'session-move',
+        'DELETE',
+        `sessions/folder/${session.acpId}`,
+        undefined,
+        (d) => moveSession(d, sessionId, null),
+      );
+    }
+    return this.mutate(
+      'session-move',
+      'POST',
+      'sessions/folder',
+      { devin_id: session.acpId, folder },
+      (d) => moveSession(d, sessionId, folder),
+    );
+  }
+
+  sessionArchive(sessionId: string, archive: boolean): Promise<void> {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) return Promise.resolve();
+    return this.mutate(
+      'session-archive',
+      'POST',
+      'sessions/bulk-archive',
+      { session_ids: [session.acpId], archive, close_pr_urls: [] },
+      (d) => setArchived(d, sessionId, archive),
+    );
+  }
+
+  sessionLink(sessionId: string): string | null {
+    if (!this.sessions.some((s) => s.id === sessionId)) return null;
+    return new URL(`/sessions/${sessionId}`, state.tenantUrl).toString();
+  }
+
+  copyLink(sessionId: string): void {
+    const link = this.sessionLink(sessionId);
+    if (!link) return;
+    if (testMode) {
+      // Record the write so e2e doesn't depend on the OS clipboard.
+      this.mutations.push({ op: 'copy-link', payload: { link } });
+    }
+    clipboard.writeText(link);
+  }
+
+  setShowArchived(value: boolean): void {
+    if (this.showArchived === value) return;
+    this.showArchived = value;
+    if (testMode) {
+      this.mutations.push({ op: 'show-archived', payload: { value } });
+    }
+    this.emit();
+    if (this.socket?.readyState === WebSocket.OPEN) void this.list('shell');
+  }
+
+  // --- context menus ------------------------------------------------------
+  // Native menus popped at the shell window; the invoke resolves to an
+  // action the shell completes inline ({action: 'rename'|'new-folder'}).
+
+  async contextMenu(arg: {
+    kind: 'session' | 'folder' | 'header';
+    sessionId?: string | undefined;
+    name?: string | undefined;
+    x: number;
+    y: number;
+  }): Promise<{
+    action: 'rename' | 'new-folder' | null;
+    items?: Record<string, unknown>[];
+  }> {
+    this.pendingAction = null;
+    const items: Electron.MenuItemConstructorOptions[] = [];
+
+    if (arg.kind === 'header') {
+      items.push({
+        label: 'Show archived sessions',
+        type: 'checkbox',
+        checked: this.showArchived,
+        click: (item) => this.setShowArchived(item.checked),
+      });
+    } else if (arg.kind === 'folder' && arg.name) {
+      const name = arg.name;
+      items.push(
+        {
+          label: 'Rename…',
+          click: () => {
+            this.pendingAction = 'rename';
+          },
+        },
+        {
+          label: 'Delete…',
+          click: () => void this.confirmDeleteFolder(name),
+        },
+      );
+    } else if (arg.kind === 'session' && arg.sessionId) {
+      const session = this.sessions.find((s) => s.id === arg.sessionId);
+      if (!session) return { action: null };
+      const link = new URL(`/sessions/${session.id}`, state.tenantUrl).toString();
+      const submenu: Electron.MenuItemConstructorOptions[] = this.userFolders().map((name) => ({
+        label: name,
+        type: 'checkbox',
+        checked: session.folder === name,
+        click: () => void this.sessionMove(session.id, name),
+      }));
+      submenu.push(
+        { type: 'separator' },
+        {
+          label: 'Remove from folder',
+          enabled: session.folder !== null,
+          click: () => void this.sessionMove(session.id, null),
+        },
+        {
+          label: 'New folder…',
+          click: () => {
+            this.pendingAction = 'new-folder';
+          },
+        },
+      );
+      items.push(
+        { label: 'Copy link', click: () => this.copyLink(session.id) },
+        { label: 'Open in browser', click: () => void shell.openExternal(session.url || link) },
+        { type: 'separator' },
+        { label: 'Move to folder', submenu },
+        { type: 'separator' },
+        {
+          label: session.isArchived ? 'Unarchive' : 'Archive',
+          click: () => void this.sessionArchive(session.id, !session.isArchived),
+        },
+      );
+    } else {
+      return { action: null };
+    }
+
+    if (items.length === 0) return { action: null };
+    if (testMode) {
+      // e2e can't click a native popup — return a description instead; the
+      // cloudMenuItems/cloudMenuClick hooks drive the same callbacks.
+      this.pendingMenu.clear();
+      let n = 0;
+      const assign = (list: Electron.MenuItemConstructorOptions[]) =>
+        list.forEach((item) => {
+          if (item.type === 'separator') return;
+          item.id = `m${n++}`;
+          this.pendingMenu.set(item.id, item);
+          if (Array.isArray(item.submenu)) {
+            assign(item.submenu as Electron.MenuItemConstructorOptions[]);
+          }
+        });
+      assign(items);
+      const describe = (
+        list: Electron.MenuItemConstructorOptions[],
+      ): Record<string, unknown>[] =>
+        list.map((item) => ({
+          id: item.id,
+          label: item.label ?? item.role ?? '',
+          type: item.type ?? 'normal',
+          enabled: item.enabled !== false,
+          ...(item.type === 'checkbox' ? { checked: item.checked } : {}),
+          ...(item.submenu
+            ? { submenu: describe(item.submenu as Electron.MenuItemConstructorOptions[]) }
+            : {}),
+        }));
+      this.lastMenuDesc = describe(items);
+      return { action: null, items: this.lastMenuDesc };
+    }
+    const menu = Menu.buildFromTemplate(items);
+    await new Promise<void>((resolve) => {
+      const opts: Electron.PopupOptions = {
+        x: Math.round(arg.x),
+        y: Math.round(arg.y),
+        callback: () => resolve(),
+      };
+      if (state.windowRef) menu.popup({ ...opts, window: state.windowRef });
+      else menu.popup(opts);
+    });
+    return { action: this.pendingAction };
+  }
+
+  private async confirmDeleteFolder(name: string): Promise<void> {
+    const win = state.windowRef;
+    if (!win) return;
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Delete', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Delete folder "${name}"?`,
+      detail: "Sessions stay — they're just unfoldered.",
+    });
+    if (response === 0) void this.folderDelete(name);
   }
 
   // --- fixture mode -------------------------------------------------------
@@ -537,7 +884,11 @@ class CloudSessions {
     try {
       const message = await this.request(
         'session/list',
-        buildListParams({ orgId, userId: this.userId }),
+        buildListParams({
+          orgId,
+          userId: this.userId,
+          archivedStatus: this.showArchived ? 'ALL' : 'ACTIVE',
+        }),
         LIST_TIMEOUT_MS,
       );
       if (message.error) {
@@ -561,6 +912,7 @@ class CloudSessions {
       }
       this.lastSyncAt = new Date().toISOString();
       this.error = null;
+      this.lastError = null;
       this.setStatus('ready');
       log('cloud', 'cloud-list', {
         detail: {

@@ -1,6 +1,15 @@
 {
-  "folders": ["Alpha", "Beta", "participated", "pinned"],
-  "folderTotals": { "Alpha": 5, "Beta": 0, "participated": 1 },
+  "folders": [
+    "Alpha",
+    "Beta",
+    "participated",
+    "pinned"
+  ],
+  "folderTotals": {
+    "Alpha": 5,
+    "Beta": 0,
+    "participated": 1
+  },
   "nextCursor": null,
   "sessions": [
     {
@@ -18,8 +27,15 @@
       "isStarred": false,
       "directChildrenCount": 0,
       "hasMoreChildren": false,
-      "prCount": 1,
-      "updatedAt": 1759500000000
+      "updatedAt": 1759500000000,
+      "prs": {
+        "open": 1,
+        "queued": 0,
+        "draft": 0,
+        "merged": 0,
+        "closed": 0
+      },
+      "isArchived": false
     },
     {
       "id": "bbbb0000000000000000000000000002",
@@ -36,8 +52,15 @@
       "isStarred": false,
       "directChildrenCount": 2,
       "hasMoreChildren": false,
-      "prCount": 0,
-      "updatedAt": 1759600000000
+      "updatedAt": 1759600000000,
+      "prs": {
+        "open": 0,
+        "queued": 0,
+        "draft": 0,
+        "merged": 0,
+        "closed": 0
+      },
+      "isArchived": false
     },
     {
       "id": "cccc0000000000000000000000000003",
@@ -54,8 +77,15 @@
       "isStarred": false,
       "directChildrenCount": 0,
       "hasMoreChildren": false,
-      "prCount": 0,
-      "updatedAt": 1759550000000
+      "updatedAt": 1759550000000,
+      "prs": {
+        "open": 0,
+        "queued": 0,
+        "draft": 0,
+        "merged": 0,
+        "closed": 0
+      },
+      "isArchived": false
     },
     {
       "id": "dddd0000000000000000000000000004",
@@ -72,8 +102,15 @@
       "isStarred": false,
       "directChildrenCount": 0,
       "hasMoreChildren": false,
-      "prCount": 0,
-      "updatedAt": 1759540000000
+      "updatedAt": 1759540000000,
+      "prs": {
+        "open": 0,
+        "queued": 0,
+        "draft": 0,
+        "merged": 0,
+        "closed": 0
+      },
+      "isArchived": false
     },
     {
       "id": "eeee0000000000000000000000000005",
@@ -90,8 +127,15 @@
       "isStarred": true,
       "directChildrenCount": 0,
       "hasMoreChildren": false,
-      "prCount": 2,
-      "updatedAt": 1759530000000
+      "updatedAt": 1759530000000,
+      "prs": {
+        "open": 1,
+        "queued": 0,
+        "draft": 0,
+        "merged": 1,
+        "closed": 0
+      },
+      "isArchived": false
     },
     {
       "id": "11110000000000000000000000000000",
@@ -108,8 +152,15 @@
       "isStarred": false,
       "directChildrenCount": 0,
       "hasMoreChildren": false,
-      "prCount": 0,
-      "updatedAt": 1759520000000
+      "updatedAt": 1759520000000,
+      "prs": {
+        "open": 0,
+        "queued": 0,
+        "draft": 0,
+        "merged": 0,
+        "closed": 0
+      },
+      "isArchived": false
     },
     {
       "id": "22220000000000000000000000000000",
@@ -126,8 +177,15 @@
       "isStarred": false,
       "directChildrenCount": 0,
       "hasMoreChildren": false,
-      "prCount": 0,
-      "updatedAt": 1759590000000
+      "updatedAt": 1759590000000,
+      "prs": {
+        "open": 0,
+        "queued": 0,
+        "draft": 0,
+        "merged": 0,
+        "closed": 0
+      },
+      "isArchived": false
     },
     {
       "id": "33330000000000000000000000000000",
@@ -144,8 +202,15 @@
       "isStarred": false,
       "directChildrenCount": 0,
       "hasMoreChildren": false,
-      "prCount": 0,
-      "updatedAt": 1759510000000
+      "updatedAt": 1759510000000,
+      "prs": {
+        "open": 0,
+        "queued": 0,
+        "draft": 0,
+        "merged": 0,
+        "closed": 0
+      },
+      "isArchived": false
     }
   ]
 }

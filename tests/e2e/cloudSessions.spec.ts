@@ -198,3 +198,169 @@ test('cloud session sidebar: data, sections, interactions, geometry', async () =
     rmSync(profile, { recursive: true, force: true });
   }
 });
+
+type MenuItem = {
+  id: string;
+  label: string;
+  type: string;
+  enabled: boolean;
+  checked?: boolean;
+  submenu?: MenuItem[];
+};
+
+function findMenuItem(items: MenuItem[], label: string): MenuItem | null {
+  for (const item of items) {
+    if (item.label === label) return item;
+    const hit = item.submenu ? findMenuItem(item.submenu, label) : null;
+    if (hit) return hit;
+  }
+  return null;
+}
+
+test('cloud session sidebar: mutations, menus, PR badges', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-'));
+  const logFile = join(profile, 'events.jsonl');
+  const fixturePath = join(profile, 'cloudSessions.json');
+  const raw = JSON.parse(
+    readFileSync(resolve(__dirname, '../fixtures/cloudSessions.json'), 'utf8'),
+  ) as CloudListResult;
+  for (const session of raw.sessions) {
+    session.url = `${fixtures.devinUrl}/sessions/${session.id}`;
+  }
+  writeFileSync(fixturePath, JSON.stringify(raw));
+
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_TEST_CLOUD_SESSIONS: fixturePath,
+    DEVIN_WORKSPACES_TEST_SESSIONS_OPEN: '1',
+  });
+  const h = hooks(app);
+  const evaluate = (fn: () => unknown) => app.evaluate(fn);
+  const mutations = () =>
+    evaluate(() => (globalThis as any).__devinworkspaces.cloudMutations()) as Promise<
+      { op: string; payload: { method: string; path: string; body?: unknown } }[]
+    >;
+  const menuItems = () =>
+    evaluate(() => (globalThis as any).__devinworkspaces.cloudMenuItems()) as Promise<
+      MenuItem[]
+    >;
+  const menuClick = (id: string) =>
+    app.evaluate((_e, itemId) => (globalThis as any).__devinworkspaces.cloudMenuClick(itemId), id);
+  const clipboardRead = () =>
+    evaluate(() => (globalThis as any).__devinworkspaces.clipboardRead()) as Promise<string>;
+
+  try {
+    await expect.poll(async () => (await h.cloudState()).status).toBe('ready');
+    const page = await shellPage(app);
+    await expect(page.locator('#sessionsPanel')).toBeVisible();
+
+    // --- PR badge attrs ---------------------------------------------------
+    await expect(
+      page.locator('[data-session-id="aaaa0000000000000000000000000001"]'),
+    ).toHaveAttribute('data-pr-open', '1');
+    await expect(
+      page.locator('[data-session-id="eeee0000000000000000000000000005"]'),
+    ).toHaveAttribute('data-pr-merged', '1');
+
+    // --- create folder via the + inline editor ----------------------------
+    await page.locator('#sessionFolderNew').click();
+    await page.locator('#sessionFolderEdit').fill('ZZ E2E');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-section-name="ZZ E2E"]')).toBeVisible();
+    expect(
+      (await mutations()).some(
+        (m) =>
+          m.op === 'folder-create' &&
+          (m.payload.body as { folder: string }).folder === 'ZZ E2E',
+      ),
+    ).toBe(true);
+
+    // --- right-click → Copy link ------------------------------------------
+    const recentRow = page.locator('[data-session-id="22220000000000000000000000000000"]');
+    await recentRow.click({ button: 'right' });
+    const copy = findMenuItem(await menuItems(), 'Copy link');
+    expect(copy).toBeTruthy();
+    await menuClick(copy!.id);
+    const expectedLink = `${fixtures.devinUrl}/sessions/22220000000000000000000000000000`;
+    expect(
+      (await mutations()).some(
+        (m) =>
+          m.op === 'copy-link' &&
+          (m.payload as unknown as { link: string }).link === expectedLink,
+      ),
+    ).toBe(true);
+    await expect.poll(clipboardRead).toBe(expectedLink);
+
+    // --- archive removes the row; Show archived restores it dimmed --------
+    await recentRow.click({ button: 'right' });
+    const archive = findMenuItem(await menuItems(), 'Archive');
+    await menuClick(archive!.id);
+    await expect(recentRow).toHaveCount(0);
+    await page.locator('#sessionsMenu').click();
+    const showArchived = findMenuItem(await menuItems(), 'Show archived sessions');
+    await menuClick(showArchived!.id);
+    await expect(recentRow).toHaveAttribute('data-archived', 'true');
+
+    // --- DnD: session onto a folder header moves it -----------------------
+    const mover = page.locator('[data-session-id="33330000000000000000000000000000"]');
+    await mover.dragTo(page.locator('[data-section-name="Alpha"]'));
+    await expect
+      .poll(async () =>
+        (await mutations()).some(
+          (m) =>
+            m.op === 'session-move' &&
+            m.payload.method === 'POST' &&
+            (m.payload.body as { folder: string }).folder === 'Alpha' &&
+            (m.payload.body as { devin_id: string }).devin_id ===
+              'devin-33330000000000000000000000000000',
+        ),
+      )
+      .toBe(true);
+
+    // --- DnD: back onto Recent removes it ---------------------------------
+    await mover.dragTo(page.locator('[data-section-name="recent"]'));
+    await expect
+      .poll(async () =>
+        (await mutations()).some(
+          (m) =>
+            m.op === 'session-move' &&
+            m.payload.method === 'DELETE' &&
+            m.payload.path === 'sessions/folder/devin-33330000000000000000000000000000',
+        ),
+      )
+      .toBe(true);
+
+    // --- DnD: folder header onto another header reorders ------------------
+    await page
+      .locator('[data-section-name="Beta"]')
+      .dragTo(page.locator('[data-section-name="Alpha"]'));
+    await expect
+      .poll(async () => {
+        const reorder = (await mutations()).find((m) => m.op === 'folder-reorder');
+        return (reorder?.payload.body as { folder_names: string[] } | undefined)
+          ?.folder_names;
+      })
+      .toEqual(['Beta', 'Alpha', 'ZZ E2E']);
+    // The section order reflects it in the DOM too.
+    await expect
+      .poll(async () =>
+        page
+          .locator('[data-section-name]')
+          .evaluateAll((els) => els.map((el) => el.getAttribute('data-section-name'))),
+      )
+      .toEqual(['pinned', 'Beta', 'Alpha', 'ZZ E2E', 'participated', 'recent']);
+
+    // --- folder context menu: Rename… resolves to the inline-edit action --
+    await page.locator('[data-section-name="Beta"]').click({ button: 'right' });
+    const rename = findMenuItem(await menuItems(), 'Rename…');
+    expect(rename).toBeTruthy();
+    const renameResult = (await app.evaluate(
+      (_e, id) => (globalThis as any).__devinworkspaces.cloudMenuClick(id),
+      rename!.id,
+    )) as { action: string | null };
+    expect(renameResult.action).toBe('rename');
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
