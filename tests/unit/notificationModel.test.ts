@@ -3,7 +3,9 @@ import type { DevinSession } from '../../src/core/devinApi';
 import {
   addNotification,
   clearNotifications,
+  collapseSuperseded,
   deriveNotifications,
+  itemKey,
   markAllRead,
   markRead,
   MAX_NOTIFICATIONS,
@@ -61,22 +63,104 @@ const note = (id: string, kind: NotificationKind = 'waiting', sessionId = 's'): 
   readAt: null,
 });
 
+describe('itemKey', () => {
+  it('maps pr kinds to the prUrl', () => {
+    const pr = { sessionId: 's1', prUrl: 'https://x/pr/1' };
+    expect(itemKey({ ...pr, kind: 'pr-opened' })).toBe('pr:https://x/pr/1');
+    expect(itemKey({ ...pr, kind: 'pr-completed' })).toBe('pr:https://x/pr/1');
+    expect(itemKey({ kind: 'pr-opened', sessionId: 's1', prUrl: undefined })).toBe('pr:');
+  });
+  it('maps status kinds to the sessionId', () => {
+    for (const kind of ['waiting', 'approval', 'blocked', 'finished'] as const) {
+      expect(itemKey({ kind, sessionId: 's1' })).toBe('session:s1');
+    }
+    expect(itemKey({ kind: 'waiting', sessionId: null })).toBe('session:');
+  });
+  it('maps update to a singleton and identity/auth to their kind', () => {
+    expect(itemKey({ kind: 'update', sessionId: null, version: '1.0.0' })).toBe('update');
+    expect(itemKey({ kind: 'update', sessionId: null, version: '2.0.0' })).toBe('update');
+    expect(itemKey({ kind: 'identity', sessionId: null })).toBe('identity');
+    expect(itemKey({ kind: 'auth', sessionId: null })).toBe('auth');
+  });
+});
+
 describe('addNotification', () => {
-  it('prepends and refreshes an unread duplicate in place', () => {
+  it('prepends when the item is new', () => {
+    let list: AppNotification[] = [];
+    list = addNotification(list, { ...note('x', 'waiting', 's1'), title: 'a' }, 'id-1');
+    list = addNotification(list, { ...note('x', 'waiting', 's2'), title: 'b' }, 'id-2');
+    expect(list.map((n) => n.id)).toEqual(['id-2', 'id-1']);
+  });
+  it('supersedes an entry for the same item — even an unread one', () => {
     let list: AppNotification[] = [];
     list = addNotification(list, { ...note('x', 'waiting', 's1'), title: 'a', body: 'b1' }, 'id-1');
     list = addNotification(list, { ...note('x', 'waiting', 's2'), title: 'b', body: 'b2' }, 'id-2');
-    expect(list.map((n) => n.id)).toEqual(['id-2', 'id-1']);
-    // Same kind+session again while unread → refreshes in place (same id).
+    // Same item again → the old entry is gone; the fresh id wins, still unread.
     list = addNotification(list, { ...note('x', 'waiting', 's1'), title: 'a2', body: 'b9' }, 'id-3');
-    expect(list.map((n) => n.id)).toEqual(['id-2', 'id-1']);
-    expect(list[1]!.body).toBe('b9');
+    expect(list.map((n) => n.id)).toEqual(['id-3', 'id-2']);
+    expect(list[0]!.body).toBe('b9');
+    expect(list[0]!.readAt).toBeNull();
   });
-  it('does not dedupe a READ entry — a fresh unread is prepended', () => {
+  it('a pr-opened followed by a pr-completed for the same prUrl leaves only the completed one', () => {
+    const prUrl = 'https://github.com/acme/widgets/pull/42';
+    let list = addNotification(
+      [],
+      { ...note('x', 'pr-opened', 's1'), prUrl, title: 'Opened acme/widgets#42' },
+      'id-open',
+    );
+    list = addNotification(
+      list,
+      { ...note('x', 'pr-completed', 's1'), prUrl, prState: 'merged', title: 'PR acme/widgets#42 merged' },
+      'id-done',
+    );
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'id-done', kind: 'pr-completed', prUrl, readAt: null });
+  });
+  it('a waiting followed by a blocked for the same session leaves only the blocked one', () => {
+    let list = addNotification([], note('x', 'waiting', 's1'), 'id-w');
+    list = addNotification(list, note('x', 'blocked', 's1'), 'id-b');
+    expect(list.map((n) => n.id)).toEqual(['id-b']);
+    expect(list[0]!.kind).toBe('blocked');
+  });
+  it('a READ pr-opened is replaced by an UNREAD pr-completed', () => {
+    const prUrl = 'https://github.com/acme/widgets/pull/7';
+    let list = addNotification([], { ...note('x', 'pr-opened', 's1'), prUrl }, 'id-open');
+    list = markRead(list, 'id-open', 5);
+    list = addNotification(list, { ...note('x', 'pr-completed', 's1'), prUrl, prState: 'closed' }, 'id-done');
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'id-done', kind: 'pr-completed', readAt: null });
+  });
+  it('does not collapse different prUrls or different sessions', () => {
+    let list = addNotification(
+      [],
+      { ...note('x', 'pr-opened', 's1'), prUrl: 'https://x/pr/1' },
+      'id-1',
+    );
+    list = addNotification(list, { ...note('x', 'pr-opened', 's1'), prUrl: 'https://x/pr/2' }, 'id-2');
+    list = addNotification(list, note('x', 'waiting', 's2'), 'id-3');
+    list = addNotification(list, note('x', 'blocked', 's1'), 'id-4');
+    expect(list.map((n) => n.id)).toEqual(['id-4', 'id-3', 'id-2', 'id-1']);
+  });
+  it('a newer update entry replaces the older one', () => {
+    let list = addNotification(
+      [],
+      { ...note('x', 'update', 'x'), sessionId: null, version: '1.0.0', title: 'Update v1.0.0 ready' },
+      'id-1',
+    );
+    list = addNotification(
+      list,
+      { ...note('x', 'update', 'x'), sessionId: null, version: '2.0.0', title: 'Update v2.0.0 ready' },
+      'id-2',
+    );
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'id-2', version: '2.0.0' });
+  });
+  it('a READ entry for the same item is superseded too — length stays 1', () => {
     let list = addNotification([], note('x', 'waiting', 's1'), 'id-1');
     list = markRead(list, 'id-1', 5);
     list = addNotification(list, { ...note('x', 'waiting', 's1') }, 'id-2');
-    expect(list).toHaveLength(2);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'id-2', readAt: null });
   });
   it('caps at MAX_NOTIFICATIONS, dropping the oldest', () => {
     let list: AppNotification[] = [];
@@ -85,6 +169,24 @@ describe('addNotification', () => {
     }
     expect(list).toHaveLength(MAX_NOTIFICATIONS);
     expect(list.at(-1)!.id).toBe('id-3');
+  });
+});
+
+describe('collapseSuperseded', () => {
+  it('keeps only the first (newest) entry per item, order preserved', () => {
+    const prUrl = 'https://github.com/acme/widgets/pull/1';
+    const list: AppNotification[] = [
+      { ...note('n1', 'blocked', 's1'), createdAt: 5 },
+      { ...note('n2', 'waiting', 's2'), createdAt: 4 },
+      { ...note('n3', 'pr-completed', 's3'), prUrl, createdAt: 3 },
+      { ...note('n4', 'waiting', 's1'), createdAt: 2 }, // superseded by n1
+      { ...note('n5', 'pr-opened', 's3'), prUrl, createdAt: 1 }, // superseded by n3
+    ];
+    expect(collapseSuperseded(list).map((n) => n.id)).toEqual(['n1', 'n2', 'n3']);
+  });
+  it('is a no-op when every item is distinct', () => {
+    const list = [note('a', 'waiting', 's1'), note('b', 'blocked', 's2')];
+    expect(collapseSuperseded(list)).toEqual(list);
   });
 });
 
