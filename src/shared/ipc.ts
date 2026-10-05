@@ -65,6 +65,7 @@ export const IpcChannels = {
   notificationsIdentityReset: 'notifications:identityReset',
   // App version / auto-update status
   updateInstall: 'update:install',
+  updateCheck: 'update:check',
   updateReleaseNotes: 'update:releaseNotes',
   localState: 'local:state',
   localUpdate: 'local:update',
@@ -328,11 +329,28 @@ export const NotificationPanelArg = z.object({ open: z.boolean() });
 
 export type NotificationsState = z.infer<typeof NotificationsStateSchema>;
 
+export const UpdateCheckSourceSchema = z.enum([
+  'startup',
+  'timer',
+  'settings',
+  'manual',
+  'resume',
+  'focus',
+]);
+export type UpdateCheckSource = z.infer<typeof UpdateCheckSourceSchema>;
+
+// update:check — on-demand check from the Updates tab (settings/manual only).
+export const UpdateCheckArg = z.object({ source: z.enum(['settings', 'manual']) });
+
 export const UpdateStateSchema = z.object({
   version: z.string(),
   available: z.string().nullable(),
   downloaded: z.string().nullable(),
   releasesUrl: z.string(),
+  enabled: z.boolean(),
+  checking: z.boolean(),
+  lastCheckedAt: z.string().nullable(),
+  error: z.string().nullable(),
 });
 export type UpdateState = z.infer<typeof UpdateStateSchema>;
 

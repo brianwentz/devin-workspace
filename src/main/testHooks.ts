@@ -2,6 +2,7 @@ import { clipboard, webContents, WebContentsView } from 'electron';
 import { computeBounds } from '../core/layout';
 import { clampFraction01, clampTerminalHeight } from '../core/layout';
 import { auditCookies } from './cookieAudit';
+import { refreshAnalyticsView } from './analytics';
 import { fromShell } from './ipcGuard';
 import { terminalHost } from './local/terminalHost';
 import type { Surface } from '../shared/ipc';
@@ -9,7 +10,12 @@ import { identityResolver } from './identity';
 import { notificationStore } from './notifications';
 import { notifier, openNotification, openPr, openPrs, openSessionPr } from './notifier';
 import { prStore } from './prs';
-import { updateAvailable, updateDownloaded } from './updater';
+import {
+  updateAvailable,
+  updateDownloaded,
+  updateOnResume,
+  updateOnWindowFocus,
+} from './updater';
 import { handleLink } from './routing';
 import { copyTabAddress, reloadCurrentScope } from './ipc';
 import { historyAction, navigationTarget, openNewSession } from './shortcuts';
@@ -50,7 +56,9 @@ export function registerTestHooks(): void {
         applyLayout();
       },
       setSurface: (value: Surface) => {
+        const previous = state.surface;
         state.surface = value;
+        if (value === 'analytics' && previous !== 'analytics') refreshAnalyticsView();
         applyLayout();
       },
       navigate: (action: 'back' | 'forward' | 'reload') => {
@@ -159,6 +167,8 @@ export function registerTestHooks(): void {
         }).id,
       simulateUpdateDownloaded: (version: string) => updateDownloaded(version),
       simulateUpdateAvailable: (version: string) => updateAvailable(version),
+      simulateUpdateFocus: () => updateOnWindowFocus(),
+      simulateUpdateResume: () => updateOnResume(),
       panelOpen: () => state.notificationsPanelOpen,
       // Service-user identity resolution (never the raw user id).
       identity: () => identityResolver().current(),

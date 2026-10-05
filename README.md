@@ -5,11 +5,14 @@ A desktop client for [Devin](https://devin.ai) — Windows and macOS (Apple Sili
 The Cloud surface is the real Devin web app (your tenant) hosted in a Chromium view, so sessions, folders, worklogs and approvals behave exactly as they do in the browser. Around it the app adds what the web app can't do on its own:
 
 - **GitHub pane** — every GitHub link a session produces (PR cards, worklog links, `_blank` popups, iframes) opens in a tabbed pane docked to the right instead of a separate browser. Tabs are scoped to the session you're viewing, persist across restarts, and can be reordered, closed and resized.
+- **Link rules** — your own prefix / regex rules (Settings → Link Handling) make other sites — Jira, GitLab, internal tools — open as pane tabs too.
 - **PR auto-open** — when a session creates a pull request, a tab for it appears in that session's pane automatically.
+- **PR panel** — the open pull requests across your sessions in one list with GitHub titles and unread markers; one click opens the PR in its session.
 - **Notifications** — an in-app notification center (plus a taskbar badge on Windows) when a session is waiting for your input or approval.
+- **Analytics** — your tenant's analytics page as its own surface in the rail.
 - **Terminal dock** — a tabbed shell (your Windows Terminal default profile or PowerShell on Windows, your login shell on macOS) under the Devin view, with per-workspace working directories.
 - **Devin Local** — run the `devin` CLI against local workspace folders from the same window (requires the Devin CLI).
-- **Credential fill** — saved logins for SSO/IdP origins, encrypted with the OS credential store (DPAPI on Windows, Keychain on macOS), fillable from the rail.
+- **Saved passwords** — logins for SSO/IdP origins, encrypted with the OS credential store (DPAPI on Windows, Keychain on macOS), filled automatically on the sign-in page.
 - **Layout memory** — the pane split, terminal height, and window size/position (per display configuration) are remembered without any settings to manage.
 
 ## Install
@@ -44,9 +47,10 @@ Because the build is not notarized, the Mac app does not auto-update: check the 
 
 ## First run
 
-1. The window opens on the **Cloud** surface (☁ in the left rail) pointing at the default tenant. If you use a different Devin tenant, open **Settings** (⚙) and change *Tenant URL*, then sign in as you normally would — SSO flows run inside the hosted view, nothing is intercepted.
+1. The window opens on the **Cloud** surface (☁ in the left rail) pointing at the default tenant. If you use a different Devin tenant, open **Settings** (⚙) and change *Tenant URL*, then sign in as you normally would — SSO flows run inside the hosted view, nothing is intercepted. Settings fields save on their own when you switch tabs or leave the page.
 2. Click any GitHub link in a session; it opens in the pane on the right. Toggle the pane with the **GH** rail button or `Ctrl+Shift+G`, drag the splitter to resize.
 3. Toggle the terminal dock with the **>_** rail button or `` Ctrl+` ``; use **+** in the dock to open a shell in a workspace folder or your home directory. On Windows the shell is your Windows Terminal default profile when available (WSL distros included); the **▾** menu lists other launchable profiles. On macOS it is your login shell (`$SHELL`, normally `zsh`).
+4. The **Analytics** rail button shows your tenant's *My analytics* page in the main column; the **PR** and bell buttons open the pull-request and notification panels.
 
 ## Notifications and PR auto-open
 
@@ -61,7 +65,9 @@ Once a token is set the poller runs continuously (10 s while a session is active
 
 - **Notification center** — the bell in the rail. New events (a session waiting for your reply, needing approval or blocked; a PR opened or merged/closed; a downloaded app update) land in the panel with unread highlighting, a taskbar overlay count (Windows) and an optional title-bar banner. Clicking an entry opens its session (or the PR tab, or installs the update). *Collect notifications*, *Show banner* and the per-kind toggles live in Settings → Notifications; "Session finished" is off by default. History persists across restarts (last 50).
 - **Open a tab when a session creates a PR** — a background tab for the PR opens in that session's pane within one poll interval. PRs that already existed when the token was saved are not opened, and closing an auto-opened tab does not bring it back.
-- **PR quick-open** — the `PR` rail button lists open pull requests across your sessions with their GitHub titles; clicking one switches to that session and opens the PR in its pane.
+- **PR panel** — the `PR` rail button lists open pull requests across your sessions with their GitHub titles. New PRs show as unread (the badge counts them); clicking one switches to that session and opens the PR in its pane. Mark-as-read, delete and *Clear all* work like the notification panel — a deleted PR stays hidden while it is open.
+
+If the token is rejected (401/403) or your user can't be determined, the bell shows an amber dot and a notification points you to Settings; the poller retries and polls immediately when the window regains focus. PRs created while the app was closed or the poller was down are still opened (last 24 h, at most 10) once it recovers.
 
 The poller only lists sessions created by the token's user (`GET /v3/self` → `user_ids` filter). With a **personal access token** the user id comes straight from `/v3/self`. A **service-user token** has no user id, so the app determines yours automatically: first from the Devin CLI sign-in (`devin auth login` / `devin auth status` — the same `devin` binary used by Devin Local), then by inferring it from the sessions you open in the app. If neither works, set the **User ID override** in Settings → Notifications; the resolved identity is shown there (masked, e.g. `user-…705c6`) and can be cleared with the **Reset** button. The first poll after a resolution confirms the id against the sessions list and falls back to the next strategy if it doesn't match.
 
@@ -69,21 +75,25 @@ The poller only lists sessions created by the token's user (`GET /v3/self` → `
 
 1. Install the Devin CLI and make sure `devin` is on your `PATH`. If it isn't, the Local surface shows install guidance; you can also point at a specific binary with `"local": { "devinPath": "C:\\path\\to\\devin.exe" }` (or `"/path/to/devin"` on macOS) in `settings.json`.
 2. Switch to the **Local** surface (⌘ in the rail), click **+ Add** and pick a workspace folder.
-3. Start a session; prompts, tool calls, plans and permission requests appear in the chat panel. The **Terminal** tab in the same panel runs the interactive `devin` CLI in that workspace. Type `/handoff` in a local session to move it to Devin Cloud.
+3. Start a session; prompts, tool calls, plans and permission requests appear in the chat panel. Each session has its own **Terminal** tab running the interactive `devin` CLI in that workspace, and its own set of GitHub tabs in the pane. PR links the CLI prints open as background tabs just like Cloud sessions (same *Open a tab when a session creates a PR* toggle). Type `/handoff` in a local session to move it to Devin Cloud.
+4. Hover a session in the list to delete it (running sessions must be cancelled first); the trash icon next to **Sessions** deletes every session in the workspace after a confirmation.
 
 ## Settings reference
 
-| Setting | Where | Notes |
+Settings is split into five tabs: **General**, **Link Handling**, **Passwords**, **Notifications** and **Updates**. Fields save automatically when you switch tabs, leave Settings or quit; invalid values are flagged inline and block the save. The API token Save/Clear and password Add/Edit buttons are explicit actions.
+
+| Setting | Tab | Notes |
 |---|---|---|
-| Tenant URL / API base | Settings | Must be `https` |
-| Workspaces | Settings → Workspaces | Folders for Devin Local and terminal working directories |
-| Tabs | Settings → Keep-alive / Max live tabs | The session you're viewing keeps its tabs loaded; hidden sessions' tabs are discarded after the keep-alive window and the live cap only ever applies to them |
-| Open non-GitHub links in system browser | Settings | GitHub links always stay in the pane |
-| Keep hidden tabs live for (hours) / Max live tabs | Settings | Memory controls for GitHub tabs of sessions you're not viewing |
-| Show terminal dock on Local and Settings too | Settings | Dock is Cloud-only by default |
-| Shell command | Settings | Blank = Windows Terminal default profile (else PowerShell) on Windows, `$SHELL` on macOS; e.g. `wsl.exe -d Ubuntu` or `/bin/zsh -l` |
-| Notifications / PR auto-open / token / org id | Settings → Notifications | See above |
-| Passwords | Settings → Passwords | Origin + username + password, encrypted with DPAPI (Windows) / Keychain (macOS); autofill fills a single match on load, offers an account picker when several match, and asks to save/update after a sign-in; rows support show/copy/edit/delete |
+| Tenant URL / API base | General | Must be `https` |
+| Workspaces | General | Folders for Devin Local and terminal working directories |
+| Open non-GitHub links in system browser | General | GitHub, tenant and rule-matched links always stay in the pane |
+| Keep hidden tabs live for (hours) / Max live tabs | General | Memory controls for GitHub tabs of sessions you're not viewing — the session you're viewing keeps its tabs loaded; hidden sessions' tabs are discarded after the keep-alive window and the live cap only ever applies to them |
+| Show terminal dock on Local and Settings too | General | Dock is Cloud-only by default |
+| Shell command | General | Blank = Windows Terminal default profile (else PowerShell) on Windows, `$SHELL` on macOS; e.g. `wsl.exe -d Ubuntu` or `/bin/zsh -l` |
+| Link rules | Link Handling | Up to 100 prefix or regular-expression rules; matching http(s) links open as pane tabs instead of the system browser (GitHub and your tenant are matched first). *Test a URL* shows where a link would go |
+| Passwords | Passwords | Origin + username + password, encrypted with DPAPI (Windows) / Keychain (macOS); autofill fills a single match on load, offers an account picker when several match, and asks to save/update after a sign-in; rows support show/copy/edit/delete |
+| Notifications / PR auto-open / token / org id / user id | Notifications | See above |
+| Version, update status, release notes | Updates | Shows the installed version, whether an update is downloading or ready (**Update now** installs it), and the release notes for the current and the available version |
 
 Pane width, terminal height, window placement and the open tab list are saved automatically.
 
@@ -102,9 +112,13 @@ On macOS, `Cmd` works everywhere `Ctrl` is listed (`Ctrl` works too).
 | `` Ctrl+` `` | Toggle terminal dock |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the focused view |
 
+GitHub tabs can be dragged to reorder; right-click a tab for *Copy address*, or the strip for *Reload all tabs in this session*.
+
+In the terminal: `Ctrl+C` copies when text is selected (otherwise it is sent to the shell), `Ctrl+Shift+C` copies, `Ctrl+V` / `Ctrl+Shift+V` paste; right-click copies the selection or pastes when nothing is selected. On macOS use `Cmd+C` / `Cmd+V` — plain `Ctrl+C` / `Ctrl+V` keep their terminal meaning.
+
 ## Where things live
 
-`%APPDATA%\devin-workspaces\` on Windows, `~/Library/Application Support/devin-workspaces/` on macOS — `settings.json` (plain settings and layout), `secrets.json` (API token, encrypted), `credentials.json` (saved logins, encrypted), `notifications.json` (notification history), `events.jsonl` (the event log), and the two browser profiles (`persist:devin`, `persist:github`). Uninstalling removes the app; delete this folder to remove all data.
+`%APPDATA%\devin-workspaces\` on Windows, `~/Library/Application Support/devin-workspaces/` on macOS — `settings.json` (plain settings and layout), `secrets.json` (API token, encrypted), `credentials.json` (saved logins, encrypted), `notifications.json` (notification history), `prs.json` (PR panel read/dismissed state), `pr-ledger.json` (PRs already seen, for catch-up after an outage), `identity.json` (resolved user id for service-user tokens), `local-sessions.json` (Devin Local session index), `events.jsonl` (the event log), and the two browser profiles (`persist:devin`, `persist:github`). Uninstalling removes the app; delete this folder to remove all data.
 
 The event log records URLs, ids and sizes only — never page content, terminal output, or secrets. It is the first place to look if notifications or PR tabs don't appear (`poll`, `poll-error`, `notification-added`, `notification-open`, `pr-auto-open` events).
 

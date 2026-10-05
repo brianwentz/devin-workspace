@@ -74,6 +74,10 @@ function hooks(app: ElectronApplication) {
       app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.simulateUpdateDownloaded(value), version),
     simulateUpdateAvailable: (version: string) =>
       app.evaluate((_e, value: string) => (globalThis as any).__devinworkspaces.simulateUpdateAvailable(value), version),
+    simulateUpdateFocus: () =>
+      app.evaluate(() => (globalThis as any).__devinworkspaces.simulateUpdateFocus()),
+    simulateUpdateResume: () =>
+      app.evaluate(() => (globalThis as any).__devinworkspaces.simulateUpdateResume()),
     panelOpen: () => app.evaluate(() => (globalThis as any).__devinworkspaces.panelOpen()),
     identity: () =>
       app.evaluate(
@@ -974,6 +978,10 @@ test('settings shows the app version and an Update now button', async () => {
       available: null,
       downloaded: null,
       releasesUrl: 'https://github.com/brianwentz/devin-workspace/releases',
+      enabled: true,
+      checking: false,
+      lastCheckedAt: null,
+      error: null,
     });
 
     // Switch to the settings surface; the About block renders the version.
@@ -985,6 +993,53 @@ test('settings shows the app version and an Update now button', async () => {
     await expect
       .poll(async () => shell(`document.getElementById('updateStatus')?.getAttribute('data-update-state')`))
       .toBe('none');
+
+    // Opening the tab fires a 'settings' check; lastCheckedAt becomes a timestamp.
+    await waitForEvent(logFile, 'update-check');
+    await expect.poll(async () => (await state(app)).update.lastCheckedAt).not.toBeNull();
+    expect(typeof (await state(app)).update.lastCheckedAt).toBe('string');
+    await expect
+      .poll(async () =>
+        shell(`(document.getElementById('updateLastChecked')?.textContent ?? '').startsWith('Last checked')`),
+      )
+      .toBe(true);
+
+    // "Check now" sends a 'manual' check (never throttled).
+    await shell(`document.getElementById('updateCheckNow').click()`);
+    await expect
+      .poll(
+        async () =>
+          (await readEvents(logFile)).filter(
+            (entry) =>
+              entry.event === 'update-check' &&
+              (entry.detail as { source?: string })?.source === 'manual',
+          ).length,
+      )
+      .toBe(1);
+
+    // Focus and resume within their throttle windows are skipped.
+    await h.simulateUpdateFocus();
+    await expect
+      .poll(async () =>
+        (await readEvents(logFile)).some(
+          (entry) =>
+            entry.event === 'update-check-skipped' &&
+            (entry.detail as { source?: string; reason?: string })?.source === 'focus' &&
+            (entry.detail as { reason?: string })?.reason === 'throttled',
+        ),
+      )
+      .toBe(true);
+    await h.simulateUpdateResume();
+    await expect
+      .poll(async () =>
+        (await readEvents(logFile)).some(
+          (entry) =>
+            entry.event === 'update-check-skipped' &&
+            (entry.detail as { source?: string; reason?: string })?.source === 'resume' &&
+            (entry.detail as { reason?: string })?.reason === 'throttled',
+        ),
+      )
+      .toBe(true);
 
     // Update available: downloading state, no Update now button yet.
     await h.simulateUpdateAvailable('9.9.9');
@@ -1002,6 +1057,8 @@ test('settings shows the app version and an Update now button', async () => {
       .poll(async () => shell(`Boolean(document.querySelector('#updateStatus[data-update-state="ready"]'))`))
       .toBe(true);
     await expect.poll(async () => shell(`Boolean(document.getElementById('updateNow'))`)).toBe(true);
+    // Check-now row is hidden once an update is downloaded.
+    expect(await shell(`Boolean(document.getElementById('updateCheckNow'))`)).toBe(false);
 
     // Click installs (test mode: logs update-install, removes the update entry).
     await shell(`document.getElementById('updateNow').click()`);
@@ -1009,6 +1066,43 @@ test('settings shows the app version and an Update now button', async () => {
     await expect
       .poll(async () => ((await h.notifications()) as { kind: string }[]).filter((e) => e.kind === 'update').length)
       .toBe(0);
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('focus and resume trigger an update check when none has run yet', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-upcheck-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launch(profile, logFile);
+  const h = hooks(app);
+  try {
+    // First resume check runs (test mode simulates the check — no network).
+    await h.simulateUpdateResume();
+    await expect
+      .poll(async () =>
+        (await readEvents(logFile)).some(
+          (entry) =>
+            entry.event === 'update-check' &&
+            (entry.detail as { source?: string })?.source === 'resume',
+        ),
+      )
+      .toBe(true);
+    // Wait for the simulated check to settle so focus hits the throttle, not in-flight.
+    await expect.poll(async () => (await state(app)).update.checking).toBe(false);
+    // Focus inside the 1 h throttle window is skipped.
+    await h.simulateUpdateFocus();
+    await expect
+      .poll(async () =>
+        (await readEvents(logFile)).some(
+          (entry) =>
+            entry.event === 'update-check-skipped' &&
+            (entry.detail as { source?: string; reason?: string })?.source === 'focus' &&
+            (entry.detail as { reason?: string })?.reason === 'throttled',
+        ),
+      )
+      .toBe(true);
   } finally {
     await app.close().catch(() => undefined);
     rmSync(profile, { recursive: true, force: true });
