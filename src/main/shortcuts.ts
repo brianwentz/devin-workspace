@@ -160,8 +160,6 @@ export function handleShortcut(
         ? 0
         : contents.getZoomLevel() + (key === '-' ? -0.5 : 0.5);
     contents.setZoomLevel(zoom);
-    // The sessions sidebar scales to the Cloud view's zoom — republish.
-    if (view === 'devin') notifyShell();
     handled = true;
   } else if (
     (key === 'f12' || (ctrl && input.shift && key === 'i')) &&

@@ -5,6 +5,7 @@ import { AgentBadge, MessageView, PermissionCard, PlanList, buttonClass } from '
 import { TerminalView } from './TerminalView';
 import { useShellState } from '../store';
 import { useLocalState } from './store';
+import { sessionTitleClass } from '../components/sessionRowStyles';
 
 type Session = LocalStatePublic['sessions'][string];
 
@@ -324,8 +325,10 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
                 data-history-source={item.historySource}
                 onClick={() => void openSession(item)}
               >
-                <div className="session-title truncate">{item.title || 'Untitled session'}</div>
-                <div className="flex items-center gap-2 text-[10px] text-[#7f8ca0]">
+                <div className={`session-title truncate ${sessionTitleClass}`}>
+                  {item.title || 'Untitled session'}
+                </div>
+                <div className="flex items-center gap-2 text-[11px] leading-[14px] text-[#7f8ca0]">
                   <span>{formatDate(item.createdAt)}</span>
                   {item.running && <span className="spinner" />}
                   {item.historySource === 'local-index' && (

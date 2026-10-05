@@ -101,6 +101,16 @@ test('cloud session sidebar: data, sections, interactions, geometry', async () =
     expect(rowIds[rootIdx + 2]).toBe('dddd0000000000000000000000000004:1');
     expect(rowIds).toContain('eeee0000000000000000000000000005:0');
 
+    // Rows use the shared 12px token (same as the web sidebar's text-xs).
+    await expect
+      .poll(() =>
+        page
+          .locator('[data-session-id]')
+          .first()
+          .evaluate((el) => getComputedStyle(el).fontSize),
+      )
+      .toBe('12px');
+
     // --- screenshot evidence (all sections expanded, full fixture) --------
     const evidenceDir = resolve(process.cwd(), 'docs', 'evidence');
     mkdirSync(evidenceDir, { recursive: true });

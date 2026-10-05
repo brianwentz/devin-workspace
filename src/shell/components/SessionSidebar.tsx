@@ -5,6 +5,7 @@ import { buildSessionTree, type SessionTreeNode } from '../../core/sessionTree';
 import type { Rect } from '../../core/layout';
 import { useShellState } from '../store';
 import { relativeTime } from './relativeTime';
+import { sessionRowClass, sessionMetaClass, sessionFolderHeaderClass } from './sessionRowStyles';
 
 // statusEnum → status dot color.
 const STATUS_COLOR: Record<string, string> = {
@@ -124,7 +125,7 @@ function Row({
           data-status-enum={s.statusEnum ?? s.status}
           data-live={liveIds.has(s.id)}
           title={s.title || 'Untitled session'}
-          className="session-row flex-1 min-w-0 flex items-center gap-1.5 px-1.5 h-[30px] rounded text-left text-[13px] leading-[18px] tracking-[-0.005em] text-[#c9d4e3] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[current=true]:bg-[#1f2f42] data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
+          className={`session-row flex-1 min-w-0 flex items-center ${sessionRowClass} text-left text-[#c9d4e3] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[current=true]:bg-[#1f2f42] data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]`}
           onMouseEnter={() => prefetch.onEnter(s.id)}
           onMouseLeave={prefetch.onLeave}
           onClick={() => window.devinworkspaces.cloudOpen(s.id)}
@@ -136,16 +137,16 @@ function Row({
             />
           </span>
           <span
-            className={`flex-1 min-w-0 truncate ${s.isUnread ? 'font-semibold text-white' : ''}`}
+            className={`flex-1 min-w-0 truncate ${s.isUnread ? 'font-medium text-white' : ''}`}
           >
             {s.title || 'Untitled session'}
           </span>
           {s.prCount > 0 && (
-            <span className="shrink-0 text-[11px] leading-[14px] tracking-[0.01em] px-1 rounded bg-[#31455f] text-[#9fc4ea]">
+            <span className="shrink-0 text-[11px] leading-[14px] px-1 rounded bg-[#31455f] text-[#9fc4ea]">
               {s.prCount} PR
             </span>
           )}
-          <span className="shrink-0 text-[11px] leading-[14px] tracking-[0.01em] text-[#8b9bb0]">
+          <span className={`shrink-0 ${sessionMetaClass}`}>
             {relativeTime(s.updatedAt, Date.now())}
           </span>
         </button>
@@ -264,10 +265,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
           className="w-full h-7 px-2 rounded bg-[#141d29] border border-[#2c3949] text-[12px] placeholder-[#5c6b80] focus:outline-none focus:border-[#54749c]"
         />
       </div>
-      <div
-        className="flex-1 overflow-y-auto px-1.5 pb-2"
-        style={{ zoom: state!.cloudZoomFactor }}
-      >
+      <div className="flex-1 overflow-y-auto px-1.5 pb-2">
         {q ? (
           filtered.length === 0 ? (
             <div className="px-2 py-3 text-[12px] text-[#5c6b80]">No matches</div>
@@ -284,7 +282,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 data-status-enum={s.statusEnum ?? s.status}
                 data-live={liveIds.has(s.id)}
                 title={s.title || 'Untitled session'}
-                className="w-full flex items-center gap-1.5 px-1.5 h-[30px] rounded text-left text-[13px] leading-[18px] tracking-[-0.005em] hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]"
+                className={`w-full flex items-center ${sessionRowClass} text-left hover:bg-[#1a2735] focus:bg-[#1f2f42] focus:outline-none data-[live=true]:border-l-2 data-[live=true]:border-l-[#3d5a80]`}
                 onMouseEnter={() => prefetch.onEnter(s.id)}
                 onMouseLeave={prefetch.onLeave}
                 onClick={() => window.devinworkspaces.cloudOpen(s.id)}
@@ -296,11 +294,11 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                   />
                 </span>
                 <span
-                  className={`flex-1 min-w-0 truncate ${s.isUnread ? 'font-semibold text-white' : ''}`}
+                  className={`flex-1 min-w-0 truncate ${s.isUnread ? 'font-medium text-white' : ''}`}
                 >
                   {s.title || 'Untitled session'}
                 </span>
-                <span className="shrink-0 text-[11px] leading-[14px] tracking-[0.01em] text-[#8b9bb0]">
+                <span className={`shrink-0 ${sessionMetaClass}`}>
                   {relativeTime(s.updatedAt, Date.now())}
                 </span>
               </button>
@@ -315,7 +313,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 type="button"
                 data-section-kind={sectionItem.kind}
                 data-section-name={sectionItem.name}
-                className="w-full flex items-center gap-1 px-1 py-1 text-[12px] leading-[16px] font-medium text-[#8b9bb0] hover:text-[#c9d4e3]"
+                className={`w-full flex items-center gap-1 px-1 py-1 ${sessionFolderHeaderClass} text-[#8b9bb0] hover:text-[#c9d4e3]`}
                 onClick={() => toggleFolder(sectionItem.name)}
               >
                 {sectionItem.collapsed ? (
@@ -326,7 +324,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 <span className="flex-1 text-left truncate">
                   {SECTION_LABELS[sectionItem.name] ?? sectionItem.name}
                 </span>
-                <span className="text-[11px] leading-[14px] tracking-[0.01em] text-[#5c6b80]">
+                <span className="text-[11px] leading-[14px] text-[#5c6b80]">
                   {sectionItem.total !== null
                     ? `${sectionItem.nodes.length} / ${sectionItem.total}`
                     : sectionItem.nodes.length}

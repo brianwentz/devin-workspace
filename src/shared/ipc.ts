@@ -532,7 +532,6 @@ export const ShellStateSchema = z.object({
   }),
   notifications: NotificationsStateSchema,
   cloud: CloudStateSchema,
-  cloudZoomFactor: z.number(),
   update: UpdateStateSchema,
   // F5 terminal dock
   terminalOpen: z.boolean(),

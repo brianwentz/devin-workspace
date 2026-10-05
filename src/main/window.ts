@@ -163,7 +163,6 @@ export function publicState(): ShellState {
       panelOpen: state.notificationsPanelOpen,
     },
     cloud: cloudSessions().snapshot(),
-    cloudZoomFactor: state.devinView?.webContents.getZoomFactor() ?? 1,
     update: updateState(),
     terminalOpen: state.terminalOpen,
     terminalHeight: state.terminalHeight,
