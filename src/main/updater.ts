@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import { app, powerMonitor } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,10 +17,90 @@ import type { ReleaseNotesReply, UpdateState } from '../shared/ipc';
 import { notifyShell } from './window';
 
 const INITIAL_DELAY_MS = 30_000;
-const INTERVAL_MS = 6 * 60 * 60 * 1000;
+const INTERVAL_MS = 2 * 60 * 60 * 1000;
+const SETTINGS_THROTTLE_MS = 60_000;
+const RESUME_THROTTLE_MS = 15 * 60 * 1000;
+const FOCUS_THROTTLE_MS = 60 * 60 * 1000;
 
+let enabled = false;
+let checking = false;
+let lastCheckedAt: number | null = null;
+let lastError: string | null = null;
 let downloadedVersion: string | null = null;
 let availableVersion: string | null = null;
+
+export type UpdateCheckSource = 'startup' | 'timer' | 'settings' | 'manual' | 'resume' | 'focus';
+
+const THROTTLE_MS: Partial<Record<UpdateCheckSource, number>> = {
+  settings: SETTINGS_THROTTLE_MS,
+  resume: RESUME_THROTTLE_MS,
+  focus: FOCUS_THROTTLE_MS,
+};
+
+function recordError(error: unknown, options: { log?: boolean } = {}): void {
+  const message = String((error as { message?: unknown })?.message ?? error);
+  lastError = message.split('\n', 1)[0]!.slice(0, 200);
+  if (options.log !== false) {
+    log('shell', 'update-error', { detail: { message } });
+  }
+  notifyShell();
+}
+
+export function checkForUpdatesNow(source: UpdateCheckSource): void {
+  if (!enabled && !testMode) {
+    // Only shell-originated requests are worth a log line — focus/resume would
+    // spam dev builds on every window focus.
+    if (source === 'settings' || source === 'manual') {
+      log('shell', 'update-check-skipped', { detail: { source, reason: 'disabled' } });
+    }
+    return;
+  }
+  if (checking) {
+    log('shell', 'update-check-skipped', { detail: { source, reason: 'in-flight' } });
+    return;
+  }
+  // The window 'focus' event fires at launch — that check is covered by the
+  // 30 s startup timer, so focus checks only run once a baseline exists.
+  if (source === 'focus' && lastCheckedAt === null) return;
+  const throttleMs = THROTTLE_MS[source];
+  if (lastCheckedAt !== null && throttleMs !== undefined) {
+    const sinceMs = Date.now() - lastCheckedAt;
+    if (sinceMs < throttleMs) {
+      log('shell', 'update-check-skipped', {
+        detail: { source, reason: 'throttled', sinceMs },
+      });
+      return;
+    }
+  }
+  log('shell', 'update-check', { detail: { source } });
+  checking = true;
+  lastError = null;
+  lastCheckedAt = Date.now();
+  notifyShell();
+  if (testMode) {
+    // Simulated check — the e2e suite must never hit the network.
+    setTimeout(() => {
+      checking = false;
+      notifyShell();
+    }, 0).unref();
+    return;
+  }
+  autoUpdater
+    .checkForUpdates()
+    .catch((error: unknown) => recordError(error, { log: false }))
+    .finally(() => {
+      checking = false;
+      notifyShell();
+    });
+}
+
+export function updateOnWindowFocus(): void {
+  checkForUpdatesNow('focus');
+}
+
+export function updateOnResume(): void {
+  checkForUpdatesNow('resume');
+}
 
 export function updateState(): UpdateState {
   return {
@@ -28,6 +108,10 @@ export function updateState(): UpdateState {
     available: availableVersion,
     downloaded: downloadedVersion,
     releasesUrl: releasesPageUrl(RELEASE_REPO.owner, RELEASE_REPO.repo),
+    enabled: enabled || testMode,
+    checking,
+    lastCheckedAt: lastCheckedAt === null ? null : new Date(lastCheckedAt).toISOString(),
+    error: lastError,
   };
 }
 
@@ -142,11 +226,11 @@ export function setupUpdater(): void {
       return;
     }
   }
+  enabled = true;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.logger = null;
 
-  autoUpdater.on('checking-for-update', () => log('shell', 'update-check'));
   autoUpdater.on('update-available', (info) => {
     log('shell', 'update-available', { detail: { version: info.version } });
     setAvailableReleaseNotes(
@@ -158,15 +242,11 @@ export function setupUpdater(): void {
     log('shell', 'update-not-available', { detail: { version: info.version } }),
   );
   autoUpdater.on('update-downloaded', (info) => updateDownloaded(info.version));
-  autoUpdater.on('error', (error) =>
-    log('shell', 'update-error', { detail: { message: String(error?.message ?? error) } }),
-  );
+  autoUpdater.on('error', (error) => recordError(error));
 
-  const check = (): void => {
-    autoUpdater.checkForUpdates().catch((error: unknown) => {
-      log('shell', 'update-error', { detail: { message: String(error) } });
-    });
-  };
-  setTimeout(check, INITIAL_DELAY_MS).unref();
-  setInterval(check, INTERVAL_MS).unref();
+  powerMonitor.on('resume', updateOnResume);
+  powerMonitor.on('unlock-screen', updateOnResume);
+
+  setTimeout(() => checkForUpdatesNow('startup'), INITIAL_DELAY_MS).unref();
+  setInterval(() => checkForUpdatesNow('timer'), INTERVAL_MS).unref();
 }
