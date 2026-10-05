@@ -1,9 +1,11 @@
 import { screen, View, type WebContentsView } from 'electron';
 import {
   clampPaneWidth,
+  clampSessionsWidth,
   clampTerminalHeight,
   computeBounds,
   fractionFromPx,
+  leftChrome,
   MIN_DEVIN_WIDTH,
   paneToggleWindowWidth,
   RAIL_WIDTH,
@@ -17,6 +19,7 @@ import { effectiveScope } from '../core/tabModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 
 import { ensureAnalyticsView } from './analytics';
+import { cloudSessions } from './cloudSessions';
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
@@ -102,7 +105,19 @@ export function layoutState(): LayoutState {
     paneFraction: state.paneFraction,
     terminalOpen: terminalVisible(),
     terminalHeight: state.terminalHeight,
+    // The sessions column only occupies space on the Cloud surface.
+    sessionsOpen: state.sessionsOpen && state.surface === 'cloud',
+    sessionsWidth: state.sessionsWidth,
   };
+}
+
+// Sessions column toggle — unlike the pane, this is an in-window shell
+// overlay column: no window resize, just a relayout + shell notify.
+export function setSessionsOpen(open: boolean, source: string): void {
+  if (state.sessionsOpen === open) return;
+  state.sessionsOpen = open;
+  applyLayout();
+  log('shell', 'sessions-panel', { detail: { open, source } });
 }
 
 export function publicState(): ShellState {
@@ -110,6 +125,9 @@ export function publicState(): ShellState {
     paneOpen: state.paneOpen,
     paneFraction: state.paneFraction,
     paneCollapsed: state.paneCollapsed,
+    sessionsOpen: state.sessionsOpen,
+    sessionsWidth: state.sessionsWidth,
+    sessionsCollapsed: state.sessionsCollapsed,
     surface: state.surface,
     currentSessionId: state.currentSessionId,
     localSessionId: state.localSessionId,
@@ -143,6 +161,7 @@ export function publicState(): ShellState {
       unreadCount: notificationsUnread(),
       panelOpen: state.notificationsPanelOpen,
     },
+    cloud: cloudSessions().snapshot(),
     update: updateState(),
     terminalOpen: state.terminalOpen,
     terminalHeight: state.terminalHeight,
@@ -255,6 +274,7 @@ export function applyLayout(): void {
   syncScope();
   const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
   state.paneCollapsed = bounds.paneCollapsed;
+  state.sessionsCollapsed = bounds.sessionsCollapsed;
   const size = windowRef.getContentBounds();
   shellView.setBounds({ x: 0, y: 0, width: size.width, height: size.height });
   if (state.surface === 'cloud') {
@@ -292,6 +312,7 @@ export function cancelDrag(restore: boolean, reason: string): void {
   state.dragTimer = null;
   if (restore) {
     if (state.dragAxis === 'x') state.paneFraction = state.dragStartFraction;
+    else if (state.dragAxis === 's') state.sessionsWidth = state.dragStartSessionsWidth;
     else state.terminalHeight = state.dragStartHeight;
   }
   lowerShell();
@@ -309,15 +330,18 @@ export function cancelDrag(restore: boolean, reason: string): void {
   state.shellView?.webContents.send(IpcChannels.layoutDragReset);
 }
 
-export function beginDrag(axis: 'x' | 'y', pos: number): void {
+export function beginDrag(axis: 'x' | 'y' | 's', pos: number): void {
   const { windowRef, shellView } = state;
   if (!windowRef || !shellView || state.dragging) return;
   if (axis === 'x' && (!state.paneOpen || state.paneCollapsed)) return;
   if (axis === 'y' && !terminalVisible()) return;
+  if (axis === 's' && (!state.sessionsOpen || state.sessionsCollapsed || state.surface !== 'cloud'))
+    return;
   state.dragging = true;
   state.dragAxis = axis;
   state.dragStartFraction = state.paneFraction;
   state.dragStartHeight = state.terminalHeight;
+  state.dragStartSessionsWidth = state.sessionsWidth;
   state.dragLastX = pos;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   raiseShell();
@@ -334,8 +358,14 @@ export function moveDrag(pos: number): void {
   const content = windowRef.getContentBounds();
   if (state.dragAxis === 'x') {
     // Pointer → pane px (guarded) → stored as a fraction of the available width.
-    const panePx = clampPaneWidth(content.width - pos - SPLITTER_WIDTH, content.width);
+    const panePx = clampPaneWidth(
+      content.width - pos - SPLITTER_WIDTH,
+      content.width,
+      leftChrome(layoutState(), content.width),
+    );
     state.paneFraction = fractionFromPx(panePx, content.width);
+  } else if (state.dragAxis === 's') {
+    state.sessionsWidth = clampSessionsWidth(pos - RAIL_WIDTH, content.width);
   } else {
     state.terminalHeight = clampTerminalHeight(
       content.height - pos - SPLITTER_WIDTH / 2,
@@ -343,13 +373,18 @@ export function moveDrag(pos: number): void {
     );
   }
   const bounds = computeBounds(content, layoutState());
-  const guideRect = state.dragAxis === 'x' ? bounds.splitter : bounds.terminalSplitter;
+  const guideRect =
+    state.dragAxis === 'x'
+      ? bounds.splitter
+      : state.dragAxis === 's'
+        ? bounds.sessionsSplitter
+        : bounds.terminalSplitter;
   if (guideRect) {
     const { width, height } = content;
     shellView?.setBounds({ x: 0, y: 0, width, height });
     shellView?.webContents.send(IpcChannels.layoutDragGuide, {
       axis: state.dragAxis,
-      pos: state.dragAxis === 'x' ? guideRect.x : guideRect.y,
+      pos: state.dragAxis === 'y' ? guideRect.y : guideRect.x,
     });
   }
   log('shell', 'drag-move', {

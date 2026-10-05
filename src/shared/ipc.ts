@@ -98,6 +98,11 @@ export const IpcChannels = {
   // Terminal copy/paste via the main-process Electron clipboard.
   clipboardReadText: 'clipboard:readText',
   clipboardWriteText: 'clipboard:writeText',
+  // Cloud session sidebar
+  cloudOpen: 'cloud:open',
+  cloudRefresh: 'cloud:refresh',
+  cloudLoadMore: 'cloud:loadMore',
+  cloudPanel: 'cloud:panel',
 } as const;
 
 export const SurfaceSchema = z.enum(['cloud', 'local', 'settings', 'analytics']);
@@ -173,6 +178,13 @@ const LayoutFields = {
   terminalOpen: z.boolean(),
   terminalHeight: z.number().min(MIN_TERMINAL_HEIGHT),
 };
+// Cloud session sidebar: open/width are persisted via syncFromState;
+// collapsedFolders is patched by the shell through settings:set/commit.
+const SessionsFields = {
+  open: z.boolean(),
+  width: z.number().int().min(200).max(480),
+  collapsedFolders: z.array(z.string().max(256)).max(200),
+};
 const TerminalFields = {
   allSurfaces: z.boolean(),
   // Optional command line override for dock shells ('' = Windows Terminal
@@ -243,6 +255,13 @@ export const SettingsObject = z.object({
       terminalHeight: LayoutFields.terminalHeight.default(DEFAULT_TERMINAL_HEIGHT),
     })
     .default({ terminalOpen: false, terminalHeight: DEFAULT_TERMINAL_HEIGHT }),
+  sessions: z
+    .object({
+      open: SessionsFields.open.default(true),
+      width: SessionsFields.width.default(260),
+      collapsedFolders: SessionsFields.collapsedFolders.default([]),
+    })
+    .default({ open: true, width: 260, collapsedFolders: [] }),
   terminal: z
     .object({
       allSurfaces: TerminalFields.allSurfaces.default(false),
@@ -269,6 +288,7 @@ export const SettingsPatchSchema = z.object({
   local: z.object(LocalFields).partial().optional(),
   layout: z.object(LayoutFields).partial().optional(),
   terminal: z.object(TerminalFields).partial().optional(),
+  sessions: z.object(SessionsFields).partial().optional(),
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 
@@ -327,6 +347,38 @@ export const NotificationIdArg = z.object({ id: z.string() });
 export const NotificationPanelArg = z.object({ open: z.boolean() });
 
 export type NotificationsState = z.infer<typeof NotificationsStateSchema>;
+
+// Cloud session sidebar — token/user id never leave main; titles are present
+// in state for display but must never be logged.
+export const CloudSessionSchema = z.object({
+  id: z.string(),
+  acpId: z.string(),
+  title: z.string(),
+  url: z.string(),
+  status: z.string(),
+  statusEnum: z.string().nullable(),
+  userActionRequired: z.string().nullable(),
+  folder: z.string().nullable(),
+  parentId: z.string().nullable(),
+  isPinned: z.boolean(),
+  isUnread: z.boolean(),
+  isStarred: z.boolean(),
+  directChildrenCount: z.number().int(),
+  hasMoreChildren: z.boolean(),
+  prCount: z.number().int(),
+  updatedAt: z.number().finite(),
+});
+export type CloudSessionState = z.infer<typeof CloudSessionSchema>;
+
+export const CloudStateSchema = z.object({
+  status: z.enum(['disabled', 'no-token', 'connecting', 'ready', 'error']),
+  lastSyncAt: z.string().nullable(),
+  error: z.string().nullable(),
+  folders: z.array(z.string()),
+  folderTotals: z.record(z.string(), z.number()),
+  sessions: z.array(CloudSessionSchema),
+});
+export type CloudState = z.infer<typeof CloudStateSchema>;
 
 export const UpdateStateSchema = z.object({
   version: z.string(),
@@ -405,6 +457,9 @@ export const ShellStateSchema = z.object({
   paneOpen: z.boolean(),
   paneFraction: z.number(),
   paneCollapsed: z.boolean(),
+  sessionsOpen: z.boolean(),
+  sessionsWidth: z.number(),
+  sessionsCollapsed: z.boolean(),
   surface: SurfaceSchema,
   currentSessionId: z.string().nullable(),
   localSessionId: z.string().nullable(),
@@ -433,6 +488,7 @@ export const ShellStateSchema = z.object({
       .nullable(),
   }),
   notifications: NotificationsStateSchema,
+  cloud: CloudStateSchema,
   update: UpdateStateSchema,
   // F5 terminal dock
   terminalOpen: z.boolean(),
@@ -504,6 +560,9 @@ export type SessionPr = z.infer<typeof SessionPrSchema>;
 export const PrUrlArg = z.object({ url: z.string().url() });
 export const PrOpenArg = z.object({ sessionId: z.string().min(1), url: z.string().url() });
 export const PrPanelArg = z.object({ open: z.boolean() });
+export const CloudOpenArg = z.object({ sessionId: z.string().min(1).max(128) });
+export const CloudLoadMoreArg = z.object({ folder: z.string().min(1).max(256) });
+export const CloudPanelArg = z.object({ open: z.boolean() });
 
 // Arg schemas for ipcMain.on channels (safeParse; invalid payloads ignored).
 export const TabIdArg = z.string();
@@ -513,7 +572,7 @@ export const SurfaceArg = SurfaceSchema;
 export const LinkOpenArg = z.string().max(8192);
 export const DragPosArg = z.number().finite();
 export const DragStartArg = z.object({
-  axis: z.enum(['x', 'y']),
+  axis: z.enum(['x', 'y', 's']),
   pos: z.number().finite(),
 });
 export const DragCancelReasonArg = z.enum(['escape', 'pointer-cancel']);

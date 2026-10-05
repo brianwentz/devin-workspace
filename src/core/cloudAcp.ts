@@ -1,0 +1,197 @@
+// Cloud session sidebar protocol helpers (pure). Ground truth:
+// docs/evidence/cloud-acp-spike-*.json — the ws speaks JSON-RPC 2.0 over
+// wss://<tenant>/api/acp/live and all extension fields live in _meta under
+// the 'cognition.ai/' prefix. The 'cognition.ai/sessionListFolders' client
+// capability is required for folder data; 'cognition.ai/compact' strips it.
+
+import { sanitizeMessage } from './devinApi';
+
+const META = 'cognition.ai/';
+
+export interface CloudSession {
+  /** Bare hex id — matches parseSessionId('/sessions/<hex>') output. */
+  id: string;
+  /** Full ACP id, e.g. 'devin-<hex>'. */
+  acpId: string;
+  title: string;
+  url: string;
+  status: string;
+  statusEnum: string | null;
+  userActionRequired: string | null;
+  folder: string | null;
+  /** Bare hex of _meta['cognition.ai/proposedByDevinId'] — the sub-agent link. */
+  parentId: string | null;
+  isPinned: boolean;
+  isUnread: boolean;
+  isStarred: boolean;
+  directChildrenCount: number;
+  hasMoreChildren: boolean;
+  prCount: number;
+  /** ms epoch. */
+  updatedAt: number;
+}
+
+export interface CloudListResult {
+  sessions: CloudSession[];
+  /** Folder order for orgId from _meta sidebarFoldersByOrg (may include the
+   * 'pinned'/'participated' system folders). */
+  folders: string[];
+  folderTotals: Record<string, number>;
+  nextCursor: string | null;
+}
+
+export function buildInitializeParams(version: string): Record<string, unknown> {
+  return {
+    protocolVersion: 1,
+    clientInfo: { name: 'devin-workspaces', version },
+    clientCapabilities: { _meta: { [`${META}sessionListFolders`]: true } },
+  };
+}
+
+export function buildListParams(options: {
+  orgId: string;
+  userId: string | null;
+}): Record<string, unknown> {
+  const meta: Record<string, unknown> = {
+    [`${META}archivedStatus`]: 'ACTIVE',
+    [`${META}orgIds`]: [options.orgId],
+    [`${META}hideCodeScans`]: true,
+    [`${META}foldersExcludeArchived`]: true,
+    [`${META}sessionType`]: ['devin'],
+    [`${META}orderBy`]: 'updated_at',
+    [`${META}sortDirection`]: 'desc',
+    [`${META}includePinned`]: true,
+    [`${META}groupChildren`]: true,
+    [`${META}childrenDirect`]: true,
+    [`${META}limit`]: 50,
+    [`${META}maxChildrenPerRoot`]: 8,
+    [`${META}maxRootsPerFolder`]: 20,
+  };
+  // Omitted entirely when the identity lookup failed — the key itself is
+  // meaningful to the server.
+  if (options.userId) meta[`${META}participant`] = [options.userId];
+  return { _meta: meta };
+}
+
+// Per-folder "show more" page: same shape minus limit, offset by roots seen.
+export function buildFolderPageParams(options: {
+  orgId: string;
+  userId: string | null;
+  folder: string;
+  rootsOffset: number;
+}): Record<string, unknown> {
+  const params = buildListParams(options);
+  const meta = params._meta as Record<string, unknown>;
+  delete meta[`${META}limit`];
+  meta[`${META}folder`] = options.folder;
+  meta[`${META}rootsOffset`] = options.rootsOffset;
+  meta[`${META}maxRootsPerFolder`] = 20;
+  return params;
+}
+
+export function acpWsUrl(tenantUrl: string, token: string, orgId: string): string {
+  const base = tenantUrl.replace(/\/$/, '').replace(/^http/, 'ws');
+  return `${base}/api/acp/live?token=${encodeURIComponent(token)}&org_id=${encodeURIComponent(orgId)}`;
+}
+
+export function usersInfoUrl(tenantUrl: string): string {
+  return `${tenantUrl.replace(/\/$/, '')}/api/users/info`;
+}
+
+export function bareSessionId(acpId: string): string {
+  return acpId.startsWith('devin-') ? acpId.slice('devin-'.length) : acpId;
+}
+
+export function sanitizeToken(message: string, token: string): string {
+  return sanitizeMessage(message, token);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function str(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function bool(value: unknown): boolean {
+  return value === true;
+}
+
+function num(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function timestampMs(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') return Date.parse(value) || 0;
+  return 0;
+}
+
+function strArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function numRecord(value: unknown): Record<string, number> {
+  const record = asRecord(value);
+  if (!record) return {};
+  const out: Record<string, number> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (typeof item === 'number' && Number.isFinite(item)) out[key] = item;
+  }
+  return out;
+}
+
+export function parseListResult(raw: unknown, orgId: string): CloudListResult {
+  const record = asRecord(raw);
+  const meta = asRecord(record?._meta) ?? {};
+  const foldersByOrg = asRecord(meta[`${META}sidebarFoldersByOrg`]);
+  const folders = strArray(foldersByOrg?.[orgId]);
+  const folderTotals = numRecord(meta[`${META}folderTotals`]);
+  const nextCursor = str(record?.nextCursor);
+
+  const rawSessions = Array.isArray(record?.sessions)
+    ? record.sessions
+    : Array.isArray(record?.items)
+      ? record.items
+      : [];
+  const sessions: CloudSession[] = [];
+  for (const entry of rawSessions) {
+    const item = asRecord(entry);
+    if (!item) continue;
+    const itemMeta = asRecord(item._meta) ?? {};
+    if (itemMeta[`${META}isArchived`] === true) continue;
+    const acpId = str(item.sessionId) ?? str(item.id);
+    if (!acpId) continue;
+    const proposedBy = str(itemMeta[`${META}proposedByDevinId`]);
+    sessions.push({
+      id: bareSessionId(acpId),
+      acpId,
+      title: str(item.title) ?? '',
+      url: str(itemMeta[`${META}url`]) ?? '',
+      status: str(itemMeta[`${META}sessionStatus`]) ?? '',
+      statusEnum: str(itemMeta[`${META}statusEnum`]),
+      userActionRequired: str(itemMeta[`${META}userActionRequired`]),
+      folder: str(itemMeta[`${META}folder`]),
+      parentId: proposedBy ? bareSessionId(proposedBy) : null,
+      isPinned: bool(itemMeta[`${META}isPinned`]),
+      isUnread: bool(itemMeta[`${META}isUnread`]),
+      isStarred: bool(itemMeta[`${META}isStarred`]),
+      directChildrenCount: num(itemMeta[`${META}directChildrenCount`]),
+      hasMoreChildren: bool(itemMeta[`${META}hasMoreChildren`]),
+      prCount: Array.isArray(itemMeta[`${META}sessionPRs`])
+        ? (itemMeta[`${META}sessionPRs`] as unknown[]).length
+        : 0,
+      updatedAt:
+        timestampMs(item.updatedAt) || timestampMs(itemMeta[`${META}sortUpdatedAt`]),
+    });
+  }
+  return { sessions, folders, folderTotals, nextCursor };
+}
+
+export function parseUsersInfo(raw: unknown): { userId: string | null } {
+  const record = asRecord(raw);
+  return { userId: str(record?.user_id) };
+}

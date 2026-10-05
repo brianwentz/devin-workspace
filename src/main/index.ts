@@ -14,6 +14,7 @@ import { log, logFile } from './log';
 import { setPermissions } from './permissions';
 import { installProtocol } from './protocol';
 import { attachSessionTracking } from './sessions';
+import { cloudSessions } from './cloudSessions';
 import { SettingsStore } from './settings';
 import { fixtureOrigins, state, testMode } from './state';
 import { registerTestHooks } from './testHooks';
@@ -80,6 +81,11 @@ function onBeforeUnload(tabId: string, event: Electron.Event): boolean {
   return leave;
 }
 
+// Set by the window 'close' handler when a second close arrives mid-shutdown
+// (the close is prevented to keep cleanup running); on a vetoed shutdown the
+// window is destroyed to honour the force-quit.
+let closeDuringShutdown = false;
+
 export async function shutdown(options: { installUpdate?: boolean } = {}): Promise<void> {
   if (state.shutdownPromise) return state.shutdownPromise;
   state.shuttingDown = true;
@@ -107,6 +113,12 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
         log('shell', 'shutdown-vetoed', { detail: { vetoed: probe.vetoed } });
         state.shuttingDown = false;
         state.shutdownPromise = null;
+        // A second close arrived while shutdown was in flight — honour it as a
+        // force-quit so the app still exits after the veto.
+        if (closeDuringShutdown) {
+          closeDuringShutdown = false;
+          state.windowRef?.destroy();
+        }
         // The probe may have discarded the active tab — restore a tab in the
         // visible scope only (never pull a hidden-scope tab into the strip).
         state.tabManager?.restoreAfterProbeCancel(probe.vetoed);
@@ -117,6 +129,7 @@ export async function shutdown(options: { installUpdate?: boolean } = {}): Promi
       }
     }
     notifier.stop('window-close');
+    cloudSessions().stop();
     if (state.dragging) cancelDrag(false, 'window-close');
     try {
       await auditCookies();
@@ -195,6 +208,11 @@ async function createWindow(): Promise<void> {
   state.paneFraction = clampFraction01(saved.pane.fraction);
   state.terminalOpen = saved.layout.terminalOpen;
   state.terminalHeight = saved.layout.terminalHeight;
+  state.sessionsOpen = saved.sessions.open;
+  state.sessionsWidth = saved.sessions.width;
+  if (testMode && process.env.DEVIN_WORKSPACES_TEST_SESSIONS_OPEN !== undefined) {
+    state.sessionsOpen = process.env.DEVIN_WORKSPACES_TEST_SESSIONS_OPEN === '1';
+  }
   terminalHost.onChange = notifyShell;
   terminalHost.onPullRequestUrl = (url, sessionId) => {
     autoOpenLocalPr(url, sessionId, 'local-terminal');
@@ -281,6 +299,7 @@ async function createWindow(): Promise<void> {
   attachContextMenu(state.shellView.webContents);
   attachRouting(state.devinView.webContents, 'devin');
   attachSessionTracking(state.devinView.webContents);
+  cloudSessions().start();
 
   state.tabManager = new TabManager({
     parent: state.windowRef.contentView,
@@ -310,7 +329,15 @@ async function createWindow(): Promise<void> {
   // Re-poll immediately on focus while the poller is in error (backoff drop).
   state.windowRef.on('focus', () => notifier.onWindowFocus());
   state.windowRef.on('close', (event) => {
-    if (state.shuttingDown) return;
+    // A second close while shutdown is in flight (e.g. a repeat app.quit())
+    // must not destroy the window — that would cut in-flight cleanup (settings
+    // flush, teardown) short via 'window-all-closed'. It's remembered instead
+    // and honoured as a force-quit if the shutdown vetoes.
+    if (state.shuttingDown) {
+      event.preventDefault();
+      closeDuringShutdown = true;
+      return;
+    }
     event.preventDefault();
     void shutdown();
   });

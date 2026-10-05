@@ -3,7 +3,7 @@ import { clampPaneWidth, fractionFromPx, paneWidthPx } from '../core/layout';
 import { newSessionUrl } from '../core/sessions';
 import { log } from './log';
 import { state, testMode, type ViewName } from './state';
-import { applyLayout, cancelDrag, setPaneOpen } from './window';
+import { applyLayout, cancelDrag, setPaneOpen, setSessionsOpen } from './window';
 
 export function historyAction(
   action: 'back' | 'forward' | 'reload',
@@ -96,6 +96,10 @@ export function handleShortcut(
 
   if (ctrl && input.shift && key === 'g') {
     setPaneOpen(!state.paneOpen, 'shortcut');
+    focusVisibleContents(contents);
+    handled = true;
+  } else if (ctrl && input.shift && key === 's' && state.surface === 'cloud') {
+    setSessionsOpen(!state.sessionsOpen, 'shortcut');
     focusVisibleContents(contents);
     handled = true;
   } else if (ctrl && key === 'tab' && state.tabManager) {

@@ -13,6 +13,8 @@ export interface LayoutState {
   paneFraction: number; // pane share of (windowWidth - RAIL_WIDTH - SPLITTER_WIDTH); 0..1
   terminalOpen: boolean;
   terminalHeight: number; // px
+  sessionsOpen: boolean;
+  sessionsWidth: number; // px
 }
 
 export interface WindowBounds {
@@ -22,6 +24,9 @@ export interface WindowBounds {
   titleBar: Rect | null;
   terminal: Rect | null;
   terminalSplitter: Rect | null;
+  sessions: Rect | null;
+  sessionsSplitter: Rect | null;
+  sessionsCollapsed: boolean;
   rail: Rect;
   paneCollapsed: boolean;
 }
@@ -30,6 +35,10 @@ export const RAIL_WIDTH = 56;
 export const SPLITTER_WIDTH = 6;
 export const TITLE_BAR_HEIGHT = 36;
 export const MIN_PANE_WIDTH = 320;
+// Cloud session sidebar column (left of the devin view, right of the rail).
+export const SESSIONS_MIN_WIDTH = 200;
+export const SESSIONS_MAX_WIDTH = 480;
+export const DEFAULT_SESSIONS_WIDTH = 260;
 // 640 keeps the default 50/50 split real at the 1400 px default window
 // (available 1338 → 669 / 669). Auto-collapse threshold: 56 + 6 + 640 + 320 = 1022.
 export const MIN_DEVIN_WIDTH = 640;
@@ -79,10 +88,34 @@ export function fractionFromPx(px: number, windowWidth: number): number {
 // px guards: the pane never drops below MIN_PANE_WIDTH and the devin view keeps
 // MIN_DEVIN_WIDTH (when the window is too narrow for both, the smaller wins and
 // computeBounds auto-collapses the pane).
-export function clampPaneWidth(width: number, windowWidth: number): number {
-  const max = Math.max(0, windowWidth - RAIL_WIDTH - SPLITTER_WIDTH - MIN_DEVIN_WIDTH);
+export function clampPaneWidth(
+  width: number,
+  windowWidth: number,
+  leftChrome = RAIL_WIDTH,
+): number {
+  const max = Math.max(0, windowWidth - leftChrome - SPLITTER_WIDTH - MIN_DEVIN_WIDTH);
   const min = Math.min(MIN_PANE_WIDTH, max);
   return Math.min(max, Math.max(min, Math.round(width)));
+}
+
+// The sessions column px width, clamped so the devin column keeps
+// MIN_DEVIN_WIDTH. The caller decides whether the column is collapsed
+// entirely (computeBounds' sessionsCollapsed).
+export function clampSessionsWidth(width: number, windowWidth: number): number {
+  const max = Math.max(
+    SESSIONS_MIN_WIDTH,
+    Math.min(SESSIONS_MAX_WIDTH, windowWidth - RAIL_WIDTH - SPLITTER_WIDTH - MIN_DEVIN_WIDTH),
+  );
+  return Math.min(max, Math.max(SESSIONS_MIN_WIDTH, Math.round(width)));
+}
+
+// Width of the fixed left chrome: rail + sessions column (+ its splitter)
+// when the sessions column is actually visible.
+export function leftChrome(layout: LayoutState, width: number): number {
+  const sessionsWidth = clampSessionsWidth(layout.sessionsWidth, width);
+  const visible =
+    layout.sessionsOpen && width - (RAIL_WIDTH + sessionsWidth + SPLITTER_WIDTH) >= MIN_DEVIN_WIDTH;
+  return RAIL_WIDTH + (visible ? sessionsWidth + SPLITTER_WIDTH : 0);
 }
 
 export function computeBounds(
@@ -99,6 +132,34 @@ export function computeBounds(
     height: Math.min(TITLE_BAR_HEIGHT, height),
   };
 
+  // The sessions column sits right of the rail, full height below the title
+  // bar (the terminal dock does not shorten it). It collapses only when the
+  // devin column could no longer keep MIN_DEVIN_WIDTH.
+  const sessionsWidth = clampSessionsWidth(layout.sessionsWidth, width);
+  const sessionsVisible =
+    layout.sessionsOpen &&
+    width - (RAIL_WIDTH + sessionsWidth + SPLITTER_WIDTH) >= MIN_DEVIN_WIDTH;
+  const sessionsCollapsed = layout.sessionsOpen && !sessionsVisible;
+  const sessions: Rect | null = sessionsVisible
+    ? {
+        x: rail.width,
+        y: TITLE_BAR_HEIGHT,
+        width: sessionsWidth,
+        height: Math.max(0, height - TITLE_BAR_HEIGHT),
+      }
+    : null;
+  const sessionsSplitter: Rect | null = sessionsVisible
+    ? {
+        x: rail.width + sessionsWidth,
+        y: TITLE_BAR_HEIGHT,
+        width: SPLITTER_WIDTH,
+        height: Math.max(0, height - TITLE_BAR_HEIGHT),
+      }
+    : null;
+  // Everything right of the sessions column: the devin column, the pane
+  // splitter/pane, and the terminal dock all start at leftChrome.
+  const chrome = leftChrome(layout, width);
+
   const terminalHeight = layout.terminalOpen
     ? clampTerminalHeight(layout.terminalHeight, height)
     : 0;
@@ -114,13 +175,13 @@ export function computeBounds(
     }
     return {
       terminal: {
-        x: rail.width,
+        x: chrome,
         y: height - terminalHeight,
         width: devinColumnWidth,
         height: terminalHeight,
       } as Rect,
       terminalSplitter: {
-        x: rail.width,
+        x: chrome,
         y: height - terminalHeight - SPLITTER_WIDTH,
         width: devinColumnWidth,
         height: SPLITTER_WIDTH,
@@ -130,14 +191,17 @@ export function computeBounds(
   };
 
   if (!layout.paneOpen) {
-    const docked = dock(Math.max(0, width - rail.width));
+    const docked = dock(Math.max(0, width - chrome));
     return {
       rail,
       titleBar,
+      sessions,
+      sessionsSplitter,
+      sessionsCollapsed,
       devin: {
-        x: rail.width,
+        x: chrome,
         y: TITLE_BAR_HEIGHT,
-        width: Math.max(0, width - rail.width),
+        width: Math.max(0, width - chrome),
         height: docked.devinHeight,
       },
       ghTab: null,
@@ -152,7 +216,7 @@ export function computeBounds(
   // pane width and the minimum devin width. Otherwise the pane is capped at the
   // width that leaves MIN_DEVIN_WIDTH for the devin view. The user's paneOpen
   // preference is not mutated — collapse is purely derived.
-  const allowedMax = width - rail.width - SPLITTER_WIDTH - MIN_DEVIN_WIDTH;
+  const allowedMax = width - chrome - SPLITTER_WIDTH - MIN_DEVIN_WIDTH;
   if (allowedMax < MIN_PANE_WIDTH) {
     const closed = computeBounds(windowSize, { ...layout, paneOpen: false });
     return { ...closed, paneCollapsed: true };
@@ -161,19 +225,23 @@ export function computeBounds(
   const paneWidth = clampPaneWidth(
     Math.min(paneWidthPx(layout.paneFraction, width), allowedMax),
     width,
+    chrome,
   );
-  const splitterX = Math.max(rail.width, width - paneWidth - SPLITTER_WIDTH);
+  const splitterX = Math.max(chrome, width - paneWidth - SPLITTER_WIDTH);
   const paneX = Math.min(width, splitterX + SPLITTER_WIDTH);
   const paneActualWidth = Math.max(0, width - paneX);
-  const docked = dock(Math.max(0, splitterX - rail.width));
+  const docked = dock(Math.max(0, splitterX - chrome));
 
   return {
     rail,
     titleBar,
+    sessions,
+    sessionsSplitter,
+    sessionsCollapsed,
     devin: {
-      x: rail.width,
+      x: chrome,
       y: TITLE_BAR_HEIGHT,
-      width: Math.max(0, splitterX - rail.width),
+      width: Math.max(0, splitterX - chrome),
       height: docked.devinHeight,
     },
     splitter: {
@@ -204,14 +272,15 @@ export function paneToggleWindowWidth(
 ): number | null {
   if (!open) {
     const bounds = computeBounds({ width: contentWidth, height: 1000 }, layout);
-    if (bounds.paneCollapsed || !bounds.ghTab) return null;
-    return RAIL_WIDTH + bounds.devin.width;
+    if (bounds.paneCollapsed || !bounds.ghTab || !bounds.splitter) return null;
+    return bounds.splitter.x;
   }
-  const devin = Math.max(0, Math.floor(contentWidth) - RAIL_WIDTH);
+  const chrome = leftChrome(layout, contentWidth);
+  const devin = Math.max(0, Math.floor(contentWidth) - chrome);
   // Clamp the ratio at 0.95 so f→1 doesn't explode the target width.
   const fraction = Math.min(0.95, clampFraction01(layout.paneFraction));
   const pane = Math.max(MIN_PANE_WIDTH, Math.round((fraction / (1 - fraction)) * devin));
-  const target = RAIL_WIDTH + devin + SPLITTER_WIDTH + pane;
+  const target = chrome + devin + SPLITTER_WIDTH + pane;
   // Never shrink when opening: stay at contentWidth when it already fits.
   const next = Math.min(target, Math.max(maxWidth, contentWidth));
   return next === contentWidth ? null : next;

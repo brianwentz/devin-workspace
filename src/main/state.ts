@@ -1,5 +1,9 @@
 import type { BaseWindow, WebContentsView } from 'electron';
-import { DEFAULT_PANE_FRACTION, DEFAULT_TERMINAL_HEIGHT } from '../core/layout';
+import {
+  DEFAULT_PANE_FRACTION,
+  DEFAULT_SESSIONS_WIDTH,
+  DEFAULT_TERMINAL_HEIGHT,
+} from '../core/layout';
 import type { IdentitySource, Surface } from '../shared/ipc';
 import type { CredentialStore } from './credentials';
 import type { SettingsStore } from './settings';
@@ -7,7 +11,7 @@ import type { TabManager } from './tabs';
 import type { DevinSession } from '../core/devinApi';
 import type { SecretStore } from './secrets';
 
-export type ViewName = 'shell' | 'devin' | 'analytics' | 'local' | `gh:${string}`;
+export type ViewName = 'shell' | 'devin' | 'cloud' | 'analytics' | 'local' | `gh:${string}`;
 
 export const testMode = process.env.DEVIN_WORKSPACES_TEST === '1';
 export const fixtureOrigins = (testMode ? process.env.DEVIN_WORKSPACES_TEST_GITHUB_ORIGINS ?? '' : '')
@@ -36,6 +40,10 @@ export const state = {
   paneOpen: true,
   paneFraction: DEFAULT_PANE_FRACTION,
   paneCollapsed: false,
+  // Cloud session sidebar column (shell-rendered, left of the devin view).
+  sessionsOpen: true,
+  sessionsWidth: DEFAULT_SESSIONS_WIDTH,
+  sessionsCollapsed: false,
   surface: 'cloud' as Surface,
   currentSessionId: null as string | null,
   // Selected Devin Local session — lifted here so it survives surface switches.
@@ -48,8 +56,9 @@ export const state = {
   terminalOpen: false,
   terminalHeight: DEFAULT_TERMINAL_HEIGHT,
   activeTerminalId: null as string | null,
-  dragAxis: 'x' as 'x' | 'y',
+  dragAxis: 'x' as 'x' | 'y' | 's',
   dragStartHeight: DEFAULT_TERMINAL_HEIGHT,
+  dragStartSessionsWidth: DEFAULT_SESSIONS_WIDTH,
   shuttingDown: false,
   shutdownPromise: null as Promise<void> | null,
   lastFocused: null as Electron.WebContents | null,

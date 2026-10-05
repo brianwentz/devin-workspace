@@ -11,6 +11,7 @@ import { TitleBar } from './components/TitleBar';
 import { Splitter } from './components/Splitter';
 import { TerminalDock } from './components/TerminalDock';
 import { SettingsPanel } from './components/SettingsPanel';
+import { SessionSidebar } from './components/SessionSidebar';
 import { LocalPanel } from './local/LocalPanel';
 
 function useWindowSize(): { width: number; height: number } {
@@ -56,6 +57,8 @@ export function App() {
     paneFraction: state.paneFraction,
     terminalOpen: terminalVisible,
     terminalHeight: state.terminalHeight,
+    sessionsOpen: state.sessionsOpen && state.surface === 'cloud',
+    sessionsWidth: state.sessionsWidth,
   });
   const paneVisible = state.paneOpen && !bounds.paneCollapsed;
   const mainRect = bounds.devin;
@@ -68,7 +71,13 @@ export function App() {
         paneCollapsed={bounds.paneCollapsed}
         terminalOpen={state.terminalOpen}
         terminalAllSurfaces={state.settings.terminal.allSurfaces}
+        sessionsOpen={state.sessionsOpen}
+        sessionsCollapsed={bounds.sessionsCollapsed}
       />
+      {state.surface === 'cloud' && bounds.sessions && <SessionSidebar rect={bounds.sessions} />}
+      {bounds.sessionsSplitter && (
+        <Splitter axis="s" rect={bounds.sessionsSplitter} enabled={state.sessionsOpen} />
+      )}
       <TitleBar
         windowWidth={size.width}
         paneVisible={paneVisible && bounds.ghTab !== null}

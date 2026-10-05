@@ -1,4 +1,5 @@
 import { clipboard, webContents, WebContentsView } from 'electron';
+import { cloudSessions } from './cloudSessions';
 import { computeBounds } from '../core/layout';
 import { clampFraction01, clampTerminalHeight } from '../core/layout';
 import { auditCookies } from './cookieAudit';
@@ -14,7 +15,7 @@ import { handleLink } from './routing';
 import { copyTabAddress, reloadCurrentScope } from './ipc';
 import { historyAction, navigationTarget, openNewSession } from './shortcuts';
 import { state, testMode } from './state';
-import { applyLayout, publicState, setPaneOpen } from './window';
+import { applyLayout, layoutState, publicState, setPaneOpen, setSessionsOpen } from './window';
 import { shutdown } from './index';
 import { localHost } from './local/ipc';
 import { publicLocalState } from './local/localState';
@@ -82,12 +83,16 @@ export function registerTestHooks(): void {
           url: view instanceof WebContentsView ? view.webContents.getURL() : null,
         })) ?? [],
       layoutRects: () =>
-        computeBounds(state.windowRef?.getContentBounds() ?? { x: 0, y: 0, width: 0, height: 0 }, {
-          paneOpen: state.paneOpen,
-          paneFraction: state.paneFraction,
-          terminalOpen: state.terminalOpen,
-          terminalHeight: state.terminalHeight,
-        }),
+        computeBounds(
+          state.windowRef?.getContentBounds() ?? { x: 0, y: 0, width: 0, height: 0 },
+          layoutState(),
+        ),
+      setSessionsOpen: (value: boolean) => setSessionsOpen(value, 'test'),
+      getSessionsBounds: () =>
+        computeBounds(
+          state.windowRef?.getContentBounds() ?? { x: 0, y: 0, width: 0, height: 0 },
+          layoutState(),
+        ).sessions,
       saveCredential: (credential: { origin: string; username: string; password: string }) =>
         state.credentials?.add(credential) ?? null,
       listCredentials: () => state.credentials?.list() ?? [],
@@ -139,6 +144,9 @@ export function registerTestHooks(): void {
       },
       hasPat: () => state.secrets?.hasPat() ?? false,
       pollNow: () => notifier.pollNow(),
+      // Cloud session sidebar data layer.
+      cloudState: () => cloudSessions().snapshot(),
+      cloudRefresh: () => cloudSessions().refresh('test'),
       listPrs: () => openPrs(),
       openSessionPr: (sessionId: string, url: string) => openSessionPr(sessionId, url),
       prsPanelOpen: () => state.prsPanelOpen,

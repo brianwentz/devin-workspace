@@ -7,6 +7,9 @@ export type PublicState = {
   paneOpen: boolean;
   paneFraction: number;
   paneCollapsed: boolean;
+  sessionsOpen: boolean;
+  sessionsWidth: number;
+  sessionsCollapsed: boolean;
   surface: 'cloud' | 'local' | 'settings' | 'analytics';
   currentSessionId: string | null;
   localSessionId: string | null;
@@ -79,6 +82,7 @@ export type PublicState = {
     panelOpen: boolean;
   };
   update: { version: string; available: string | null; downloaded: string | null };
+  cloud: import('../../src/shared/ipc').CloudState;
 };
 
 export async function launchApp(
@@ -101,6 +105,8 @@ export async function launchApp(
       DEVIN_WORKSPACES_LOG: logFile,
       DEVIN_WORKSPACES_DOWNLOAD_DIR: downloadDir,
       DEVIN_WORKSPACES_ALLOW_EXTERNAL: '0',
+      // Legacy specs assume the sessions column is closed (devin.x === RAIL).
+      DEVIN_WORKSPACES_TEST_SESSIONS_OPEN: '0',
       DEVIN_WORKSPACES_TEST_RELEASES_URL: fixtures.apiUrl,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       ...extraEnv,

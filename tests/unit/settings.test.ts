@@ -326,3 +326,36 @@ describe('routing.rules', () => {
     ).toBe(false);
   });
 });
+
+describe('sessions settings', () => {
+  it('defaults to open, width 260, no collapsed folders', () => {
+    const settings = SettingsSchema.parse({});
+    expect(settings.sessions).toEqual({ open: true, width: 260, collapsedFolders: [] });
+  });
+
+  it('parses explicit values and rejects out-of-range width', () => {
+    const { settings, dropped } = parseSettingsFile({
+      sessions: { open: false, width: 320, collapsedFolders: ['Alpha'] },
+    });
+    expect(dropped).toEqual([]);
+    expect(settings.sessions).toEqual({ open: false, width: 320, collapsedFolders: ['Alpha'] });
+    expect(
+      parseSettingsFile({ sessions: { width: 9999 } }).settings.sessions.width,
+    ).toBe(260);
+  });
+
+  it('patches collapsedFolders without touching open/width', () => {
+    const base: Settings = {
+      ...SettingsSchema.parse({}),
+      sessions: { open: false, width: 300, collapsedFolders: [] },
+    };
+    const next = mergeSettings(base, {
+      sessions: { collapsedFolders: ['Alpha', 'pinned'] },
+    });
+    expect(next.sessions).toEqual({
+      open: false,
+      width: 300,
+      collapsedFolders: ['Alpha', 'pinned'],
+    });
+  });
+});

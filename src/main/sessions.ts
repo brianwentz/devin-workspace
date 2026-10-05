@@ -1,4 +1,5 @@
 import { parseSessionId } from '../core/sessions';
+import { cloudSessions } from './cloudSessions';
 import { log } from './log';
 import { notifier } from './notifier';
 import { state } from './state';
@@ -15,6 +16,7 @@ export function attachSessionTracking(devinView: Electron.WebContents): void {
     log('devin', 'session-change', { url, detail: { sessionId } });
     // Service-user identity inference observes the sessions the user opens.
     notifier.onSessionChanged(sessionId);
+    cloudSessions().refresh('session-change');
   };
   devinView.on('did-navigate', (_event, url) => update(url));
   devinView.on('did-navigate-in-page', (_event, url) => update(url));

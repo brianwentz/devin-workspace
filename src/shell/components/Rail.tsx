@@ -1,4 +1,4 @@
-import { BarChart3, Bell } from 'lucide-react';
+import { BarChart3, Bell, PanelLeft } from 'lucide-react';
 import { RAIL_WIDTH, TITLE_BAR_HEIGHT } from '../../core/layout';
 import { useShellState } from '../store';
 import { requestSurface } from '../surface';
@@ -11,6 +11,8 @@ interface RailProps {
   paneCollapsed: boolean;
   terminalOpen: boolean;
   terminalAllSurfaces: boolean;
+  sessionsOpen: boolean;
+  sessionsCollapsed: boolean;
 }
 
 const buttonClass =
@@ -64,6 +66,8 @@ export function Rail({
   paneCollapsed,
   terminalOpen,
   terminalAllSurfaces,
+  sessionsOpen,
+  sessionsCollapsed,
 }: RailProps) {
   const terminalOffSurface = surface !== 'cloud' && !terminalAllSurfaces;
   return (
@@ -82,6 +86,29 @@ export function Rail({
         onClick={() => void requestSurface('cloud')}
       >
         ☁
+      </button>
+      <button
+        id="sessionsToggle"
+        type="button"
+        aria-label="Toggle sessions sidebar"
+        aria-pressed={sessionsOpen}
+        title={
+          surface !== 'cloud'
+            ? 'Sessions sidebar shows on Cloud'
+            : sessionsCollapsed && sessionsOpen
+              ? 'Sessions sidebar hidden — widen window'
+              : 'Toggle sessions sidebar (Ctrl+Shift+S)'
+        }
+        className={`${buttonClass} relative flex items-center justify-center${surface !== 'cloud' ? ' opacity-50' : ''}`}
+        onClick={() => window.devinworkspaces.cloudPanel(!sessionsOpen)}
+      >
+        <PanelLeft size={18} strokeWidth={1.8} />
+        {sessionsCollapsed && sessionsOpen && surface === 'cloud' && (
+          <span
+            className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#e0a03c]"
+            title="sidebar hidden — widen window"
+          />
+        )}
       </button>
       <button
         id="localButton"

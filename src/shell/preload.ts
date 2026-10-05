@@ -210,8 +210,8 @@ const api = {
   openLink: (url: string) => {
     if (typeof url === 'string' && url.length < 8192) ipcRenderer.send(IpcChannels.linkOpen, url);
   },
-  dragStart: (axis: 'x' | 'y', pos: number) => {
-    if ((axis === 'x' || axis === 'y') && Number.isFinite(pos)) {
+  dragStart: (axis: 'x' | 'y' | 's', pos: number) => {
+    if ((axis === 'x' || axis === 'y' || axis === 's') && Number.isFinite(pos)) {
       ipcRenderer.send(IpcChannels.layoutDragStart, { axis, pos });
     }
   },
@@ -248,16 +248,17 @@ const api = {
       ipcRenderer.send(IpcChannels.autofillPromptResolve, { action });
     }
   },
-  onDragGuide: (callback: (guide: { axis: 'x' | 'y'; pos: number }) => void) => {
+  onDragGuide: (callback: (guide: { axis: 'x' | 'y' | 's'; pos: number }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
       if (
         payload &&
         typeof payload === 'object' &&
         typeof (payload as { pos?: unknown }).pos === 'number' &&
         ((payload as { axis?: unknown }).axis === 'x' ||
-          (payload as { axis?: unknown }).axis === 'y')
+          (payload as { axis?: unknown }).axis === 'y' ||
+          (payload as { axis?: unknown }).axis === 's')
       ) {
-        callback(payload as { axis: 'x' | 'y'; pos: number });
+        callback(payload as { axis: 'x' | 'y' | 's'; pos: number });
       }
     };
     ipcRenderer.on(IpcChannels.layoutDragGuide, listener);
@@ -294,6 +295,19 @@ const api = {
   identity: () => ipcRenderer.invoke(IpcChannels.notificationsIdentity) as Promise<IdentityInfo>,
   identityReset: () => ipcRenderer.send(IpcChannels.notificationsIdentityReset),
   updateInstall: () => ipcRenderer.send(IpcChannels.updateInstall),
+  // Cloud session sidebar.
+  cloudOpen: (sessionId: string) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudOpen, { sessionId });
+    }
+  },
+  cloudRefresh: () => ipcRenderer.send(IpcChannels.cloudRefresh),
+  cloudLoadMore: (folder: string) => {
+    if (isString(folder) && folder.length >= 1 && folder.length <= 256) {
+      ipcRenderer.send(IpcChannels.cloudLoadMore, { folder });
+    }
+  },
+  cloudPanel: (open: boolean) => ipcRenderer.send(IpcChannels.cloudPanel, { open }),
   releaseNotes: () =>
     ipcRenderer.invoke(IpcChannels.updateReleaseNotes) as Promise<ReleaseNotesReply>,
   // DEVIN_WORKSPACES_TEST_BANNER_MS shortens the banner auto-hide in tests.

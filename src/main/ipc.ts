@@ -7,6 +7,9 @@ import {
   CredentialRevealSchema,
   CredentialSaveSchema,
   CredentialUpdateSchema,
+  CloudLoadMoreArg,
+  CloudOpenArg,
+  CloudPanelArg,
   DragCancelReasonArg,
   DragPosArg,
   DragStartArg,
@@ -42,6 +45,7 @@ import { historyAction, navigationTarget } from './shortcuts';
 import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
+import { cloudSessions } from './cloudSessions';
 import {
   applyLayout,
   beginDrag,
@@ -53,6 +57,7 @@ import {
   setNotificationsPanel,
   setPrsPanel,
   setPaneOpen,
+  setSessionsOpen,
 } from './window';
 
 // "Reload all tabs in this session" (strip menu + test hook).
@@ -75,6 +80,11 @@ export function applySettingsPatch(patch: SettingsPatch): Settings {
   const next: Settings = state.settings!.merge(patch);
   notifier.onSettingsChanged(previousSettings, next);
   if (next.pane.open !== state.paneOpen) setPaneOpen(next.pane.open, 'settings');
+  // Skip layout churn on the quit-flush path — it sits inside the settings
+  // commit round trip and must stay cheap.
+  if (!state.shuttingDown && next.sessions.open !== state.sessionsOpen)
+    setSessionsOpen(next.sessions.open, 'settings');
+  state.sessionsWidth = next.sessions.width;
   // Raw 0..1 preference; the px guards are applied when laying out.
   state.paneFraction = clampFraction01(next.pane.fraction);
   state.surface = next.surface;
@@ -224,6 +234,20 @@ export function setupIpc(): void {
   guardedOn(IpcChannels.layoutDragCancel, (_event, reason: unknown) => {
     const parsed = DragCancelReasonArg.safeParse(reason);
     cancelDrag(true, parsed.success ? parsed.data : 'pointer-cancel');
+  });
+  // Cloud session sidebar.
+  guardedOn(IpcChannels.cloudOpen, (_event, payload: unknown) => {
+    const parsed = CloudOpenArg.safeParse(payload);
+    if (parsed.success) cloudSessions().openSession(parsed.data.sessionId);
+  });
+  guardedOn(IpcChannels.cloudRefresh, () => cloudSessions().refresh('shell'));
+  guardedOn(IpcChannels.cloudLoadMore, (_event, payload: unknown) => {
+    const parsed = CloudLoadMoreArg.safeParse(payload);
+    if (parsed.success) cloudSessions().loadMore(parsed.data.folder);
+  });
+  guardedOn(IpcChannels.cloudPanel, (_event, payload: unknown) => {
+    const parsed = CloudPanelArg.safeParse(payload);
+    if (parsed.success) setSessionsOpen(parsed.data.open, 'rail');
   });
   // Credentials: never log IPC payloads (they may carry secrets).
   guardedHandle(IpcChannels.credentialsList, () => state.credentials?.list() ?? []);
