@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { currentDevinUrl, launchApp, shellPage, state } from './helpers';
+import { currentDevinUrl, dndMove, launchApp, shellPage, state } from './helpers';
 import type { CloudListResult } from '../../src/core/cloudAcp';
 import { RAIL_WIDTH, SPLITTER_WIDTH, DEFAULT_SESSIONS_WIDTH } from '../../src/core/layout';
 
@@ -301,8 +301,11 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
     await expect(recentRow).toHaveAttribute('data-archived', 'true');
 
     // --- DnD: session onto a folder header moves it -----------------------
-    const mover = page.locator('[data-session-id="33330000000000000000000000000000"]');
-    await mover.dragTo(page.locator('[data-section-name="Alpha"]'));
+    await dndMove(
+      page,
+      '[data-session-id="33330000000000000000000000000000"]',
+      '[data-section-name="Alpha"]',
+    );
     await expect
       .poll(async () =>
         (await mutations()).some(
@@ -317,7 +320,11 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
       .toBe(true);
 
     // --- DnD: back onto Recent removes it ---------------------------------
-    await mover.dragTo(page.locator('[data-section-name="recent"]'));
+    await dndMove(
+      page,
+      '[data-session-id="33330000000000000000000000000000"]',
+      '[data-section-name="recent"]',
+    );
     await expect
       .poll(async () =>
         (await mutations()).some(
@@ -330,9 +337,7 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
       .toBe(true);
 
     // --- DnD: folder header onto another header reorders ------------------
-    await page
-      .locator('[data-section-name="Beta"]')
-      .dragTo(page.locator('[data-section-name="Alpha"]'));
+    await dndMove(page, '[data-section-name="Beta"]', '[data-section-name="Alpha"]');
     await expect
       .poll(async () => {
         const reorder = (await mutations()).find((m) => m.op === 'folder-reorder');
@@ -377,11 +382,18 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
       )
       .toBe(1);
     // move it back to Alpha so later steps see the fixture order
-    await foldered.dragTo(page.locator('[data-section-name="Alpha"]'));
+    await dndMove(
+      page,
+      '[data-session-id="bbbb0000000000000000000000000002"]',
+      '[data-section-name="Alpha"]',
+    );
 
     // --- DnD onto participated header is a move target --------------------
-    const betaRow = page.locator('[data-session-id="eeee0000000000000000000000000005"]');
-    await betaRow.dragTo(page.locator('[data-section-name="participated"]'));
+    await dndMove(
+      page,
+      '[data-session-id="eeee0000000000000000000000000005"]',
+      '[data-section-name="participated"]',
+    );
     await expect
       .poll(async () =>
         (await mutations()).filter(
@@ -394,9 +406,7 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
       .toBe(2);
 
     // --- folder headers cannot be dropped/reordered onto participated -----
-    await page
-      .locator('[data-section-name="Alpha"]')
-      .dragTo(page.locator('[data-section-name="participated"]'));
+    await dndMove(page, '[data-section-name="Alpha"]', '[data-section-name="participated"]');
     await expect(
       page.locator('[data-section-name="participated"]'),
     ).toHaveAttribute('data-drop-before', 'false');

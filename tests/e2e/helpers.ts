@@ -592,3 +592,31 @@ export async function keyboardReorderTab(
     { timeout: 5000 },
   );
 }
+
+/**
+ * Deterministic HTML5 drag & drop: dispatch a synthetic drag sequence with a
+ * real DataTransfer so React handlers see the exact MIME types the app uses.
+ * Playwright's dragTo drives the browser's native DnD pipeline, which flakes
+ * on HTML5 draggable elements; this skips the input pipeline entirely.
+ */
+export async function dndMove(page: Page, sourceSel: string, targetSel: string) {
+  await page.evaluate(
+    ([src, tgt]) => {
+      const source = document.querySelector(src as string);
+      const target = document.querySelector(tgt as string);
+      if (!source || !target) {
+        throw new Error(`dndMove: missing element ${!source ? src : tgt}`);
+      }
+      const dataTransfer = new DataTransfer();
+      const fire = (el: Element, type: string, cancelable = true) =>
+        el.dispatchEvent(
+          new DragEvent(type, { bubbles: true, cancelable, dataTransfer }),
+        );
+      fire(source, 'dragstart');
+      fire(target, 'dragover');
+      fire(target, 'drop');
+      fire(source, 'dragend');
+    },
+    [sourceSel, targetSel] as const,
+  );
+}
