@@ -467,7 +467,7 @@ class CloudSessions {
       const session = this.sessions.find((s) => s.id === arg.sessionId);
       if (!session) return { action: null };
       const link = new URL(`/sessions/${session.id}`, state.tenantUrl).toString();
-      const submenu: Electron.MenuItemConstructorOptions[] = this.userFolders().map((name) => ({
+      const submenu: Electron.MenuItemConstructorOptions[] = this.folders.map((name) => ({
         label: name,
         type: 'checkbox',
         checked: session.folder === name,

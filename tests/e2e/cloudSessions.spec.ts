@@ -349,6 +349,58 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
       )
       .toEqual(['pinned', 'Beta', 'Alpha', 'ZZ E2E', 'participated', 'recent']);
 
+    // --- move a foldered session out via the menu -------------------------
+    // 'participated' is a system folder but a valid move target in the web.
+    const foldered = page.locator('[data-session-id="bbbb0000000000000000000000000002"]');
+    await foldered.click({ button: 'right' });
+    const menu = await menuItems();
+    const participated = findMenuItem(menu, 'participated');
+    expect(participated).toBeTruthy();
+    await menuClick(participated!.id);
+    await expect
+      .poll(async () =>
+        (await mutations()).some(
+          (m) =>
+            m.op === 'session-move' &&
+            (m.payload.body as { folder?: string } | undefined)?.folder ===
+              'participated',
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(async () =>
+        page
+          .locator(
+            'xpath=//*[@data-section-name="participated"]/ancestor::div[1]//*[@data-session-id="bbbb0000000000000000000000000002"]',
+          )
+          .count(),
+      )
+      .toBe(1);
+    // move it back to Alpha so later steps see the fixture order
+    await foldered.dragTo(page.locator('[data-section-name="Alpha"]'));
+
+    // --- DnD onto participated header is a move target --------------------
+    const betaRow = page.locator('[data-session-id="eeee0000000000000000000000000005"]');
+    await betaRow.dragTo(page.locator('[data-section-name="participated"]'));
+    await expect
+      .poll(async () =>
+        (await mutations()).filter(
+          (m) =>
+            m.op === 'session-move' &&
+            (m.payload.body as { folder?: string } | undefined)?.folder ===
+              'participated',
+        ).length,
+      )
+      .toBe(2);
+
+    // --- folder headers cannot be dropped/reordered onto participated -----
+    await page
+      .locator('[data-section-name="Alpha"]')
+      .dragTo(page.locator('[data-section-name="participated"]'));
+    await expect(
+      page.locator('[data-section-name="participated"]'),
+    ).toHaveAttribute('data-drop-before', 'false');
+
     // --- folder context menu: Rename… resolves to the inline-edit action --
     await page.locator('[data-section-name="Beta"]').click({ button: 'right' });
     const rename = findMenuItem(await menuItems(), 'Rename…');

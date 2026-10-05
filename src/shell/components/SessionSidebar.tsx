@@ -51,8 +51,11 @@ const SECTION_LABELS: Record<string, string> = {
 const SESSION_MIME = 'application/x-devin-session';
 const FOLDER_MIME = 'application/x-devin-folder';
 
-// 'pinned'/'participated' are system folders — not rename/delete/drop targets.
-const isUserFolder = (name: string) => name !== 'pinned' && name !== 'participated';
+// 'pinned'/'participated' are system folders: not editable/reorderable, but
+// like the web app they ARE move targets (POST sessions/folder).
+const isEditableFolder = (name: string) => name !== 'pinned' && name !== 'participated';
+const isMoveTarget = (section: { kind: string }) =>
+  section.kind === 'folder' || section.kind === 'recent';
 
 const OP_LABELS: Record<string, string> = {
   'folder-create': 'create folder',
@@ -322,7 +325,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
     [baseData, cloud.showArchived],
   );
   const userFolderNames = useMemo(
-    () => data.folders.filter(isUserFolder),
+    () => data.folders.filter(isEditableFolder),
     [data.folders],
   );
 
@@ -574,20 +577,23 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 data-section-name={sectionItem.name}
                 data-drop-target={dropTarget === sectionItem.name}
                 data-drop-before={dropBefore === sectionItem.name}
-                draggable={sectionItem.kind === 'folder' && isUserFolder(sectionItem.name)}
+                draggable={sectionItem.kind === 'folder' && isEditableFolder(sectionItem.name)}
                 onDragStart={(e) => {
                   e.dataTransfer.setData(FOLDER_MIME, sectionItem.name);
                   e.dataTransfer.effectAllowed = 'move';
                 }}
                 onDragOver={(e) => {
                   const types = e.dataTransfer.types;
-                  const isFolderTarget =
-                    sectionItem.kind === 'folder' && isUserFolder(sectionItem.name);
-                  if (types.includes(SESSION_MIME) && (isFolderTarget || sectionItem.kind === 'recent')) {
+                  const isFolderTarget = isMoveTarget(sectionItem);
+                  if (types.includes(SESSION_MIME) && isFolderTarget) {
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                     setDropTarget(sectionItem.name);
-                  } else if (types.includes(FOLDER_MIME) && isFolderTarget) {
+                  } else if (
+                    types.includes(FOLDER_MIME) &&
+                    sectionItem.kind === 'folder' &&
+                    isEditableFolder(sectionItem.name)
+                  ) {
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                     setDropBefore(sectionItem.name);
@@ -599,12 +605,11 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 }}
                 onDrop={(e) => {
                   const sessionId = e.dataTransfer.getData(SESSION_MIME);
-                  const target =
-                    sectionItem.kind === 'folder' && isUserFolder(sectionItem.name)
-                      ? sectionItem.name
-                      : sectionItem.kind === 'recent'
-                        ? null
-                        : undefined;
+                  const target = isMoveTarget(sectionItem)
+                    ? sectionItem.kind === 'recent'
+                      ? null
+                      : sectionItem.name
+                    : undefined;
                   if (sessionId && target !== undefined) {
                     e.preventDefault();
                     moveSessionTo(sessionId, target);
@@ -614,7 +619,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                     folder &&
                     folder !== sectionItem.name &&
                     sectionItem.kind === 'folder' &&
-                    isUserFolder(sectionItem.name)
+                    isEditableFolder(sectionItem.name)
                   ) {
                     e.preventDefault();
                     const names = userFolderNames.filter((n) => n !== folder);
@@ -626,7 +631,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  if (sectionItem.kind === 'folder' && isUserFolder(sectionItem.name)) {
+                  if (sectionItem.kind === 'folder' && isEditableFolder(sectionItem.name)) {
                     void folderMenu(sectionItem.name, e.clientX, e.clientY);
                   }
                 }}

@@ -131,7 +131,9 @@ const withoutSessions = (data: CloudListData, patch: (s: CloudSession) => CloudS
 });
 
 export function moveSession(data: CloudListData, id: string, folder: string | null): CloudListData {
-  return withoutSessions(data, (s) => (s.id === id ? { ...s, folder } : s));
+  return withoutSessions(data, (s) =>
+    s.id === id ? { ...s, folder, isPinned: folder === PINNED } : s,
+  );
 }
 
 export function reorderFolders(data: CloudListData, names: string[]): CloudListData {

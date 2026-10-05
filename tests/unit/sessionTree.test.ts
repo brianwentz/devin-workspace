@@ -197,6 +197,14 @@ describe('optimistic mutations', () => {
     expect(moveSession(d, 'zz', 'Alpha').sessions).toEqual(d.sessions);
   });
 
+  it('moveSession to pinned sets isPinned, other folders clear it', () => {
+    const pinned = moveSession(data(), 'c', 'pinned');
+    expect(pinned.sessions[2]!.folder).toBe('pinned');
+    expect(pinned.sessions[2]!.isPinned).toBe(true);
+    const back = moveSession(pinned, 'c', 'Alpha');
+    expect(back.sessions[2]!.isPinned).toBe(false);
+  });
+
   it('reorderFolders reorders user folders and keeps stragglers', () => {
     const next = reorderFolders(data(), ['Beta', 'Alpha']);
     expect(next.folders).toEqual(['Beta', 'Alpha']);
