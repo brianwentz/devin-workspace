@@ -106,12 +106,12 @@ export function Splitter({ axis, rect, enabled }: SplitterProps) {
       <div
         id="dragGuide"
         aria-hidden="true"
-        className={`absolute bg-[#91c4ff] pointer-events-none ${axis === 'y' ? 'left-0 w-full' : ''}`}
+        className="absolute bg-[#91c4ff] pointer-events-none"
         style={{
           display: guidePos === null ? 'none' : 'block',
           ...(axis === 'x'
             ? { left: guidePos ?? rect.x, top: rect.y, width: 2, height: rect.height }
-            : { top: guidePos ?? rect.y, height: 2 }),
+            : { left: rect.x, top: guidePos ?? rect.y, width: rect.width, height: 2 }),
         }}
       />
     </>
