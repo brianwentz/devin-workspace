@@ -105,17 +105,6 @@ export function Rail({
       >
         <BarChart3 size={18} strokeWidth={1.8} />
       </button>
-      <button
-        id="settingsButton"
-        type="button"
-        aria-label="Settings"
-        aria-pressed={surface === 'settings'}
-        title="Settings"
-        className={buttonClass}
-        onClick={() => void requestSurface('settings')}
-      >
-        ⚙
-      </button>
       <PrQuickOpen buttonClass={buttonClass} />
       <NotificationsButton buttonClass={buttonClass} />
       <span className="flex-1" />
@@ -140,7 +129,7 @@ export function Rail({
         aria-label="Toggle GitHub pane"
         aria-pressed={paneOpen}
         title={paneCollapsed ? 'GitHub pane hidden — widen window' : 'Toggle GitHub pane'}
-        className={`${buttonClass} relative mb-3 text-sm`}
+        className={`${buttonClass} relative text-sm`}
         onClick={() => window.devinworkspaces.togglePane()}
       >
         GH
@@ -150,6 +139,17 @@ export function Rail({
             title="pane hidden — widen window"
           />
         )}
+      </button>
+      <button
+        id="settingsButton"
+        type="button"
+        aria-label="Settings"
+        aria-pressed={surface === 'settings'}
+        title="Settings"
+        className={`${buttonClass} mb-3`}
+        onClick={() => void requestSurface('settings')}
+      >
+        ⚙
       </button>
     </aside>
   );

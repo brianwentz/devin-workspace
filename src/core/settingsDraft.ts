@@ -27,7 +27,7 @@ export const DRAFT_TAB: Record<DraftField, SettingsTabId> = {
   tenantUrl: 'general',
   apiBase: 'general',
   workspaces: 'general',
-  allowExternal: 'general',
+  allowExternal: 'links',
   keepAliveHours: 'general',
   maxLiveTabs: 'general',
   sessionsOpen: 'general',

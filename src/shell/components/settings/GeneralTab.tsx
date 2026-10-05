@@ -94,15 +94,6 @@ export function GeneralTab() {
         </div>
         <FieldError inputId="workspaceInput" message={errors.workspaces} />
       </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          id="allowExternalInput"
-          type="checkbox"
-          checked={draft.allowExternal}
-          onChange={(event) => updateDraft({ allowExternal: event.target.checked })}
-        />
-        <span>Open non-GitHub links in system browser</span>
-      </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-[#aeb9c8]">Keep hidden tabs live for (hours, 0 = discard on switch)</span>
         <input

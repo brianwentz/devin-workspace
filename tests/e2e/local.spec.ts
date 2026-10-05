@@ -624,3 +624,53 @@ test('Local composer: native editing shortcuts work (Ctrl+A/C/V/X/Z) — regress
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test('Local composer keeps unsent text across a surface switch', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-draft-'));
+  const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_LOCAL_AGENT_CMD: FAKE_AGENT_CMD,
+  });
+  const agentPids: number[] = [];
+  try {
+    await waitForHooks(app);
+    await setSurfaceLocal(app);
+    const ws = await addWorkspace(app, workspace);
+    await expect.poll(async () => (await localState(app)).agents[ws]?.status).toBe('ready');
+    agentPids.push(await agentPid(app, ws));
+    const sessionId = await newSession(app, ws);
+    expect(sessionId).toBeTruthy();
+
+    const page = await shellPage(app);
+    await expect.poll(() => shellCount(app, `.session-item[data-session-id="${sessionId}"]`)).toBe(1);
+    expect(await shellClick(app, `.session-item[data-session-id="${sessionId}"]`)).toBe(true);
+    await page.waitForSelector('#composer:not([disabled])');
+    const composer = page.locator('#composer');
+    await composer.click();
+    await page.keyboard.type('keep me');
+
+    await evaluateInShell(app, "window.devinworkspaces.setSurface('settings')");
+    await page.waitForSelector('#composer', { state: 'detached' });
+    await evaluateInShell(app, "window.devinworkspaces.setSurface('local')");
+    await page.waitForSelector('#composer:not([disabled])');
+
+    await expect.poll(() => page.locator('#composer').inputValue()).toBe('keep me');
+    await expect(page.locator('#sendButton')).toBeEnabled();
+
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await waitForEventCount(logFile, 'window-close-complete', 1);
+    await app.close();
+  } finally {
+    await app.close().catch(() => undefined);
+    for (const pid of agentPids) {
+      try {
+        process.kill(pid);
+      } catch {
+        // already gone
+      }
+    }
+    rmSync(profile, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
