@@ -6,6 +6,8 @@ const inputClass =
   'w-full max-w-md px-2 py-1.5 rounded-md border border-[#39475a] bg-[#0d141d] text-sm text-[#e8edf5]';
 const saveClass =
   'px-3 py-1.5 rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] text-sm disabled:hover:bg-[#1a2330]';
+const rowButtonClass =
+  'px-2 py-1 rounded-md border border-[#39475a] bg-[#1a2330] hover:bg-[#2a394d] text-xs disabled:hover:bg-[#1a2330]';
 
 const REVEAL_MS = 30_000;
 const CONFIRM_DELETE_MS = 3_000;
@@ -14,11 +16,11 @@ function relativeLastUsed(lastUsedAt: number | null): string {
   if (lastUsedAt === null) return 'never';
   const delta = Date.now() - lastUsedAt;
   const minutes = Math.floor(delta / 60_000);
-  if (minutes < 1) return 'last used just now';
-  if (minutes < 60) return `last used ${minutes}m ago`;
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `last used ${hours}h ago`;
-  return `last used ${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function PasswordRow({ entry }: { entry: CredentialEntry }) {
@@ -95,93 +97,122 @@ function PasswordRow({ entry }: { entry: CredentialEntry }) {
   };
 
   return (
-    <li data-credential-id={entry.id} className="flex flex-col gap-1 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-xs">{entry.username}</span>
-        <span className="text-xs text-[#7f8ca0]">{relativeLastUsed(entry.lastUsedAt)}</span>
-        <span className="flex-1" />
-        <button
-          id={`credentialReveal-${entry.id}`}
-          type="button"
-          className={saveClass}
-          aria-label={revealed === null ? 'Show password' : 'Hide password'}
-          onClick={() => (revealed === null ? void show() : hide())}
-        >
-          {revealed === null ? <Eye size={14} /> : <EyeOff size={14} />}
-        </button>
-        <button
-          id={`credentialCopy-${entry.id}`}
-          type="button"
-          className={saveClass}
-          onClick={() => void copy()}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-        <button
-          id={`credentialEdit-${entry.id}`}
-          type="button"
-          className={saveClass}
-          onClick={() => {
-            setEditing((value) => !value);
-            setEditUsername(entry.username);
-            setEditPassword('');
-            setError(null);
-          }}
-        >
-          Edit
-        </button>
-        <button
-          id={`credentialDelete-${entry.id}`}
-          type="button"
-          className={saveClass}
-          onClick={remove}
-        >
-          {confirmDelete ? 'Confirm delete' : 'Delete'}
-        </button>
-      </div>
-      {revealed !== null && (
-        <input
-          className={inputClass}
-          readOnly
-          value={revealed}
-          aria-label="Revealed password"
-          onBlur={hide}
-        />
+    <>
+      <tr data-credential-id={entry.id} className="border-b border-[#39475a]/60 hover:bg-[#1a2330]">
+        <td className="px-2 py-1.5 align-middle">
+          <span className="font-mono text-xs truncate max-w-[16rem] block" title={entry.origin}>
+            {entry.origin}
+          </span>
+        </td>
+        <td className="px-2 py-1.5 align-middle">
+          {editing ? (
+            <input
+              id={`credentialEditUsername-${entry.id}`}
+              className={inputClass}
+              value={editUsername}
+              onChange={(event) => setEditUsername(event.target.value)}
+              placeholder="Username"
+              autoComplete="off"
+            />
+          ) : (
+            <span className="font-mono text-xs">{entry.username}</span>
+          )}
+        </td>
+        <td className="px-2 py-1.5 align-middle">
+          {editing ? (
+            <input
+              id={`credentialEditPassword-${entry.id}`}
+              className={inputClass}
+              type="password"
+              value={editPassword}
+              onChange={(event) => setEditPassword(event.target.value)}
+              placeholder="New password (unchanged if blank)"
+              autoComplete="off"
+            />
+          ) : revealed !== null ? (
+            <input
+              className={inputClass}
+              readOnly
+              value={revealed}
+              aria-label="Revealed password"
+              onBlur={hide}
+            />
+          ) : (
+            <span className="text-[#7f8ca0]">••••••••</span>
+          )}
+        </td>
+        <td className="px-2 py-1.5 align-middle text-xs text-[#7f8ca0]">
+          {relativeLastUsed(entry.lastUsedAt)}
+        </td>
+        <td className="px-2 py-1.5 align-middle text-right whitespace-nowrap">
+          <span className="flex justify-end gap-1">
+            {editing ? (
+              <>
+                <button
+                  id={`credentialEditSave-${entry.id}`}
+                  type="button"
+                  className={rowButtonClass}
+                  onClick={() => void saveEdit()}
+                >
+                  Save
+                </button>
+                <button type="button" className={rowButtonClass} onClick={() => setEditing(false)}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  id={`credentialReveal-${entry.id}`}
+                  type="button"
+                  className={rowButtonClass}
+                  aria-label={revealed === null ? 'Show password' : 'Hide password'}
+                  onClick={() => (revealed === null ? void show() : hide())}
+                >
+                  {revealed === null ? <Eye size={14} /> : <EyeOff size={14} />}
+                </button>
+                <button
+                  id={`credentialCopy-${entry.id}`}
+                  type="button"
+                  className={rowButtonClass}
+                  onClick={() => void copy()}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+                <button
+                  id={`credentialEdit-${entry.id}`}
+                  type="button"
+                  className={rowButtonClass}
+                  onClick={() => {
+                    setEditing((value) => !value);
+                    setEditUsername(entry.username);
+                    setEditPassword('');
+                    setError(null);
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  id={`credentialDelete-${entry.id}`}
+                  type="button"
+                  className={rowButtonClass}
+                  onClick={remove}
+                >
+                  {confirmDelete ? 'Confirm delete' : 'Delete'}
+                </button>
+              </>
+            )}
+          </span>
+        </td>
+      </tr>
+      {error && (
+        <tr>
+          <td colSpan={5} className="text-xs text-[#ff8a8a] px-2 pb-1.5">
+            {error}
+          </td>
+        </tr>
       )}
-      {editing && (
-        <div className="flex items-center gap-2">
-          <input
-            id={`credentialEditUsername-${entry.id}`}
-            className={inputClass}
-            value={editUsername}
-            onChange={(event) => setEditUsername(event.target.value)}
-            placeholder="Username"
-            autoComplete="off"
-          />
-          <input
-            id={`credentialEditPassword-${entry.id}`}
-            className={inputClass}
-            type="password"
-            value={editPassword}
-            onChange={(event) => setEditPassword(event.target.value)}
-            placeholder="New password (unchanged if blank)"
-            autoComplete="off"
-          />
-          <button
-            id={`credentialEditSave-${entry.id}`}
-            type="button"
-            className={saveClass}
-            onClick={() => void saveEdit()}
-          >
-            Save
-          </button>
-          <button type="button" className={saveClass} onClick={() => setEditing(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
-      {error && <span className="text-sm text-[#ff8a8a]">{error}</span>}
-    </li>
+    </>
   );
 }
 
@@ -231,12 +262,9 @@ export function PasswordsSection({
       entry.origin.toLowerCase().includes(query) ||
       entry.username.toLowerCase().includes(query),
   );
-  const groups = new Map<string, CredentialEntry[]>();
-  for (const entry of visible) {
-    const list = groups.get(entry.origin) ?? [];
-    list.push(entry);
-    groups.set(entry.origin, list);
-  }
+  const sorted = [...visible].sort(
+    (a, b) => a.origin.localeCompare(b.origin) || a.username.localeCompare(b.username),
+  );
 
   return (
     <section id="credentialsSection" className="flex flex-col gap-3">
@@ -254,18 +282,42 @@ export function PasswordsSection({
           autoComplete="off"
         />
       )}
-      <div className="flex flex-col gap-3 max-w-md">
-        {[...groups.entries()].map(([origin, entries]) => (
-          <div key={origin} className="flex flex-col gap-1">
-            <h3 className="text-xs font-semibold text-[#7f8ca0]">{origin}</h3>
-            <ul className="flex flex-col gap-1">
-              {entries.map((entry) => (
-                <PasswordRow key={entry.id} entry={entry} />
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      {credentials.length === 0 ? (
+        <p id="credentialsEmpty" className="text-xs text-[#7f8ca0]">
+          No saved passwords yet.
+        </p>
+      ) : (
+        <table id="credentialsTable" className="w-full max-w-3xl text-sm border-collapse">
+          <thead>
+            <tr>
+              <th className="text-left text-xs font-semibold text-[#7f8ca0] border-b border-[#39475a] px-2 py-1.5">
+                Origin
+              </th>
+              <th className="text-left text-xs font-semibold text-[#7f8ca0] border-b border-[#39475a] px-2 py-1.5">
+                Username
+              </th>
+              <th className="text-left text-xs font-semibold text-[#7f8ca0] border-b border-[#39475a] px-2 py-1.5">
+                Password
+              </th>
+              <th className="text-left text-xs font-semibold text-[#7f8ca0] border-b border-[#39475a] px-2 py-1.5">
+                Last used
+              </th>
+              <th className="text-right text-xs font-semibold text-[#7f8ca0] border-b border-[#39475a] px-2 py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-2 py-1.5 text-xs text-[#7f8ca0]">
+                  No matches.
+                </td>
+              </tr>
+            ) : (
+              sorted.map((entry) => <PasswordRow key={entry.id} entry={entry} />)
+            )}
+          </tbody>
+        </table>
+      )}
       <div className="flex flex-col gap-2 max-w-md">
         <select
           id="credentialOrigin"
