@@ -79,13 +79,20 @@ function resolveOnPath(name: string): string | null {
   }
 }
 
-// One interactive `devin` CLI pty per local session (fresh TUI — no `-r`, so
-// each session gets its own context). The external binary is spawned
+// One interactive `devin` CLI pty per local session — a selected session
+// resumes with `devin -r <id>` in its own pty. The external binary is spawned
 // via node-pty/ConPTY — never node (RunAsNode fuse is off). A full command
 // override exists only in test mode (DEVIN_WORKSPACES_TEST_TERMINAL_CMD).
 export class TerminalHost {
   private readonly terminals = new Map<string, TerminalEntry>();
   private readonly bySession = new Map<string, string>();
+
+  // Injected from index.ts (avoids a circular acpHost import): releasing a
+  // session's CLI lock before a `devin -r` spawn, reclaiming it on close.
+  sessionGate: {
+    release: (sessionId: string) => Promise<void>;
+    reclaim: (sessionId: string) => Promise<void>;
+  } | null = null;
 
   constructor(private readonly testMode: boolean) {}
 
@@ -277,7 +284,7 @@ export class TerminalHost {
     return env;
   }
 
-  open(options: TerminalOpenOptions, cols = 120, rows = 30): OpenResult {
+  async open(options: TerminalOpenOptions, cols = 120, rows = 30): Promise<OpenResult> {
     const workspaces = (state.settings?.current.workspaces ?? []).map((w) => resolve(w));
     const normalized =
       options.kind === 'devin'
@@ -305,6 +312,15 @@ export class TerminalHost {
         const existing = this.terminals.get(existingId);
         if (existing && existing.exitCode === null) return { ok: true, id: existingId };
       }
+      // `devin -r` takes the CLI's per-session lock — chat for this session is
+      // released first (agent restart), reclaimed when this pty closes.
+      try {
+        await this.sessionGate?.release(options.sessionId);
+      } catch (error) {
+        log('local', 'terminal-session-release-error', {
+          detail: { sessionId: options.sessionId, message: String(error) },
+        });
+      }
     }
     const command = this.resolveCommand(options);
     if ('error' in command) {
@@ -315,7 +331,10 @@ export class TerminalHost {
     try {
       // Lazy: a missing/broken native addon must not break app startup.
       const nodePty = require('node-pty') as typeof pty;
-      const args = command.appendCwd ? [...command.args, '--cd', normalized] : command.args;
+      const args = [
+        ...(command.appendCwd ? [...command.args, '--cd', normalized] : command.args),
+        ...(options.kind === 'devin' ? ['-r', options.sessionId] : []),
+      ];
       proc = nodePty.spawn(command.file, args, {
         cwd: normalized,
         cols,
@@ -330,6 +349,7 @@ export class TerminalHost {
       });
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
+    const spawnedAt = Date.now();
     const entry: TerminalEntry = {
       id: randomUUID(),
       kind: options.kind,
@@ -368,6 +388,12 @@ export class TerminalHost {
       if (entry.sessionId && this.bySession.get(entry.sessionId) === entry.id) {
         this.bySession.delete(entry.sessionId);
       }
+      // `devin -r` exits fast+nonzero when the acp lock was still held (e.g. a
+      // stale process we didn't restart) — the Restart button is the recovery.
+      if (entry.sessionId && exitCode !== 0 && Date.now() - spawnedAt < 3000) {
+        log('local', 'terminal-session-locked', { detail: { sessionId: entry.sessionId } });
+      }
+      if (entry.sessionId) void this.sessionGate?.reclaim(entry.sessionId);
       const view = state.shellView;
       if (view && !view.webContents.isDestroyed()) {
         view.webContents.send(IpcChannels.terminalExit, {
@@ -386,6 +412,7 @@ export class TerminalHost {
         ok: true,
         pid: proc.pid,
         ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
+        resume: entry.sessionId !== null,
       },
     });
     this.onChange?.();
@@ -483,6 +510,7 @@ export class TerminalHost {
     if (entry.sessionId && this.bySession.get(entry.sessionId) === id) {
       this.bySession.delete(entry.sessionId);
     }
+    if (entry.sessionId) void this.sessionGate?.reclaim(entry.sessionId);
     log('local', 'terminal-close', { detail: { id } });
     this.onChange?.();
     return true;

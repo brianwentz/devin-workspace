@@ -248,21 +248,6 @@ const api = {
       ipcRenderer.send(IpcChannels.autofillPromptResolve, { action });
     }
   },
-  onDragGuide: (callback: (guide: { axis: 'x' | 'y'; pos: number }) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-      if (
-        payload &&
-        typeof payload === 'object' &&
-        typeof (payload as { pos?: unknown }).pos === 'number' &&
-        ((payload as { axis?: unknown }).axis === 'x' ||
-          (payload as { axis?: unknown }).axis === 'y')
-      ) {
-        callback(payload as { axis: 'x' | 'y'; pos: number });
-      }
-    };
-    ipcRenderer.on(IpcChannels.layoutDragGuide, listener);
-    return () => ipcRenderer.removeListener(IpcChannels.layoutDragGuide, listener);
-  },
   onDragReset: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on(IpcChannels.layoutDragReset, listener);

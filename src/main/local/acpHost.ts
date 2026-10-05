@@ -22,6 +22,7 @@ import {
   resetHistory,
   sessionsFor,
   setPermission,
+  setTerminalOwned,
   startPrompt,
   titleFromPrompt,
   upsertAgent,
@@ -425,7 +426,8 @@ export class DevinLocalHost {
     update((state) => {
       let next = state;
       for (const session of sessionsFor(state, workspace)) {
-        if (session.running) next = finishPrompt(next, session.id, 'error', reason);
+        if (session.running)
+          next = finishPrompt(next, session.id, 'error', reason, new Date().toISOString());
         else if (session.pendingPermission) next = clearPermission(next, session.id);
       }
       if (!stillTracked) return next;
@@ -438,6 +440,89 @@ export class DevinLocalHost {
       });
     });
     log('local', 'agent-exit', { detail: { workspace, generation, code, signal, reason } });
+  }
+
+  // Restart the workspace agent without crash bookkeeping — used for the
+  // terminal handoff, where the CLI's per-session lock is only released when
+  // the acp process exits.
+  async restartAgent(workspace: string, reason: string): Promise<void> {
+    const normalized = resolve(workspace);
+    const handle = this.agents.get(normalized);
+    if (!handle) return;
+    // Bump the generation first so the imminent onExit is a no-op.
+    handle.generation += 1;
+    handle.remoteToUi.clear();
+    for (const [, pending] of handle.pendingPermissions) {
+      pending.resolve({ outcome: 'cancelled' });
+    }
+    handle.pendingPermissions.clear();
+    for (const [sessionId, binding] of this.bindings) {
+      if (binding.workspace === normalized) this.bindings.delete(sessionId);
+    }
+    const child = handle.child;
+    const exited = new Promise<void>((resolveExit) => {
+      if (!child || child.exitCode !== null || child.signalCode !== null) {
+        resolveExit();
+        return;
+      }
+      const timer = setTimeout(resolveExit, 3000);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolveExit();
+      });
+    });
+    update((state) => {
+      let next = state;
+      for (const session of sessionsFor(state, normalized)) {
+        if (session.running) {
+          next = finishPrompt(next, session.id, 'cancelled', undefined, new Date().toISOString());
+        } else if (session.pendingPermission) {
+          next = clearPermission(next, session.id);
+        }
+      }
+      return upsertAgent(next, normalized, { status: 'starting' });
+    });
+    log('local', 'agent-restart', { detail: { workspace: normalized, reason } });
+    this.stopChild(handle);
+    await exited;
+    handle.child = null;
+    handle.connection = null;
+    handle.backoffMs = BACKOFF_MIN_MS;
+    handle.nextRestartAt = 0;
+    handle.exit.reject(new Error(`agent restarted: ${reason}`));
+    handle.exit = deferred();
+    handle.ready = this.start(handle);
+    await handle.ready;
+  }
+
+  // Terminal handoff: mark the session owned by its `devin -r` pty and release
+  // the CLI lock by restarting the workspace agent (the lock lives in-process).
+  async releaseSessionForTerminal(sessionId: string): Promise<void> {
+    const session = getLocalState().sessions[sessionId];
+    if (!session) return;
+    update((state) => setTerminalOwned(state, sessionId, true));
+    const handle = this.agents.get(session.workspace);
+    if (handle?.child && this.bindings.has(sessionId)) {
+      await this.restartAgent(session.workspace, 'terminal-handoff');
+    }
+  }
+
+  // The terminal closed: hand the session back to chat, reloading fresh history
+  // (which now includes the turns made in the terminal).
+  async reclaimSessionFromTerminal(sessionId: string): Promise<void> {
+    update((state) => setTerminalOwned(state, sessionId, false));
+    const session = getLocalState().sessions[sessionId];
+    if (!session || this.disposed) return;
+    try {
+      const handle = await this.ensureAgent(session.workspace);
+      if (handle.capabilities.loadSession) {
+        await this.loadSession(session.workspace, sessionId);
+      }
+    } catch (error) {
+      log('local', 'session-reclaim-error', {
+        detail: { sessionId, message: errorMessage(error) },
+      });
+    }
   }
 
   private stopChild(handle: AgentHandle): void {
@@ -487,6 +572,17 @@ export class DevinLocalHost {
     const kind = params.update.sessionUpdate;
     if (kind === 'tool_call' || kind === 'tool_call_update' || kind === 'plan') {
       log('local', 'session-update', { detail: { sessionId, kind } });
+    }
+    if (kind === 'usage_update') {
+      const usage = params.update as { used?: unknown; size?: unknown };
+      log('local', 'session-update', {
+        detail: {
+          sessionId,
+          kind,
+          used: typeof usage.used === 'number' ? usage.used : null,
+          size: typeof usage.size === 'number' ? usage.size : null,
+        },
+      });
     }
     if (this.options.onPullRequestUrl) {
       for (const text of collectAgentOutputText(params.update as unknown as Record<string, unknown>, kind)) {
@@ -586,6 +682,7 @@ export class DevinLocalHost {
   // Make sure the UI session is attached to the current agent generation,
   // replaying history (loadSession) or re-creating a remote session after a crash.
   private async bind(handle: AgentHandle, session: LocalSession): Promise<SessionBinding> {
+    if (session.terminalOwned) throw new Error('session is open in the Terminal tab');
     const connection = handle.connection;
     if (!connection) throw new Error('agent not connected');
     const existing = this.bindings.get(session.id);
@@ -620,12 +717,13 @@ export class DevinLocalHost {
 
   async prompt(sessionId: string, text: string): Promise<StopReason> {
     const session = this.requireSession(sessionId);
+    if (session.terminalOwned) throw new Error('session is open in the Terminal tab');
     if (session.running) throw new Error('a prompt is already running in this session');
     const handle = await this.ensureAgent(session.workspace);
     const binding = await this.bind(handle, this.requireSession(sessionId));
     const connection = handle.connection;
     if (!connection) throw new Error('agent not connected');
-    update((state) => startPrompt(state, sessionId, text));
+    update((state) => startPrompt(state, sessionId, text, new Date().toISOString()));
     const entry = this.index.find((item) => item.id === sessionId);
     if (entry && !entry.title) {
       entry.title = titleFromPrompt(text);
@@ -639,13 +737,22 @@ export class DevinLocalHost {
       ]);
       const stopReason = response.stopReason as StopReason;
       handle.backoffMs = BACKOFF_MIN_MS;
-      update((state) => finishPrompt(state, sessionId, stopReason));
+      update((state) =>
+        finishPrompt(
+          state,
+          sessionId,
+          stopReason,
+          undefined,
+          new Date().toISOString(),
+          response.usage ?? undefined,
+        ),
+      );
       this.flushPrLinks(sessionId);
       log('local', 'prompt-finish', { detail: { sessionId, stopReason } });
       return stopReason;
     } catch (error) {
       const message = errorMessage(error);
-      update((state) => finishPrompt(state, sessionId, 'error', message));
+      update((state) => finishPrompt(state, sessionId, 'error', message, new Date().toISOString()));
       this.flushPrLinks(sessionId);
       log('local', 'prompt-error', { detail: { sessionId, message } });
       throw error;
@@ -654,6 +761,7 @@ export class DevinLocalHost {
 
   async cancel(sessionId: string): Promise<void> {
     const session = this.requireSession(sessionId);
+    if (session.terminalOwned) throw new Error('session is open in the Terminal tab');
     const handle = this.agents.get(session.workspace);
     const binding = this.bindings.get(sessionId);
     if (!handle?.connection || !binding) return;
@@ -813,6 +921,8 @@ export class DevinLocalHost {
 
   async loadSession(workspace: string, sessionId: string): Promise<void> {
     const normalized = resolve(workspace);
+    const existing = getLocalState().sessions[sessionId];
+    if (existing?.terminalOwned) throw new Error('session is open in the Terminal tab');
     const handle = await this.ensureAgent(normalized);
     if (!handle.capabilities.loadSession) throw new Error('history not supported by agent');
     const connection = handle.connection;

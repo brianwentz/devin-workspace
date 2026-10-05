@@ -10,6 +10,7 @@ import {
   SPLITTER_WIDTH,
   type LayoutState,
   type Rect,
+  type WindowBounds,
 } from '../core/layout';
 import { openPullRequests } from '../core/notifyModel';
 import { unreadPrCount, visiblePrs } from '../core/prPanelModel';
@@ -190,8 +191,12 @@ export function ensureAttached(view: View | null): void {
   state.windowRef.contentView.addChildView(view);
 }
 
-// Raise the shell DOM over every hosted view (transparent bg so they still
-// paint beneath) — used by the splitter drag and the notifications panel.
+// A transparent raised view does not composite over sibling WebContentsViews
+// on macOS (it whites out); only Windows keeps the see-through raise.
+const OVERLAY_TRANSPARENT = process.platform !== 'darwin';
+
+// Raise the shell DOM over every hosted view — used by shell-DOM overlays
+// (notifications panel, autofill picker/prompt).
 export function raiseShell(): void {
   // Overlay restacking during teardown re-adds views whose webContents are
   // being destroyed — a synchronous native call that isn't bounded by any
@@ -199,7 +204,7 @@ export function raiseShell(): void {
   if (state.shuttingDown) return;
   const { windowRef, shellView } = state;
   if (!windowRef || !shellView) return;
-  shellView.setBackgroundColor('#00000000');
+  shellView.setBackgroundColor(OVERLAY_TRANSPARENT ? '#00000000' : '#111827');
   windowRef.contentView.addChildView(shellView);
 }
 
@@ -249,18 +254,15 @@ export function syncScope(): void {
   );
 }
 
-export function applyLayout(): void {
-  const { windowRef, shellView, devinView, tabManager } = state;
-  if (!windowRef || !shellView || !devinView || !tabManager) return;
-  syncScope();
-  const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
+// Shared geometry for applyLayout and the live drag resize in moveDrag.
+function applyBounds(bounds: WindowBounds, size: { width: number; height: number }): void {
+  const { shellView, devinView, tabManager } = state;
   state.paneCollapsed = bounds.paneCollapsed;
-  const size = windowRef.getContentBounds();
-  shellView.setBounds({ x: 0, y: 0, width: size.width, height: size.height });
+  shellView?.setBounds({ x: 0, y: 0, width: size.width, height: size.height });
   if (state.surface === 'cloud') {
-    devinView.setBounds(nativeBounds(bounds.devin));
+    devinView?.setBounds(nativeBounds(bounds.devin));
   } else {
-    devinView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    devinView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   }
   if (state.surface === 'analytics') {
     ensureAnalyticsView().setBounds(nativeBounds(bounds.devin));
@@ -268,14 +270,23 @@ export function applyLayout(): void {
     state.analyticsView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   }
   const paneVisible = state.paneOpen && !bounds.paneCollapsed;
-  tabManager.setBounds(paneVisible ? nativeBounds(bounds.ghTab) : null);
+  tabManager?.setBounds(paneVisible ? nativeBounds(bounds.ghTab) : null);
+}
+
+export function applyLayout(): void {
+  const { windowRef, shellView, devinView, tabManager } = state;
+  if (!windowRef || !shellView || !devinView || !tabManager) return;
+  syncScope();
+  const bounds = computeBounds(windowRef.getContentBounds(), layoutState());
+  applyBounds(bounds, windowRef.getContentBounds());
   if (!state.dragging) {
     ensureShellBottom();
     if (state.surface === 'cloud') ensureAttached(devinView);
     else detachView(devinView);
     if (state.surface === 'analytics') ensureAttached(state.analyticsView);
     else detachView(state.analyticsView);
-    const activeTabView = paneVisible ? tabManager.activeView : null;
+    const activeTabView =
+      state.paneOpen && !bounds.paneCollapsed ? tabManager.activeView : null;
     if (activeTabView) ensureAttached(activeTabView);
     else if (tabManager.activeView) detachView(tabManager.activeView);
     // The notifications panel and the autofill overlays are shell-DOM modals
@@ -294,7 +305,6 @@ export function cancelDrag(restore: boolean, reason: string): void {
     if (state.dragAxis === 'x') state.paneFraction = state.dragStartFraction;
     else state.terminalHeight = state.dragStartHeight;
   }
-  lowerShell();
   log('shell', 'drag-cancel', {
     detail: {
       reason,
@@ -320,7 +330,6 @@ export function beginDrag(axis: 'x' | 'y', pos: number): void {
   state.dragStartHeight = state.terminalHeight;
   state.dragLastX = pos;
   if (state.dragTimer) clearTimeout(state.dragTimer);
-  raiseShell();
   state.dragTimer = setTimeout(() => cancelDrag(true, 'safety-timeout'), 10_000);
   log('shell', 'drag-start', {
     detail: { axis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
@@ -328,7 +337,7 @@ export function beginDrag(axis: 'x' | 'y', pos: number): void {
 }
 
 export function moveDrag(pos: number): void {
-  const { windowRef, shellView } = state;
+  const { windowRef } = state;
   if (!state.dragging || !windowRef) return;
   state.dragLastX = pos;
   const content = windowRef.getContentBounds();
@@ -342,16 +351,11 @@ export function moveDrag(pos: number): void {
       content.height,
     );
   }
-  const bounds = computeBounds(content, layoutState());
-  const guideRect = state.dragAxis === 'x' ? bounds.splitter : bounds.terminalSplitter;
-  if (guideRect) {
-    const { width, height } = content;
-    shellView?.setBounds({ x: 0, y: 0, width, height });
-    shellView?.webContents.send(IpcChannels.layoutDragGuide, {
-      axis: state.dragAxis,
-      pos: state.dragAxis === 'x' ? guideRect.x : guideRect.y,
-    });
-  }
+  // Live-resize the hosted views — no shell raise (see OVERLAY_TRANSPARENT).
+  applyBounds(computeBounds(content, layoutState()), content);
+  // Push the new geometry to the shell without persisting — notifyShell's
+  // syncFromState would write settings.json on every pointermove.
+  state.shellView?.webContents.send(IpcChannels.stateUpdate, publicState());
   log('shell', 'drag-move', {
     detail: { axis: state.dragAxis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
   });
@@ -387,7 +391,6 @@ export function endDrag(pos: number): void {
   state.dragging = false;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   state.dragTimer = null;
-  if (state.shellView) state.shellView.setBackgroundColor('#111827');
   log('shell', 'drag-end', {
     detail: { axis: state.dragAxis, pos, paneFraction: state.paneFraction, terminalHeight: state.terminalHeight },
   });
