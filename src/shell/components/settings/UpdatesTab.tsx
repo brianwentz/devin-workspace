@@ -59,6 +59,11 @@ export function UpdatesTab({ update }: { update: ShellState['update'] | null }) 
   const [failed, setFailed] = useState(false);
   const availableVersion = update?.available ?? null;
 
+  // On-demand check when the tab opens (throttled main-side to 60 s).
+  useEffect(() => {
+    window.devinworkspaces.updateCheck('settings');
+  }, []);
+
   useEffect(() => {
     let alive = true;
     setReply(null);
@@ -112,6 +117,36 @@ export function UpdatesTab({ update }: { update: ShellState['update'] | null }) 
         ) : (
           <p id="updateStatus" data-update-state="none" className="text-xs text-[#7f8ca0]">
             You&apos;re up to date.
+          </p>
+        )}
+        {!update.downloaded &&
+          (update.enabled ? (
+            <div className="flex items-center gap-3">
+              <button
+                id="updateCheckNow"
+                type="button"
+                className={saveClass}
+                disabled={update.checking}
+                onClick={() => window.devinworkspaces.updateCheck('manual')}
+              >
+                {update.checking ? 'Checking…' : 'Check now'}
+              </button>
+              <span id="updateLastChecked" className="text-xs text-[#7f8ca0]">
+                {update.checking
+                  ? 'Checking…'
+                  : update.lastCheckedAt
+                    ? `Last checked ${new Date(update.lastCheckedAt).toLocaleTimeString()}`
+                    : 'Not checked yet'}
+              </span>
+            </div>
+          ) : (
+            <span id="updateLastChecked" className="text-xs text-[#7f8ca0]">
+              Automatic updates are unavailable in this build.
+            </span>
+          ))}
+        {update.error && (
+          <p id="updateError" className="text-xs text-[#ff8a8a]">
+            Update check failed: {update.error}
           </p>
         )}
         <a

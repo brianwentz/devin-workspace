@@ -1,5 +1,5 @@
 import { WebContentsView } from 'electron';
-import { analyticsUrl } from '../core/sessions';
+import { analyticsUrl, isAnalyticsUrl } from '../core/sessions';
 import { log } from './log';
 import { attachRouting } from './routing';
 import { state } from './state';
@@ -27,4 +27,25 @@ export function ensureAnalyticsView(): WebContentsView {
   });
   log('analytics', 'analytics-view-created', { url });
   return view;
+}
+
+// Re-entering the surface reloads in place so the charts are never stale.
+// First entry is covered by the creation load — no double load.
+export function refreshAnalyticsView(): void {
+  if (!state.analyticsView) {
+    ensureAnalyticsView();
+    return;
+  }
+  const contents = state.analyticsView.webContents;
+  const current = contents.getURL();
+  if (isAnalyticsUrl(current, state.tenantUrl)) {
+    contents.reload();
+    log('analytics', 'analytics-refresh', { url: current, detail: { mode: 'reload' } });
+  } else {
+    const url = analyticsUrl(state.tenantUrl);
+    contents.loadURL(url).catch((error: unknown) => {
+      log('analytics', 'load-error', { url, detail: { message: String(error) } });
+    });
+    log('analytics', 'analytics-refresh', { url, detail: { mode: 'navigate' } });
+  }
 }

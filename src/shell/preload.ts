@@ -313,6 +313,8 @@ const api = {
       ipcRenderer.send(IpcChannels.cloudPrefetch, { sessionId });
     }
   },
+  updateCheck: (source: 'settings' | 'manual') =>
+    ipcRenderer.send(IpcChannels.updateCheck, { source }),
   releaseNotes: () =>
     ipcRenderer.invoke(IpcChannels.updateReleaseNotes) as Promise<ReleaseNotesReply>,
   // DEVIN_WORKSPACES_TEST_BANNER_MS shortens the banner auto-hide in tests.

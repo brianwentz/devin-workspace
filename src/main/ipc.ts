@@ -34,6 +34,7 @@ import {
 import { fieldErrorsFromIssues } from '../core/settingsDraft';
 import { sanitizeMessage } from '../core/devinApi';
 import { analyticsUrl } from '../core/sessions';
+import { refreshAnalyticsView } from './analytics';
 import { settingsFlushDone } from './settingsFlush';
 import { identityResolver } from './identity';
 import { log } from './log';
@@ -41,9 +42,9 @@ import { notificationStore } from './notifications';
 import { notifier, openNotification, openPr, openPrs } from './notifier';
 import { prStore } from './prs';
 import { handleLink } from './routing';
-import { hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
+import { checkForUpdatesNow, hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
-import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg } from '../shared/ipc';
+import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import { cloudSessions } from './cloudSessions';
@@ -212,7 +213,9 @@ export function setupIpc(): void {
   guardedOn(IpcChannels.surfaceSet, (_event, next: unknown) => {
     const parsed = SurfaceArg.safeParse(next);
     if (!parsed.success) return;
+    const previous = state.surface;
     state.surface = parsed.data;
+    if (parsed.data === 'analytics' && previous !== 'analytics') refreshAnalyticsView();
     setNotificationsPanel(false);
     setPrsPanel(false);
     closeAutofillOverlays();
@@ -377,6 +380,10 @@ function setupExtrasIpc(): void {
   });
   guardedOn(IpcChannels.updateInstall, () => {
     if (hasDownloadedUpdate()) installUpdate();
+  });
+  guardedOn(IpcChannels.updateCheck, (_e, arg: unknown) => {
+    const parsed = UpdateCheckArg.safeParse(arg);
+    if (parsed.success) checkForUpdatesNow(parsed.data.source);
   });
   guardedHandle(IpcChannels.updateReleaseNotes, () => releaseNotesReply());
 }

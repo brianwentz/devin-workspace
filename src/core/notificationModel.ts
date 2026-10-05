@@ -36,28 +36,52 @@ export const MAX_NOTIFICATIONS = 50;
 
 export type NewNotification = Omit<AppNotification, 'id' | 'readAt'>;
 
-// Prepend unless an UNREAD entry already carries the same
-// kind+sessionId+prUrl+version — then refresh that entry in place (same id,
-// new body/createdAt, still unread). Result capped at MAX_NOTIFICATIONS.
+// What a notification is "about" — a later entry for the same item supersedes
+// earlier ones.
+export function itemKey(
+  n: Pick<AppNotification, 'kind' | 'sessionId' | 'prUrl' | 'version'>,
+): string {
+  switch (n.kind) {
+    case 'pr-opened':
+    case 'pr-completed':
+      return `pr:${n.prUrl ?? ''}`;
+    case 'waiting':
+    case 'approval':
+    case 'blocked':
+    case 'finished':
+      return `session:${n.sessionId ?? ''}`;
+    case 'update':
+      return 'update';
+    default:
+      return n.kind;
+  }
+}
+
+// Remove every entry for the same item (read or unread — superseding a read
+// entry yields a fresh unread one), then prepend and cap at MAX_NOTIFICATIONS.
 export function addNotification(
   list: readonly AppNotification[],
   next: NewNotification,
   id: string,
 ): AppNotification[] {
   const entry: AppNotification = { ...next, id, readAt: null };
-  const existing = list.findIndex(
-    (item) =>
-      item.readAt === null &&
-      item.kind === next.kind &&
-      item.sessionId === next.sessionId &&
-      (item.prUrl ?? null) === (next.prUrl ?? null) &&
-      (item.version ?? null) === (next.version ?? null),
-  );
-  const out =
-    existing >= 0
-      ? list.map((item, i) => (i === existing ? { ...entry, id: item.id } : item))
-      : [entry, ...list];
+  const key = itemKey(next);
+  const out = [entry, ...list.filter((item) => itemKey(item) !== key)];
   return out.slice(0, MAX_NOTIFICATIONS);
+}
+
+// Keep the first (newest — the list is newest-first) entry per item, order
+// preserved. Cleans persisted histories written before supersession existed.
+export function collapseSuperseded(list: readonly AppNotification[]): AppNotification[] {
+  const seen = new Set<string>();
+  const out: AppNotification[] = [];
+  for (const item of list) {
+    const key = itemKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 export function markRead(list: readonly AppNotification[], id: string, now: number): AppNotification[] {

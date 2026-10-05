@@ -224,6 +224,29 @@ test('terminal dock: rail toggle, shell tabs, surface gating, persisted height',
     const after = await app.evaluate(() => (globalThis as G).__devinworkspaces.getDevinBounds());
     expect(after?.height).toBe(before!.height - 280 - 6);
 
+    // Drag guide: the blue line must cover the splitter rect (devin column),
+    // not the whole window width — the pane is open by default at 1400x900.
+    const splitterBox = await page.locator('#terminalSplitter').boundingBox();
+    expect(splitterBox).toBeTruthy();
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    expect(splitterBox!.x + splitterBox!.width).toBeLessThan(clientWidth);
+    const splitCx = splitterBox!.x + splitterBox!.width / 2;
+    const splitCy = splitterBox!.y + splitterBox!.height / 2;
+    await page.mouse.move(splitCx, splitCy);
+    await page.mouse.down();
+    await page.mouse.move(splitCx, splitCy - 40, { steps: 3 });
+    // Both splitters render a #dragGuide sibling; the terminal one follows #terminalSplitter.
+    const dragGuide = page.locator('#terminalSplitter + #dragGuide');
+    await expect(dragGuide).toBeVisible();
+    const guideBox = await dragGuide.boundingBox();
+    expect(guideBox).toBeTruthy();
+    expect(guideBox!.x).toBeCloseTo(splitterBox!.x, 0);
+    expect(guideBox!.width).toBeCloseTo(splitterBox!.width, 0);
+    await page.keyboard.press('Escape');
+    await expect(dragGuide).toBeHidden();
+    await page.mouse.up().catch(() => undefined);
+    expect((await state(app)).terminalHeight).toBe(280);
+
     // Native layering: no WebContentsView may cover the dock rect — a stray
     // native view over the strip swallows real clicks before they reach the
     // shell DOM (CDP input bypasses native hit-testing, so DOM assertions miss it).
