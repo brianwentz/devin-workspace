@@ -17,6 +17,7 @@ import { parseSessionId } from '../core/sessions';
 import { log } from './log';
 import { attachRouting } from './routing';
 import { applySessionChange, attachSessionTracking } from './sessions';
+import { cloudSessions } from './cloudSessions';
 import { state } from './state';
 import { applyLayout, detachView, notifyShell } from './window';
 
@@ -261,6 +262,11 @@ export class CloudViewPool {
         to: { kind: kindOf(next), sessionId: sid(next) },
       },
     });
+    // A home→session rekey on the active view may be the composer finishing
+    // a 'New session' — the sidebar files it under the pending folder.
+    if (fromKey === HOME_KEY && next !== HOME_KEY && entry === this.active) {
+      cloudSessions().noteHomeNavigation(next);
+    }
     if (entry === this.active) {
       applySessionChange(next === HOME_KEY ? parseSessionId(url, state.tenantUrl) : next, url);
     }

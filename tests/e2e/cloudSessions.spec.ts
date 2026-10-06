@@ -29,6 +29,7 @@ function hooks(app: ElectronApplication) {
         status: string;
         sessions: Array<{ id: string; url: string; folder: string | null }>;
         folders: string[];
+        cached: boolean;
       }>,
     cloudRefresh: () => evaluate(() => (globalThis as any).__devinworkspaces.cloudRefresh()),
     layoutRects: () =>
@@ -192,6 +193,58 @@ test('cloud session sidebar: data, sections, interactions, geometry', async () =
     await h.cloudRefresh();
     await expect.poll(async () => (await h.cloudState()).sessions.length).toBe(5);
     expect((await h.cloudState()).folders).toEqual(['Alpha', 'pinned']);
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('cloud session sidebar: cached list renders while connecting', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-'));
+  const logFile = join(profile, 'events.jsonl');
+  const raw = JSON.parse(
+    readFileSync(resolve(__dirname, '../fixtures/cloudSessions.json'), 'utf8'),
+  ) as CloudListResult;
+  for (const session of raw.sessions) {
+    session.url = `${fixtures.devinUrl}/sessions/${session.id}`;
+  }
+  // CloudCache shape — the data layer reads it instead of the fixture file.
+  const cachePath = join(profile, 'cloud-cache.json');
+  writeFileSync(
+    cachePath,
+    JSON.stringify({
+      version: 1,
+      tenantUrl: fixtures.devinUrl,
+      savedAt: new Date().toISOString(),
+      sessions: raw.sessions,
+      folders: raw.folders,
+      folderTotals: raw.folderTotals,
+    }),
+  );
+
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_TEST_CLOUD_CACHE: cachePath,
+    DEVIN_WORKSPACES_TEST_SESSIONS_OPEN: '1',
+  });
+  const h = hooks(app);
+  try {
+    await expect.poll(async () => (await h.cloudState()).status).toBe('connecting');
+    expect((await h.cloudState()).cached).toBe(true);
+    expect((await h.cloudState()).sessions).toHaveLength(8);
+
+    const page = await shellPage(app);
+    await expect(page.locator('#sessionsPanel')).toBeVisible();
+    await expect(page.locator('#cloudStatus')).toHaveAttribute(
+      'data-cloud-status',
+      'connecting',
+    );
+    await expect(page.locator('#cloudStatus')).toHaveAttribute(
+      'data-cloud-cached',
+      'true',
+    );
+    await expect(page.locator('#cloudStatus')).toContainText('cached');
+    await expect.poll(async () => page.locator('[data-session-id]').count()).toBe(8);
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await app.close().catch(() => undefined);
@@ -420,6 +473,108 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
       rename!.id,
     )) as { action: string | null };
     expect(renameResult.action).toBe('rename');
+
+    // --- New session: menus, header button, per-folder +, home→session file -
+    await page.locator('#sessionsMenu').click();
+    expect(findMenuItem(await menuItems(), 'New session')).toBeTruthy();
+    await page.locator('[data-section-name="Beta"]').click({ button: 'right' });
+    expect(findMenuItem(await menuItems(), 'New session in folder')).toBeTruthy();
+
+    // Header button: pending folder null, composer loads on the tenant root.
+    await page.locator('#sessionNew').click();
+    expect(
+      (await mutations()).some(
+        (m) =>
+          m.op === 'new-session' &&
+          (m.payload as unknown as { folder: string | null }).folder === null,
+      ),
+    ).toBe(true);
+    await expect.poll(() => currentDevinUrl(app, fixtures)).toBe(`${fixtures.devinUrl}/`);
+
+    // Per-folder +: hover reveals it; a home→session navigation arms a watch —
+    // nothing files until the backend lists the new session.
+    await page.locator('[data-section-name="Alpha"]').hover();
+    await page.locator('[data-folder-new-session="Alpha"]').click();
+    expect(
+      (await mutations()).some(
+        (m) =>
+          m.op === 'new-session' &&
+          (m.payload as unknown as { folder: string | null }).folder === 'Alpha',
+      ),
+    ).toBe(true);
+    await evaluate(
+      () => (globalThis as any).__devinworkspaces.cloudNoteHomeNavigation('abc123'),
+    );
+    const movedTo = (id: string, folder: string | null) =>
+      mutations().then((ms) =>
+        ms.some(
+          (m) =>
+            m.op === 'session-move' &&
+            m.payload.method === 'POST' &&
+            m.payload.path === 'sessions/folder' &&
+            (m.payload.body as { devin_id: string }).devin_id === `devin-${id}` &&
+            (m.payload.body as { folder: string | null }).folder === folder,
+        ),
+      );
+    expect(await movedTo('abc123', 'Alpha')).toBe(false);
+
+    // Backend catches up: the session appears in the fixture, refresh files it.
+    const seed = raw.sessions.find((s) => s.folder === null)!;
+    raw.sessions.push({
+      ...seed,
+      id: 'abc123',
+      acpId: 'devin-abc123',
+      title: 'Watched new session',
+      url: `${fixtures.devinUrl}/sessions/abc123`,
+      folder: null,
+      isPinned: false,
+    });
+    writeFileSync(fixturePath, JSON.stringify(raw));
+    await h.cloudRefresh();
+    await expect.poll(() => movedTo('abc123', 'Alpha')).toBe(true);
+
+    // Top-level new session: the watch still updates the sidebar, files nothing.
+    await app.evaluate(
+      () => (globalThis as any).__devinworkspaces.cloudNewSession(null),
+    );
+    await evaluate(
+      () => (globalThis as any).__devinworkspaces.cloudNoteHomeNavigation('def456'),
+    );
+    raw.sessions.push({
+      ...seed,
+      id: 'def456',
+      acpId: 'devin-def456',
+      title: 'Top-level new session',
+      url: `${fixtures.devinUrl}/sessions/def456`,
+      folder: null,
+      isPinned: false,
+    });
+    writeFileSync(fixturePath, JSON.stringify(raw));
+    await h.cloudRefresh();
+    await expect(page.locator('[data-session-id="def456"]')).toBeVisible();
+    expect(
+      (await mutations()).some(
+        (m) =>
+          m.op === 'session-move' &&
+          (m.payload.body as { devin_id?: string } | undefined)?.devin_id === 'devin-def456',
+      ),
+    ).toBe(false);
+
+    // Navigating home to an ALREADY-listed session files nothing.
+    const sessionMoveCount = (await mutations()).filter(
+      (m) => m.op === 'session-move',
+    ).length;
+    await app.evaluate(
+      (_e, folder) => (globalThis as any).__devinworkspaces.cloudNewSession(folder),
+      'Beta',
+    );
+    await app.evaluate(
+      (_e, id) => (globalThis as any).__devinworkspaces.cloudNoteHomeNavigation(id),
+      'aaaa0000000000000000000000000001',
+    );
+    expect(
+      (await mutations()).filter((m) => m.op === 'session-move'),
+    ).toHaveLength(sessionMoveCount);
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await app.close().catch(() => undefined);

@@ -141,6 +141,12 @@ export function bareSessionId(acpId: string): string {
   return acpId.startsWith('devin-') ? acpId.slice('devin-'.length) : acpId;
 }
 
+// Backoff for the new-session watch: the composer navigates home→/sessions/<id>
+// a few seconds before the backend actually lists the session.
+export const NEW_SESSION_WATCH_DELAYS_MS = [
+  1500, 2500, 4000, 6000, 8000, 10000, 12000,
+];
+
 export function sanitizeToken(message: string, token: string): string {
   return sanitizeMessage(message, token);
 }

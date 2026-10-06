@@ -9,6 +9,7 @@ import {
   GitPullRequestDraft,
   Plus,
   RefreshCw,
+  SquarePen,
 } from 'lucide-react';
 import type { CloudSessionState } from '../../shared/ipc';
 import {
@@ -109,7 +110,7 @@ function statusText(cloud: ReturnType<typeof useCloud>): string {
           })()
         : 'synced';
     case 'connecting':
-      return 'Connecting…';
+      return cloud.cached ? 'Connecting… · showing cached list' : 'Connecting…';
     case 'no-token':
       return 'Sign in to Devin to load sessions';
     case 'error':
@@ -439,6 +440,16 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
         <span className="text-[13px] font-semibold flex-1">Sessions</span>
         <button
+          id="sessionNew"
+          type="button"
+          aria-label="New session"
+          title="New session"
+          className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#1a2735] text-[#8b9bb0] hover:text-[#c9d4e3]"
+          onClick={() => window.devinworkspaces.cloudNewSession(null)}
+        >
+          <SquarePen size={13} />
+        </button>
+        <button
           id="sessionFolderNew"
           type="button"
           aria-label="New folder"
@@ -478,6 +489,7 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
       <div
         id="cloudStatus"
         data-cloud-status={cloud.status}
+        data-cloud-cached={cloud.cached}
         className="px-3 pb-1.5 text-[11px] text-[#8b9bb0] truncate"
         title={cloud.status === 'error' ? (cloud.error ?? '') : undefined}
       >
@@ -571,87 +583,104 @@ export function SessionSidebar({ rect }: { rect: Rect }) {
                   />
                 </div>
               ) : (
-              <button
-                type="button"
-                data-section-kind={sectionItem.kind}
-                data-section-name={sectionItem.name}
-                data-drop-target={dropTarget === sectionItem.name}
-                data-drop-before={dropBefore === sectionItem.name}
-                draggable={sectionItem.kind === 'folder' && isEditableFolder(sectionItem.name)}
-                onDragStart={(e) => {
-                  e.dataTransfer.setData(FOLDER_MIME, sectionItem.name);
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                onDragOver={(e) => {
-                  const types = e.dataTransfer.types;
-                  const isFolderTarget = isMoveTarget(sectionItem);
-                  if (types.includes(SESSION_MIME) && isFolderTarget) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    setDropTarget(sectionItem.name);
-                  } else if (
-                    types.includes(FOLDER_MIME) &&
-                    sectionItem.kind === 'folder' &&
-                    isEditableFolder(sectionItem.name)
-                  ) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    setDropBefore(sectionItem.name);
-                  }
-                }}
-                onDragLeave={() => {
-                  if (dropTarget === sectionItem.name) setDropTarget(null);
-                  if (dropBefore === sectionItem.name) setDropBefore(null);
-                }}
-                onDrop={(e) => {
-                  const sessionId = e.dataTransfer.getData(SESSION_MIME);
-                  const target = isMoveTarget(sectionItem)
-                    ? sectionItem.kind === 'recent'
-                      ? null
-                      : sectionItem.name
-                    : undefined;
-                  if (sessionId && target !== undefined) {
-                    e.preventDefault();
-                    moveSessionTo(sessionId, target);
-                  }
-                  const folder = e.dataTransfer.getData(FOLDER_MIME);
-                  if (
-                    folder &&
-                    folder !== sectionItem.name &&
-                    sectionItem.kind === 'folder' &&
-                    isEditableFolder(sectionItem.name)
-                  ) {
-                    e.preventDefault();
-                    const names = userFolderNames.filter((n) => n !== folder);
-                    names.splice(names.indexOf(sectionItem.name), 0, folder);
-                    reorderTo(names);
-                  }
-                  setDropTarget(null);
-                  setDropBefore(null);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  if (sectionItem.kind === 'folder' && isEditableFolder(sectionItem.name)) {
-                    void folderMenu(sectionItem.name, e.clientX, e.clientY);
-                  }
-                }}
-                className={`w-full flex items-center gap-1 px-1 py-1 ${sessionFolderHeaderClass} text-[#8b9bb0] hover:text-[#c9d4e3] data-[drop-target=true]:bg-[#1f2f42] data-[drop-before=true]:border-t-2 data-[drop-before=true]:border-t-[#54749c]`}
-                onClick={() => toggleFolder(sectionItem.name)}
-              >
-                {sectionItem.collapsed ? (
-                  <ChevronRight size={12} />
-                ) : (
-                  <ChevronDown size={12} />
-                )}
-                <span className="flex-1 text-left truncate">
-                  {SECTION_LABELS[sectionItem.name] ?? sectionItem.name}
+                <span className="group flex items-center">
+                  <button
+                    type="button"
+                    data-section-kind={sectionItem.kind}
+                    data-section-name={sectionItem.name}
+                    data-drop-target={dropTarget === sectionItem.name}
+                    data-drop-before={dropBefore === sectionItem.name}
+                    draggable={sectionItem.kind === 'folder' && isEditableFolder(sectionItem.name)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(FOLDER_MIME, sectionItem.name);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      const types = e.dataTransfer.types;
+                      const isFolderTarget = isMoveTarget(sectionItem);
+                      if (types.includes(SESSION_MIME) && isFolderTarget) {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        setDropTarget(sectionItem.name);
+                      } else if (
+                        types.includes(FOLDER_MIME) &&
+                        sectionItem.kind === 'folder' &&
+                        isEditableFolder(sectionItem.name)
+                      ) {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        setDropBefore(sectionItem.name);
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (dropTarget === sectionItem.name) setDropTarget(null);
+                      if (dropBefore === sectionItem.name) setDropBefore(null);
+                    }}
+                    onDrop={(e) => {
+                      const sessionId = e.dataTransfer.getData(SESSION_MIME);
+                      const target = isMoveTarget(sectionItem)
+                        ? sectionItem.kind === 'recent'
+                          ? null
+                          : sectionItem.name
+                        : undefined;
+                      if (sessionId && target !== undefined) {
+                        e.preventDefault();
+                        moveSessionTo(sessionId, target);
+                      }
+                      const folder = e.dataTransfer.getData(FOLDER_MIME);
+                      if (
+                        folder &&
+                        folder !== sectionItem.name &&
+                        sectionItem.kind === 'folder' &&
+                        isEditableFolder(sectionItem.name)
+                      ) {
+                        e.preventDefault();
+                        const names = userFolderNames.filter((n) => n !== folder);
+                        names.splice(names.indexOf(sectionItem.name), 0, folder);
+                        reorderTo(names);
+                      }
+                      setDropTarget(null);
+                      setDropBefore(null);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (sectionItem.kind === 'folder' && isEditableFolder(sectionItem.name)) {
+                        void folderMenu(sectionItem.name, e.clientX, e.clientY);
+                      }
+                    }}
+                    className={`flex-1 min-w-0 flex items-center gap-1 px-1 py-1 ${sessionFolderHeaderClass} text-[#8b9bb0] hover:text-[#c9d4e3] data-[drop-target=true]:bg-[#1f2f42] data-[drop-before=true]:border-t-2 data-[drop-before=true]:border-t-[#54749c]`}
+                    onClick={() => toggleFolder(sectionItem.name)}
+                  >
+                    {sectionItem.collapsed ? (
+                      <ChevronRight size={12} />
+                    ) : (
+                      <ChevronDown size={12} />
+                    )}
+                    <span className="flex-1 text-left truncate">
+                      {SECTION_LABELS[sectionItem.name] ?? sectionItem.name}
+                    </span>
+                    <span className="text-[11px] leading-[14px] text-[#5c6b80]">
+                      {sectionItem.total !== null
+                        ? `${sectionItem.nodes.length} / ${sectionItem.total}`
+                        : sectionItem.nodes.length}
+                    </span>
+                  </button>
+                  {sectionItem.kind === 'folder' && isEditableFolder(sectionItem.name) && (
+                    <button
+                      type="button"
+                      data-folder-new-session={sectionItem.name}
+                      aria-label="New session in folder"
+                      title="New session in folder"
+                      className="w-5 h-5 mr-1 shrink-0 flex items-center justify-center rounded text-[#5c6b80] hover:text-[#c9d4e3] hover:bg-[#1a2735] opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.devinworkspaces.cloudNewSession(sectionItem.name);
+                      }}
+                    >
+                      <Plus size={12} />
+                    </button>
+                  )}
                 </span>
-                <span className="text-[11px] leading-[14px] text-[#5c6b80]">
-                  {sectionItem.total !== null
-                    ? `${sectionItem.nodes.length} / ${sectionItem.total}`
-                    : sectionItem.nodes.length}
-                </span>
-              </button>
               )}
               {!sectionItem.collapsed && (
                 <>
