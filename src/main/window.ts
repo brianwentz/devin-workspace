@@ -1,9 +1,11 @@
 import { screen, View, type WebContentsView } from 'electron';
 import {
   clampPaneWidth,
+  clampSessionsWidth,
   clampTerminalHeight,
   computeBounds,
   fractionFromPx,
+  leftChrome,
   MIN_DEVIN_WIDTH,
   paneToggleWindowWidth,
   RAIL_WIDTH,
@@ -18,6 +20,8 @@ import { effectiveScope } from '../core/tabModel';
 import { IpcChannels, SettingsSchema, type ShellState } from '../shared/ipc';
 
 import { ensureAnalyticsView } from './analytics';
+import { cloudSessions } from './cloudSessions';
+import { cloudViews } from './cloudViews';
 import { terminalHost } from './local/terminalHost';
 import { log } from './log';
 import { notificationsUnread } from './notifications';
@@ -103,7 +107,19 @@ export function layoutState(): LayoutState {
     paneFraction: state.paneFraction,
     terminalOpen: terminalVisible(),
     terminalHeight: state.terminalHeight,
+    // The sessions column only occupies space on the Cloud surface.
+    sessionsOpen: state.sessionsOpen && state.surface === 'cloud',
+    sessionsWidth: state.sessionsWidth,
   };
+}
+
+// Sessions column toggle — unlike the pane, this is an in-window shell
+// overlay column: no window resize, just a relayout + shell notify.
+export function setSessionsOpen(open: boolean, source: string): void {
+  if (state.sessionsOpen === open) return;
+  state.sessionsOpen = open;
+  applyLayout();
+  log('shell', 'sessions-panel', { detail: { open, source } });
 }
 
 export function publicState(): ShellState {
@@ -111,6 +127,9 @@ export function publicState(): ShellState {
     paneOpen: state.paneOpen,
     paneFraction: state.paneFraction,
     paneCollapsed: state.paneCollapsed,
+    sessionsOpen: state.sessionsOpen,
+    sessionsWidth: state.sessionsWidth,
+    sessionsCollapsed: state.sessionsCollapsed,
     surface: state.surface,
     currentSessionId: state.currentSessionId,
     localSessionId: state.localSessionId,
@@ -144,6 +163,7 @@ export function publicState(): ShellState {
       unreadCount: notificationsUnread(),
       panelOpen: state.notificationsPanelOpen,
     },
+    cloud: cloudSessions().snapshot(),
     update: updateState(),
     terminalOpen: state.terminalOpen,
     terminalHeight: state.terminalHeight,
@@ -223,14 +243,16 @@ export function overlayOpen(): boolean {
 export function lowerShell(): void {
   // See raiseShell — never restack during shutdown.
   if (state.shuttingDown) return;
-  const { windowRef, shellView, devinView, analyticsView, tabManager } = state;
+  const { windowRef, shellView, analyticsView, tabManager } = state;
   if (!windowRef || !shellView) return;
   shellView.setBackgroundColor('#111827');
+  const pooled = cloudViews().views();
+  const active = cloudViews().activeView();
   const children = [...windowRef.contentView.children];
   for (const child of children) {
     if (
       child === shellView ||
-      child === devinView ||
+      pooled.includes(child as WebContentsView) ||
       child === analyticsView ||
       tabManager?.getViews().includes(child as WebContentsView)
     ) {
@@ -238,7 +260,7 @@ export function lowerShell(): void {
     }
   }
   windowRef.contentView.addChildView(shellView, 0);
-  if (state.surface === 'cloud' && devinView) windowRef.contentView.addChildView(devinView);
+  if (state.surface === 'cloud' && active) windowRef.contentView.addChildView(active);
   if (state.surface === 'analytics' && analyticsView)
     windowRef.contentView.addChildView(analyticsView);
   if (state.paneOpen && !state.paneCollapsed) addAtTop(tabManager?.activeView ?? null);
@@ -258,11 +280,16 @@ export function syncScope(): void {
 function applyBounds(bounds: WindowBounds, size: { width: number; height: number }): void {
   const { shellView, devinView, tabManager } = state;
   state.paneCollapsed = bounds.paneCollapsed;
+  state.sessionsCollapsed = bounds.sessionsCollapsed;
   shellView?.setBounds({ x: 0, y: 0, width: size.width, height: size.height });
-  if (state.surface === 'cloud') {
-    devinView?.setBounds(nativeBounds(bounds.devin));
-  } else {
-    devinView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  // Only the ACTIVE pooled view is laid out/attached; every other pooled view
+  // gets zero bounds and stays detached.
+  for (const view of cloudViews().views()) {
+    if (view === devinView && state.surface === 'cloud') {
+      view.setBounds(nativeBounds(bounds.devin));
+    } else {
+      view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    }
   }
   if (state.surface === 'analytics') {
     ensureAnalyticsView().setBounds(nativeBounds(bounds.devin));
@@ -281,8 +308,10 @@ export function applyLayout(): void {
   applyBounds(bounds, windowRef.getContentBounds());
   if (!state.dragging) {
     ensureShellBottom();
-    if (state.surface === 'cloud') ensureAttached(devinView);
-    else detachView(devinView);
+    for (const view of cloudViews().views()) {
+      if (view === devinView && state.surface === 'cloud') ensureAttached(view);
+      else detachView(view);
+    }
     if (state.surface === 'analytics') ensureAttached(state.analyticsView);
     else detachView(state.analyticsView);
     const activeTabView =
@@ -303,6 +332,7 @@ export function cancelDrag(restore: boolean, reason: string): void {
   state.dragTimer = null;
   if (restore) {
     if (state.dragAxis === 'x') state.paneFraction = state.dragStartFraction;
+    else if (state.dragAxis === 's') state.sessionsWidth = state.dragStartSessionsWidth;
     else state.terminalHeight = state.dragStartHeight;
   }
   log('shell', 'drag-cancel', {
@@ -319,15 +349,18 @@ export function cancelDrag(restore: boolean, reason: string): void {
   state.shellView?.webContents.send(IpcChannels.layoutDragReset);
 }
 
-export function beginDrag(axis: 'x' | 'y', pos: number): void {
+export function beginDrag(axis: 'x' | 'y' | 's', pos: number): void {
   const { windowRef, shellView } = state;
   if (!windowRef || !shellView || state.dragging) return;
   if (axis === 'x' && (!state.paneOpen || state.paneCollapsed)) return;
   if (axis === 'y' && !terminalVisible()) return;
+  if (axis === 's' && (!state.sessionsOpen || state.sessionsCollapsed || state.surface !== 'cloud'))
+    return;
   state.dragging = true;
   state.dragAxis = axis;
   state.dragStartFraction = state.paneFraction;
   state.dragStartHeight = state.terminalHeight;
+  state.dragStartSessionsWidth = state.sessionsWidth;
   state.dragLastX = pos;
   if (state.dragTimer) clearTimeout(state.dragTimer);
   state.dragTimer = setTimeout(() => cancelDrag(true, 'safety-timeout'), 10_000);
@@ -344,10 +377,18 @@ export function moveDrag(pos: number): void {
   let changed = false;
   if (state.dragAxis === 'x') {
     // Pointer → pane px (guarded) → stored as a fraction of the available width.
-    const panePx = clampPaneWidth(content.width - pos - SPLITTER_WIDTH, content.width);
+    const panePx = clampPaneWidth(
+      content.width - pos - SPLITTER_WIDTH,
+      content.width,
+      leftChrome(layoutState(), content.width),
+    );
     const next = fractionFromPx(panePx, content.width);
     changed = next !== state.paneFraction;
     state.paneFraction = next;
+  } else if (state.dragAxis === 's') {
+    const next = clampSessionsWidth(pos - RAIL_WIDTH, content.width);
+    changed = next !== state.sessionsWidth;
+    state.sessionsWidth = next;
   } else {
     const next = clampTerminalHeight(
       content.height - pos - SPLITTER_WIDTH / 2,

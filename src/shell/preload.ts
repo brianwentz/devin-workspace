@@ -3,6 +3,7 @@ import type { AppNotification } from '../core/notificationModel';
 import type { CredentialEntry } from '../core/credentials';
 import {
   IpcChannels,
+  type BadgeRender,
   type IdentityInfo,
   type SessionPr,
   type LocalResult,
@@ -210,8 +211,8 @@ const api = {
   openLink: (url: string) => {
     if (typeof url === 'string' && url.length < 8192) ipcRenderer.send(IpcChannels.linkOpen, url);
   },
-  dragStart: (axis: 'x' | 'y', pos: number) => {
-    if ((axis === 'x' || axis === 'y') && Number.isFinite(pos)) {
+  dragStart: (axis: 'x' | 'y' | 's', pos: number) => {
+    if ((axis === 'x' || axis === 'y' || axis === 's') && Number.isFinite(pos)) {
       ipcRenderer.send(IpcChannels.layoutDragStart, { axis, pos });
     }
   },
@@ -279,6 +280,83 @@ const api = {
   identity: () => ipcRenderer.invoke(IpcChannels.notificationsIdentity) as Promise<IdentityInfo>,
   identityReset: () => ipcRenderer.send(IpcChannels.notificationsIdentityReset),
   updateInstall: () => ipcRenderer.send(IpcChannels.updateInstall),
+  // Cloud session sidebar.
+  cloudOpen: (sessionId: string) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudOpen, { sessionId });
+    }
+  },
+  cloudRefresh: () => ipcRenderer.send(IpcChannels.cloudRefresh),
+  cloudLoadMore: (folder: string) => {
+    if (isString(folder) && folder.length >= 1 && folder.length <= 256) {
+      ipcRenderer.send(IpcChannels.cloudLoadMore, { folder });
+    }
+  },
+  cloudPanel: (open: boolean) => ipcRenderer.send(IpcChannels.cloudPanel, { open }),
+  cloudPrefetch: (sessionId: string) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudPrefetch, { sessionId });
+    }
+  },
+  // Cloud sidebar mutations + native context menus.
+  cloudFolderCreate: (name: string) => {
+    const trimmed = name.trim();
+    if (trimmed.length >= 1 && trimmed.length <= 100) {
+      ipcRenderer.send(IpcChannels.cloudFolderCreate, { name: trimmed });
+    }
+  },
+  cloudFolderRename: (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (isString(oldName) && trimmed.length >= 1 && trimmed.length <= 100) {
+      ipcRenderer.send(IpcChannels.cloudFolderRename, { oldName, newName: trimmed });
+    }
+  },
+  cloudFolderDelete: (name: string) => {
+    if (isString(name)) ipcRenderer.send(IpcChannels.cloudFolderDelete, { name });
+  },
+  cloudFolderReorder: (names: string[]) => {
+    if (Array.isArray(names)) ipcRenderer.send(IpcChannels.cloudFolderReorder, { names });
+  },
+  cloudSessionMove: (sessionId: string, folder: string | null) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudSessionMove, { sessionId, folder });
+    }
+  },
+  cloudSessionArchive: (sessionId: string, archive: boolean) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudSessionArchive, { sessionId, archive });
+    }
+  },
+  cloudCopyLink: (sessionId: string) => {
+    if (isString(sessionId) && sessionId.length <= 128) {
+      ipcRenderer.send(IpcChannels.cloudCopyLink, { sessionId });
+    }
+  },
+  cloudContextMenu: (request: {
+    kind: 'session' | 'folder' | 'header';
+    sessionId?: string;
+    name?: string;
+    x: number;
+    y: number;
+  }) =>
+    ipcRenderer.invoke(IpcChannels.cloudContextMenu, request) as Promise<{
+      action: 'rename' | 'new-folder' | null;
+    }>,
+  cloudShowArchived: (value: boolean) =>
+    ipcRenderer.send(IpcChannels.cloudShowArchived, { value }),
+  // Taskbar badge: main asks the shell to render, replies get {count,size}.
+  onBadgeRender: (callback: (request: BadgeRender) => void) => {
+    const listener = (_event: unknown, request: BadgeRender) => callback(request);
+    ipcRenderer.on(IpcChannels.badgeRender, listener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.badgeRender, listener);
+    };
+  },
+  badgeRendered: (dataUrl: string | null) =>
+    ipcRenderer.invoke(IpcChannels.badgeRendered, { dataUrl }) as Promise<{
+      count: number;
+      size: number;
+    }>,
   updateCheck: (source: 'settings' | 'manual') =>
     ipcRenderer.send(IpcChannels.updateCheck, { source }),
   releaseNotes: () =>

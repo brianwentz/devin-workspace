@@ -7,6 +7,7 @@ import { TerminalView } from './TerminalView';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { useShellState } from '../store';
 import { useLocalState } from './store';
+import { sessionTitleClass } from '../components/sessionRowStyles';
 import { clearDraft, getDraft, setDraft as setStoredDraft } from './drafts';
 
 type Session = LocalStatePublic['sessions'][string];
@@ -357,7 +358,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
                 data-history-source={item.historySource}
                 onClick={() => void openSession(item)}
               >
-                <div className="session-title flex items-center gap-1 truncate">
+                <div className={`session-title flex items-center gap-1 truncate ${sessionTitleClass}`}>
                   {item.terminalOwned && (
                     <span className="session-terminal-marker text-[#83b6ff]" title="Open in Terminal">
                       &gt;_
@@ -365,7 +366,7 @@ export function LocalPanel({ style }: { style: CSSProperties }) {
                   )}
                   <span className="truncate">{item.title || 'Untitled session'}</span>
                 </div>
-                <div className="flex items-center gap-2 text-[10px] text-[#7f8ca0]">
+                <div className="flex items-center gap-2 text-[11px] leading-[14px] text-[#7f8ca0]">
                   <span>{formatDate(item.createdAt)}</span>
                   {item.running && <span className="spinner" />}
                   {item.historySource === 'local-index' && (

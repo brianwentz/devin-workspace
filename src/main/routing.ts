@@ -13,6 +13,8 @@ import { log } from './log';
 import { allowExternalEnabled } from './settings';
 import { fixtureOrigins, state, type ViewName } from './state';
 import { GLOBAL } from '../core/tabModel';
+import { keyForUrl } from '../core/viewPool';
+import { cloudViews } from './cloudViews';
 import { applyLayout, notifyShell, setPaneOpen } from './window';
 import { handleShortcut } from './shortcuts';
 
@@ -75,11 +77,9 @@ function openGitHubTab(url: string, background: boolean): string | undefined {
 
 // Navigate the Cloud view (also used by the scope menu — F7).
 export function loadInDevinView(url: string): void {
-  if (!state.devinView) return;
+  if (!state.cloudViewsRef) return;
   state.surface = 'cloud';
-  state.devinView.webContents.loadURL(url).catch((error: unknown) => {
-    log('devin', 'load-error', { url, detail: { message: String(error) } });
-  });
+  cloudViews().show(keyForUrl(url, state.tenantUrl), url);
 }
 
 // Apply a LinkRouter decision. Returns the decision so callers can preventDefault etc.
