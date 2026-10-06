@@ -491,8 +491,8 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
     ).toBe(true);
     await expect.poll(() => currentDevinUrl(app, fixtures)).toBe(`${fixtures.devinUrl}/`);
 
-    // Per-folder +: hover reveals it; home→session navigation files the new
-    // session under that folder.
+    // Per-folder +: hover reveals it; a home→session navigation arms a watch —
+    // nothing files until the backend lists the new session.
     await page.locator('[data-section-name="Alpha"]').hover();
     await page.locator('[data-folder-new-session="Alpha"]').click();
     expect(
@@ -505,21 +505,64 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
     await evaluate(
       () => (globalThis as any).__devinworkspaces.cloudNoteHomeNavigation('abc123'),
     );
+    const movedTo = (id: string, folder: string | null) =>
+      mutations().then((ms) =>
+        ms.some(
+          (m) =>
+            m.op === 'session-move' &&
+            m.payload.method === 'POST' &&
+            m.payload.path === 'sessions/folder' &&
+            (m.payload.body as { devin_id: string }).devin_id === `devin-${id}` &&
+            (m.payload.body as { folder: string | null }).folder === folder,
+        ),
+      );
+    expect(await movedTo('abc123', 'Alpha')).toBe(false);
+
+    // Backend catches up: the session appears in the fixture, refresh files it.
+    const seed = raw.sessions.find((s) => s.folder === null)!;
+    raw.sessions.push({
+      ...seed,
+      id: 'abc123',
+      acpId: 'devin-abc123',
+      title: 'Watched new session',
+      url: `${fixtures.devinUrl}/sessions/abc123`,
+      folder: null,
+      isPinned: false,
+    });
+    writeFileSync(fixturePath, JSON.stringify(raw));
+    await h.cloudRefresh();
+    await expect.poll(() => movedTo('abc123', 'Alpha')).toBe(true);
+
+    // Top-level new session: the watch still updates the sidebar, files nothing.
+    await app.evaluate(
+      () => (globalThis as any).__devinworkspaces.cloudNewSession(null),
+    );
+    await evaluate(
+      () => (globalThis as any).__devinworkspaces.cloudNoteHomeNavigation('def456'),
+    );
+    raw.sessions.push({
+      ...seed,
+      id: 'def456',
+      acpId: 'devin-def456',
+      title: 'Top-level new session',
+      url: `${fixtures.devinUrl}/sessions/def456`,
+      folder: null,
+      isPinned: false,
+    });
+    writeFileSync(fixturePath, JSON.stringify(raw));
+    await h.cloudRefresh();
+    await expect(page.locator('[data-session-id="def456"]')).toBeVisible();
     expect(
       (await mutations()).some(
         (m) =>
-          m.op === 'session-file' &&
-          m.payload.method === 'POST' &&
-          m.payload.path === 'sessions/folder' &&
-          (m.payload.body as { devin_id: string; folder: string }).devin_id ===
-            'devin-abc123' &&
-          (m.payload.body as { devin_id: string; folder: string }).folder === 'Alpha',
+          m.op === 'session-move' &&
+          (m.payload.body as { devin_id?: string } | undefined)?.devin_id === 'devin-def456',
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     // Navigating home to an ALREADY-listed session files nothing.
-    const sessionFileCount = (await mutations()).filter(
-      (m) => m.op === 'session-file',
+    const sessionMoveCount = (await mutations()).filter(
+      (m) => m.op === 'session-move',
     ).length;
     await app.evaluate(
       (_e, folder) => (globalThis as any).__devinworkspaces.cloudNewSession(folder),
@@ -530,8 +573,8 @@ test('cloud session sidebar: mutations, menus, PR badges', async () => {
       'aaaa0000000000000000000000000001',
     );
     expect(
-      (await mutations()).filter((m) => m.op === 'session-file'),
-    ).toHaveLength(sessionFileCount);
+      (await mutations()).filter((m) => m.op === 'session-move'),
+    ).toHaveLength(sessionMoveCount);
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await app.close().catch(() => undefined);

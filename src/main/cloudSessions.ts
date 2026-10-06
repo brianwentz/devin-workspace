@@ -12,6 +12,7 @@ import {
   buildFolderPageParams,
   buildInitializeParams,
   buildListParams,
+  NEW_SESSION_WATCH_DELAYS_MS,
   parseListResult,
   parseUsersInfo,
   sanitizeToken,
@@ -110,6 +111,13 @@ class CloudSessions {
   private cached = false;
   private lastCacheJson = '';
   private pendingNewSession: { folder: string; at: number } | null = null;
+  private newSessionWatch: {
+    sessionId: string;
+    folder: string | null;
+    startedAt: number;
+    attempt: number;
+  } | null = null;
+  private newSessionTimer: NodeJS.Timeout | null = null;
   private lastError: { op: string; message: string } | null = null;
   // Test mode records every mutation ({op, method, path, body}) — no network.
   private mutations: { op: string; payload: Record<string, unknown> }[] = [];
@@ -265,8 +273,9 @@ class CloudSessions {
   // 'New session' entry points record a pending folder, then reuse the
   // Ctrl+N path (the web app's composer lives on the tenant root). When the
   // HOME view navigates to the session the composer created, rekey() calls
-  // noteHomeNavigation which files it via the sessions/folder mutation.
+  // noteHomeNavigation which watches for it to be listed, then files it.
   newSession(folder: string | null): void {
+    this.cancelNewSessionWatch();
     this.pendingNewSession = folder ? { folder, at: Date.now() } : null;
     if (testMode) {
       this.mutations.push({ op: 'new-session', payload: { folder } });
@@ -275,24 +284,71 @@ class CloudSessions {
     openNewSession();
   }
 
+  // The composer navigates home→/sessions/<id> seconds before the backend
+  // lists it, so instead of filing immediately we watch: re-list on a backoff
+  // until the id appears (settleNewSession) or the delays run out.
   noteHomeNavigation(sessionId: string): void {
-    const pending = this.pendingNewSession;
-    if (!pending) return;
-    this.pendingNewSession = null;
-    if (Date.now() - pending.at > NEW_SESSION_FILE_WINDOW_MS) return;
-    // The id is already listed — the user clicked an existing session in the
-    // web app's own sidebar, not a freshly created one.
     if (this.sessions.some((s) => s.id === sessionId)) {
+      // Already listed — the user clicked an existing session in the web
+      // app's own sidebar, not a freshly created one.
+      this.pendingNewSession = null;
       log('cloud', 'cloud-new-session-skip', { detail: { reason: 'existing' } });
       return;
     }
-    void this.mutate(
-      'session-file',
-      'POST',
-      'sessions/folder',
-      { devin_id: `devin-${sessionId}`, folder: pending.folder },
-      (d) => d,
-    );
+    const pending = this.pendingNewSession;
+    this.pendingNewSession = null;
+    const folder =
+      pending && Date.now() - pending.at <= NEW_SESSION_FILE_WINDOW_MS
+        ? pending.folder
+        : null;
+    this.cancelNewSessionWatch();
+    this.newSessionWatch = { sessionId, folder, startedAt: Date.now(), attempt: 0 };
+    this.scheduleNewSessionWatch();
+  }
+
+  private scheduleNewSessionWatch(): void {
+    const watch = this.newSessionWatch;
+    if (!watch) return;
+    if (watch.attempt >= NEW_SESSION_WATCH_DELAYS_MS.length) {
+      this.newSessionWatch = null;
+      log('cloud', 'cloud-new-session-skip', {
+        detail: { reason: 'not-listed', attempts: watch.attempt },
+      });
+      return;
+    }
+    const delay = NEW_SESSION_WATCH_DELAYS_MS[watch.attempt];
+    watch.attempt++;
+    this.newSessionTimer = setTimeout(() => {
+      this.newSessionTimer = null;
+      if (!this.newSessionWatch) return;
+      if (this.socket?.readyState === WebSocket.OPEN) void this.list('new-session');
+      this.scheduleNewSessionWatch();
+    }, delay);
+  }
+
+  private cancelNewSessionWatch(): void {
+    this.newSessionWatch = null;
+    if (this.newSessionTimer) {
+      clearTimeout(this.newSessionTimer);
+      this.newSessionTimer = null;
+    }
+  }
+
+  // Runs after every successful list (live socket or fixture reload): once the
+  // watched id shows up, file it under the pending folder via sessionMove.
+  private settleNewSession(): void {
+    const watch = this.newSessionWatch;
+    if (!watch) return;
+    if (!this.sessions.some((s) => s.id === watch.sessionId)) return;
+    this.cancelNewSessionWatch();
+    log('cloud', 'cloud-new-session-settled', {
+      detail: {
+        attempts: watch.attempt,
+        durationMs: Date.now() - watch.startedAt,
+        filed: watch.folder !== null,
+      },
+    });
+    if (watch.folder !== null) void this.sessionMove(watch.sessionId, watch.folder);
   }
 
   prefetchSession(sessionId: string): void {
@@ -443,6 +499,12 @@ class CloudSessions {
   sessionMove(sessionId: string, folder: string | null): Promise<void> {
     const session = this.sessions.find((s) => s.id === sessionId);
     if (!session) return Promise.resolve();
+    // The target may have been deleted between 'New session in folder' and
+    // the session actually being listed.
+    if (folder !== null && !this.folders.includes(folder)) {
+      log('cloud', 'cloud-new-session-skip', { detail: { reason: 'folder-gone' } });
+      return Promise.resolve();
+    }
     if (folder === null) {
       return this.mutate(
         'session-move',
@@ -710,6 +772,7 @@ class CloudSessions {
       log('cloud', 'cloud-error', { detail: { kind: 'fixture', message: String(error).slice(0, 200) } });
     }
     this.emit();
+    this.settleNewSession();
   }
 
   // --- token acquisition --------------------------------------------------
@@ -1067,6 +1130,7 @@ class CloudSessions {
           },
         });
         this.emit();
+        this.settleNewSession();
         if (!testMode) this.writeCache();
         // A totally empty result usually means the page is on another org for
         // multi-org users — re-read devinDebug.getOrgId() once per connection.
@@ -1204,6 +1268,7 @@ class CloudSessions {
   }
 
   private clearTimers(): void {
+    this.cancelNewSessionWatch();
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.pollTimer) clearTimeout(this.pollTimer);
     if (this.connectTimer) clearTimeout(this.connectTimer);
