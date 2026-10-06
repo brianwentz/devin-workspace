@@ -10,6 +10,7 @@ import {
   resetHistory,
   sessionsFor,
   setPermission,
+  setTerminalOwned,
   startPrompt,
   titleFromPrompt,
   upsertAgent,
@@ -41,14 +42,14 @@ describe('localModel reducers', () => {
   });
 
   it('startPrompt adds a user message, sets running and a title from the first prompt', () => {
-    const state = startPrompt(withSession(), SID, 'Hello   there, Devin — please fix the build');
+    const state = startPrompt(withSession(), SID, 'Hello   there, Devin — please fix the build', '2026-10-01T00:00:01Z');
     const session = state.sessions[SID]!;
     expect(session.running).toBe(true);
     expect(session.messages).toEqual([
       { role: 'user', blocks: [{ type: 'text', text: 'Hello   there, Devin — please fix the build' }] },
     ]);
     expect(session.title).toBe('Hello there, Devin — please fix the build');
-    const second = startPrompt(finishPrompt(state, SID, 'end_turn'), SID, 'second');
+    const second = startPrompt(finishPrompt(state, SID, 'end_turn'), SID, 'second', '2026-10-01T00:00:02Z');
     expect(second.sessions[SID]!.title).toBe('Hello there, Devin — please fix the build');
     expect(second.sessions[SID]!.lastStopReason).toBeUndefined();
   });
@@ -61,7 +62,7 @@ describe('localModel reducers', () => {
   });
 
   it('concatenates agent_message_chunk text into one block and starts an agent message', () => {
-    let state = startPrompt(withSession(), SID, 'hi');
+    let state = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
     state = applyUpdate(state, SID, { sessionUpdate: 'agent_message_chunk', content: text('p') });
     state = applyUpdate(state, SID, { sessionUpdate: 'agent_message_chunk', content: text('o') });
     state = applyUpdate(state, SID, { sessionUpdate: 'agent_message_chunk', content: text('ng') });
@@ -71,7 +72,7 @@ describe('localModel reducers', () => {
   });
 
   it('keeps thought chunks in separate thought blocks and concatenates consecutive thoughts', () => {
-    let state = startPrompt(withSession(), SID, 'hi');
+    let state = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
     state = applyUpdate(state, SID, { sessionUpdate: 'agent_thought_chunk', content: text('think ') });
     state = applyUpdate(state, SID, { sessionUpdate: 'agent_thought_chunk', content: text('hard') });
     state = applyUpdate(state, SID, { sessionUpdate: 'agent_message_chunk', content: text('answer') });
@@ -112,7 +113,7 @@ describe('localModel reducers', () => {
   });
 
   it('ignores user_message_chunk echoes while a prompt is running', () => {
-    let state = startPrompt(withSession(), SID, 'hello');
+    let state = startPrompt(withSession(), SID, 'hello', '2026-10-01T00:00:01Z');
     const before = state;
     state = applyUpdate(state, SID, { sessionUpdate: 'user_message_chunk', content: text('hello') });
     expect(state).toBe(before);
@@ -141,7 +142,7 @@ describe('localModel reducers', () => {
   });
 
   it('tool_call creates a card and a tool_call block; tool_call_update merges fields', () => {
-    let state = startPrompt(withSession(), SID, 'hi');
+    let state = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
     state = applyUpdate(state, SID, {
       sessionUpdate: 'tool_call',
       toolCallId: 'tc1',
@@ -233,7 +234,7 @@ describe('localModel reducers', () => {
   it('session_info_update sets the title; unknown updates are ignored', () => {
     let state = withSession();
     const before = state;
-    state = applyUpdate(state, SID, { sessionUpdate: 'usage_update', used: 1, size: 2 });
+    state = applyUpdate(state, SID, { sessionUpdate: 'some_future_kind' });
     expect(state).toBe(before);
     state = applyUpdate(state, SID, { sessionUpdate: 'session_info_update', title: 'Named' });
     expect(state.sessions[SID]!.title).toBe('Named');
@@ -260,7 +261,7 @@ describe('localModel reducers', () => {
 
   it('finishPrompt records each stopReason, clears running and pending permission', () => {
     for (const reason of ['end_turn', 'cancelled', 'max_tokens', 'refusal', 'max_turn_requests'] as const) {
-      let state = startPrompt(withSession(), SID, 'go');
+      let state = startPrompt(withSession(), SID, 'go', '2026-10-01T00:00:01Z');
       state = setPermission(state, SID, { requestId: 'r', toolCallId: 't', title: 'x', options: [] });
       state = finishPrompt(state, SID, reason);
       const session = state.sessions[SID]!;
@@ -269,13 +270,18 @@ describe('localModel reducers', () => {
       expect(session.pendingPermission).toBeUndefined();
       expect(session.error).toBeUndefined();
     }
-    const failed = finishPrompt(startPrompt(withSession(), SID, 'go'), SID, 'error', 'agent crashed');
+    const failed = finishPrompt(
+      startPrompt(withSession(), SID, 'go', '2026-10-01T00:00:01Z'),
+      SID,
+      'error',
+      { error: 'agent crashed' },
+    );
     expect(failed.sessions[SID]!.lastStopReason).toBe('error');
     expect(failed.sessions[SID]!.error).toBe('agent crashed');
   });
 
   it('resetHistory clears messages, tool calls and plan but keeps metadata', () => {
-    let state = startPrompt(withSession(), SID, 'hi');
+    let state = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
     state = applyUpdate(state, SID, { sessionUpdate: 'tool_call', toolCallId: 't', title: 'T' });
     state = applyUpdate(state, SID, { sessionUpdate: 'plan', entries: [] });
     const reset = resetHistory(state, SID).sessions[SID]!;
@@ -287,7 +293,7 @@ describe('localModel reducers', () => {
   });
 
   it('upsertSession adds new entries and only refreshes metadata of existing ones', () => {
-    let state = startPrompt(withSession(), SID, 'hi');
+    let state = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
     state = upsertSession(
       state,
       newSession({ id: SID, workspace: WS, title: 'From agent', historySource: 'agent', loaded: false }),
@@ -343,5 +349,94 @@ describe('localModel reducers', () => {
   it('emptyLocalState carries install guidance when the CLI is missing', () => {
     expect(emptyLocalState(null).installGuidance).toContain('docs.devin.ai/desktop');
     expect(emptyLocalState('C:\\devin.exe').installGuidance).toBe('');
+  });
+});
+
+describe('thinking indicator + token usage', () => {
+  it('startPrompt stamps promptStartedAt and clears lastTurnMs', () => {
+    const state = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
+    const session = state.sessions[SID]!;
+    expect(session.promptStartedAt).toBe('2026-10-01T00:00:01Z');
+    expect(session.lastTurnMs).toBeUndefined();
+  });
+
+  it('finishPrompt computes lastTurnMs and merges prompt-response usage', () => {
+    const started = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
+    const state = finishPrompt(started, SID, 'end_turn', {
+      now: '2026-10-01T00:00:03.500Z',
+      usage: { totalTokens: 1234, inputTokens: 1000, outputTokens: 234 },
+    });
+    const session = state.sessions[SID]!;
+    expect(session.running).toBe(false);
+    expect(session.promptStartedAt).toBeUndefined();
+    expect(session.lastTurnMs).toBe(2500);
+    expect(session.usage).toMatchObject({
+      totalTokens: 1234,
+      inputTokens: 1000,
+      outputTokens: 234,
+      used: null,
+    });
+  });
+
+  it('usage_update sets used/size and meta-derived tokens, computes total', () => {
+    const state = applyUpdate(withSession(), SID, {
+      sessionUpdate: 'usage_update',
+      used: 84795,
+      size: 1000000,
+      _meta: {
+        'cognition.ai/inputTokens': 84791,
+        'cognition.ai/outputTokens': 4,
+        'cognition.ai/cachedWriteTokens': 84787,
+      },
+    });
+    expect(state.sessions[SID]!.usage).toMatchObject({
+      used: 84795,
+      size: 1000000,
+      inputTokens: 84791,
+      outputTokens: 4,
+      cachedWriteTokens: 84787,
+      totalTokens: 84795,
+    });
+  });
+
+  it('finishPrompt without usage keeps prior usage; unknown session is a no-op', () => {
+    let state = applyUpdate(withSession(), SID, {
+      sessionUpdate: 'usage_update',
+      used: 100,
+      size: 200000,
+    });
+    const started = startPrompt(state, SID, 'hi', '2026-10-01T00:00:01Z');
+    state = finishPrompt(started, SID, 'end_turn', { now: '2026-10-01T00:00:02Z' });
+    expect(state.sessions[SID]!.usage).toMatchObject({ used: 100, size: 200000 });
+    expect(state.sessions[SID]!.lastTurnMs).toBe(1000);
+    expect(
+      applyUpdate(withSession(), 'nope', { sessionUpdate: 'usage_update', used: 1, size: 1 }),
+    ).toEqual(withSession());
+  });
+});
+
+
+describe('terminalOwned handoff', () => {
+  it('setTerminalOwned marks the session and clears running state', () => {
+    let state = startPrompt(withSession(), SID, 'hi', '2026-10-01T00:00:01Z');
+    state = setPermission(state, SID, {
+      requestId: 'r1',
+      toolCallId: 't1',
+      title: 'cmd',
+      options: [],
+    });
+    state = setTerminalOwned(state, SID, true);
+    const session = state.sessions[SID]!;
+    expect(session.terminalOwned).toBe(true);
+    expect(session.running).toBe(false);
+    expect(session.pendingPermission).toBeUndefined();
+    expect(session.promptStartedAt).toBeUndefined();
+  });
+
+  it('setTerminalOwned(false) clears the flag; unknown session is a no-op', () => {
+    let state = setTerminalOwned(withSession(), SID, true);
+    state = setTerminalOwned(state, SID, false);
+    expect(state.sessions[SID]!.terminalOwned).toBeUndefined();
+    expect(setTerminalOwned(withSession(), 'nope', true)).toEqual(withSession());
   });
 });

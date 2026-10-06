@@ -17,7 +17,7 @@ type Hooks = {
   terminalClose(id: string): boolean;
   terminalRead(id: string): string;
   terminalPid(id: string): number | null;
-  terminalList(): Array<{ id: string; kind: string; cwd: string; title: string; exitCode: number | null }>;
+  terminalList(): Array<{ id: string; kind: string; cwd: string; sessionId: string | null; title: string; exitCode: number | null }>;
   localAddWorkspace(path: string): string | null;
   localNewSession(workspace: string): Promise<string>;
   localState(): { agents: Record<string, { status: string }> };
@@ -224,8 +224,8 @@ test('terminal dock: rail toggle, shell tabs, surface gating, persisted height',
     const after = await app.evaluate(() => (globalThis as G).__devinworkspaces.getDevinBounds());
     expect(after?.height).toBe(before!.height - 280 - 6);
 
-    // Drag guide: the blue line must cover the splitter rect (devin column),
-    // not the whole window width — the pane is open by default at 1400x900.
+    // Live resize: the dock height follows the pointer mid-drag; Escape
+    // restores it.
     const splitterBox = await page.locator('#terminalSplitter').boundingBox();
     expect(splitterBox).toBeTruthy();
     const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
@@ -235,15 +235,8 @@ test('terminal dock: rail toggle, shell tabs, surface gating, persisted height',
     await page.mouse.move(splitCx, splitCy);
     await page.mouse.down();
     await page.mouse.move(splitCx, splitCy - 40, { steps: 3 });
-    // Both splitters render a #dragGuide sibling; the terminal one follows #terminalSplitter.
-    const dragGuide = page.locator('#terminalSplitter + #dragGuide');
-    await expect(dragGuide).toBeVisible();
-    const guideBox = await dragGuide.boundingBox();
-    expect(guideBox).toBeTruthy();
-    expect(guideBox!.x).toBeCloseTo(splitterBox!.x, 0);
-    expect(guideBox!.width).toBeCloseTo(splitterBox!.width, 0);
+    await expect.poll(async () => (await state(app)).terminalHeight).toBeGreaterThan(280);
     await page.keyboard.press('Escape');
-    await expect(dragGuide).toBeHidden();
     await page.mouse.up().catch(() => undefined);
     expect((await state(app)).terminalHeight).toBe(280);
 
@@ -590,6 +583,101 @@ test('terminal: quit disposes several live devin ptys and the process exits', as
       app.close().then(() => undefined),
       new Promise((resolve) => setTimeout(resolve, 10_000)),
     ]);
+  } finally {
+    if (!closed) {
+      spawnSync('taskkill', ['/PID', String(app.process().pid), '/T', '/F'], { stdio: 'ignore' });
+      await Promise.race([
+        app.close().then(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
+    }
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        rmSync(profile, { recursive: true, force: true });
+        rmSync(workspace, { recursive: true, force: true });
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+  }
+});
+
+test('terminal: devin pty resumes with -r, reuses the live pty per session', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-term-resume-'));
+  const logFile = join(profile, 'events.jsonl');
+  writeFileSync(logFile, '', 'utf8');
+  const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_TEST_TERMINAL_CMD: TERMINAL_CMD,
+  });
+  let closed = false;
+  const read = (id: string) =>
+    app.evaluate((_e, tid) => (globalThis as G).__devinworkspaces.terminalRead(tid as string), id);
+  try {
+    await expect
+      .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
+      .toBe(true);
+    const ws = await app.evaluate(
+      (_e, path) => (globalThis as G).__devinworkspaces.localAddWorkspace(path as string),
+      workspace,
+    );
+    expect(ws).toBeTruthy();
+
+    const a1 = await app.evaluate(
+      (_e, o) =>
+        (globalThis as G).__devinworkspaces.terminalOpen({
+          kind: 'devin',
+          workspace: (o as { ws: string }).ws,
+          sessionId: (o as { ws: string; sid: string }).sid,
+        }),
+      { ws: ws as string, sid: 'sess-a' },
+    );
+    expect(a1.ok).toBe(true);
+    const idA = a1.ok ? a1.id : '';
+    await expect.poll(async () => read(idA)).toContain('args:-r sess-a');
+
+    // Same session reuses the live pty.
+    const a2 = await app.evaluate(
+      (_e, o) =>
+        (globalThis as G).__devinworkspaces.terminalOpen({
+          kind: 'devin',
+          workspace: (o as { ws: string }).ws,
+          sessionId: (o as { ws: string; sid: string }).sid,
+        }),
+      { ws: ws as string, sid: 'sess-a' },
+    );
+    expect(a2.ok && a2.id).toBe(idA);
+
+    const b = await app.evaluate(
+      (_e, o) =>
+        (globalThis as G).__devinworkspaces.terminalOpen({
+          kind: 'devin',
+          workspace: (o as { ws: string }).ws,
+          sessionId: (o as { ws: string; sid: string }).sid,
+        }),
+      { ws: ws as string, sid: 'sess-b' },
+    );
+    expect(b.ok).toBe(true);
+    const idB = b.ok ? b.id : '';
+    expect(idB).not.toBe(idA);
+    await expect.poll(async () => read(idB)).toContain('args:-r sess-b');
+
+    const list = await app.evaluate(() => (globalThis as G).__devinworkspaces.terminalList());
+    expect(
+      list
+        .filter((t) => t.kind === 'devin' && t.cwd === ws)
+        .map((t) => t.sessionId)
+        .sort(),
+    ).toEqual(['sess-a', 'sess-b'].sort() as unknown[]);
+    const resumeEvents = (await readEvents(logFile)).filter(
+      (e) => e.event === 'terminal-open' && (e.detail as { resume?: boolean }).resume === true,
+    );
+    expect(resumeEvents).toHaveLength(2);
+
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await app.close().catch(() => undefined);
+    closed = true;
   } finally {
     if (!closed) {
       spawnSync('taskkill', ['/PID', String(app.process().pid), '/T', '/F'], { stdio: 'ignore' });

@@ -47,6 +47,43 @@ export type StopReason =
 
 export type HistorySource = 'agent' | 'local-index';
 
+// Cumulative token/context usage for a session — fed by `usage_update` updates
+// and PromptResponse.usage (experimental ACP field). `used`/`size` are context
+// window numbers; the token fields are cumulative across turns.
+export type SessionUsage = {
+  used: number | null;
+  size: number | null;
+  totalTokens: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  thoughtTokens: number | null;
+  cachedReadTokens: number | null;
+  cachedWriteTokens: number | null;
+};
+
+// Subset of the SDK's experimental `Usage` carried by a prompt response.
+export type PromptUsage = {
+  totalTokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  thoughtTokens?: number | null;
+  cachedReadTokens?: number | null;
+  cachedWriteTokens?: number | null;
+};
+
+export function emptyUsage(): SessionUsage {
+  return {
+    used: null,
+    size: null,
+    totalTokens: null,
+    inputTokens: null,
+    outputTokens: null,
+    thoughtTokens: null,
+    cachedReadTokens: null,
+    cachedWriteTokens: null,
+  };
+}
+
 export type LocalSession = {
   id: string;
   workspace: string;
@@ -58,6 +95,13 @@ export type LocalSession = {
   pendingPermission?: PendingPermission;
   running: boolean;
   lastStopReason?: StopReason;
+  // The session's `devin -r` pty owns the CLI's per-session lock — chat is
+  // disabled until the terminal closes (see acpHost.releaseSessionForTerminal).
+  terminalOwned?: boolean;
+  // ISO stamp of the in-flight prompt; drives the thinking indicator.
+  promptStartedAt?: string;
+  lastTurnMs?: number;
+  usage?: SessionUsage;
   error?: string;
   historySource: HistorySource;
   loaded: boolean;
@@ -126,6 +170,12 @@ export type SessionUpdate =
   | (ToolCallUpdateFields & { sessionUpdate: 'tool_call_update' })
   | { sessionUpdate: 'plan'; entries: PlanEntry[] }
   | { sessionUpdate: 'session_info_update'; title?: string | null }
+  | {
+      sessionUpdate: 'usage_update';
+      used: number;
+      size: number;
+      _meta?: Record<string, unknown> | null;
+    }
   | { sessionUpdate: string; [key: string]: unknown };
 
 export const TITLE_MAX = 60;
@@ -287,21 +337,52 @@ export function applyUpdate(state: LocalState, sessionId: string, update: Sessio
       if (!info.title) return state;
       return replaceSession(state, { ...session, title: info.title });
     }
+    case 'usage_update': {
+      const usageUpdate = update as { used?: unknown; size?: unknown; _meta?: unknown };
+      const usage = { ...(session.usage ?? emptyUsage()) };
+      if (typeof usageUpdate.used === 'number') usage.used = usageUpdate.used;
+      if (typeof usageUpdate.size === 'number') usage.size = usageUpdate.size;
+      const meta =
+        usageUpdate._meta && typeof usageUpdate._meta === 'object'
+          ? (usageUpdate._meta as Record<string, unknown>)
+          : {};
+      for (const key of [
+        'inputTokens',
+        'outputTokens',
+        'cachedWriteTokens',
+        'cachedReadTokens',
+        'thoughtTokens',
+      ] as const) {
+        const value = meta[`cognition.ai/${key}`];
+        if (typeof value === 'number') usage[key] = value;
+      }
+      if (usage.inputTokens !== null && usage.outputTokens !== null) {
+        usage.totalTokens = usage.inputTokens + usage.outputTokens;
+      }
+      return replaceSession(state, { ...session, usage });
+    }
     default:
       return state;
   }
 }
 
-export function startPrompt(state: LocalState, sessionId: string, text: string): LocalState {
+export function startPrompt(
+  state: LocalState,
+  sessionId: string,
+  text: string,
+  now: string,
+): LocalState {
   const session = state.sessions[sessionId];
   if (!session) return state;
   const next: LocalSession = {
     ...session,
     messages: [...session.messages, { role: 'user', blocks: [{ type: 'text', text }] }],
     running: true,
+    promptStartedAt: now,
     title: session.title || titleFromPrompt(text),
   };
   delete next.lastStopReason;
+  delete next.lastTurnMs;
   delete next.error;
   return replaceSession(state, next);
 }
@@ -310,13 +391,36 @@ export function finishPrompt(
   state: LocalState,
   sessionId: string,
   stopReason: StopReason,
-  error?: string,
+  options: { error?: string; now?: string; usage?: PromptUsage | undefined } = {},
 ): LocalState {
   const session = state.sessions[sessionId];
   if (!session) return state;
   const next: LocalSession = { ...session, running: false, lastStopReason: stopReason };
   delete next.pendingPermission;
-  if (error) next.error = error;
+  if (options.now && session.promptStartedAt) {
+    next.lastTurnMs = Math.max(
+      0,
+      Date.parse(options.now) - Date.parse(session.promptStartedAt),
+    );
+  }
+  delete next.promptStartedAt;
+  const usage = options.usage;
+  if (usage) {
+    const merged = { ...(session.usage ?? emptyUsage()) };
+    for (const key of [
+      'totalTokens',
+      'inputTokens',
+      'outputTokens',
+      'thoughtTokens',
+      'cachedReadTokens',
+      'cachedWriteTokens',
+    ] as const) {
+      const value = usage[key];
+      if (typeof value === 'number') merged[key] = value;
+    }
+    next.usage = merged;
+  }
+  if (options.error) next.error = options.error;
   else delete next.error;
   return replaceSession(state, next);
 }
@@ -336,6 +440,26 @@ export function clearPermission(state: LocalState, sessionId: string): LocalStat
   if (!session || !session.pendingPermission) return state;
   const next = { ...session };
   delete next.pendingPermission;
+  return replaceSession(state, next);
+}
+
+export function setTerminalOwned(
+  state: LocalState,
+  sessionId: string,
+  owned: boolean,
+): LocalState {
+  const session = state.sessions[sessionId];
+  if (!session) return state;
+  const next = { ...session };
+  if (owned) {
+    next.terminalOwned = true;
+    // No in-flight chat survives the handoff.
+    next.running = false;
+    delete next.pendingPermission;
+    delete next.promptStartedAt;
+  } else {
+    delete next.terminalOwned;
+  }
   return replaceSession(state, next);
 }
 

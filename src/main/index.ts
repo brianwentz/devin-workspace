@@ -228,6 +228,13 @@ async function createWindow(): Promise<void> {
   terminalHost.onPullRequestUrl = (url, sessionId) => {
     autoOpenLocalPr(url, sessionId, 'local-terminal');
   };
+  // Exclusive handoff: `devin -r` ptys take the CLI's per-session lock; the acp
+  // agent releases it (restart) on open and reclaims the session on close.
+  terminalHost.sessionGate = {
+    release: (sessionId) => localHost()?.releaseSessionForTerminal(sessionId) ?? Promise.resolve(),
+    reclaim: (sessionId) =>
+      localHost()?.reclaimSessionFromTerminal(sessionId) ?? Promise.resolve(),
+  };
   state.surface = saved.surface;
   // Env override wins over the persisted tenant URL (tests rely on it).
   state.tenantUrl = process.env.DEVIN_WORKSPACES_TENANT_URL ?? saved.tenantUrl;

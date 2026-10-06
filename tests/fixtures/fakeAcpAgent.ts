@@ -16,6 +16,13 @@ const supportsList = process.env.FAKE_ACP_LIST === '1';
 const supportsLoad = process.env.FAKE_ACP_LOAD === '1';
 const supportsDelete = process.env.FAKE_ACP_DELETE === '1';
 const linkUrl = process.env.FAKE_ACP_LINK_URL ?? 'https://github.com/cognition-ai/devin-workspaces/pull/1';
+// FAKE_ACP_USAGE=1 emits a usage_update mid-prompt and a `usage` field on the
+// prompt response; FAKE_ACP_PROMPT_DELAY_MS stalls mid-prompt so the UI's
+// thinking indicator is observable.
+const emitUsage = process.env.FAKE_ACP_USAGE === '1';
+const promptDelayMs = Number(process.env.FAKE_ACP_PROMPT_DELAY_MS ?? 0) || 0;
+
+const USAGE = { totalTokens: 1234, inputTokens: 1000, outputTokens: 234 };
 
 type Session = {
   id: string;
@@ -113,9 +120,9 @@ function createAgent(connection: AgentSideConnection): Agent {
     },
     async deleteSession(params) {
       if (!supportsDelete) throw new Error('session/delete not supported');
-      if (!sessions.delete(params.sessionId)) {
-        throw new Error(`unknown session ${params.sessionId}`);
-      }
+      // Idempotent: after a restart we know nothing about older sessions, but
+      // the real CLI persists them — deleting one we forgot still succeeds.
+      sessions.delete(params.sessionId);
       return {};
     },
     async cancel(params) {
@@ -152,6 +159,18 @@ function createAgent(connection: AgentSideConnection): Agent {
         sessionUpdate: 'agent_thought_chunk',
         content: { type: 'text', text: 'The user said something. ' },
       });
+      if (emitUsage) {
+        await emit(session, {
+          sessionUpdate: 'usage_update',
+          used: 1234,
+          size: 200000,
+          _meta: {
+            'cognition.ai/inputTokens': 1000,
+            'cognition.ai/outputTokens': 234,
+          },
+        } as unknown as SessionNotification['update']);
+      }
+      if (promptDelayMs > 0) await sleep(promptDelayMs);
       await sleep(10);
       await emit(session, {
         sessionUpdate: 'agent_thought_chunk',
@@ -234,7 +253,7 @@ function createAgent(connection: AgentSideConnection): Agent {
           { content: 'Celebrate', priority: 'low', status: 'pending' },
         ],
       });
-      return { stopReason: 'end_turn' };
+      return { stopReason: 'end_turn', ...(emitUsage ? { usage: USAGE } : {}) };
     },
   };
   return agent;

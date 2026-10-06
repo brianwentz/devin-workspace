@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { startFixtureServers, type FixtureServers } from '../fixtures/http';
-import { evaluateInShell, launchApp, readEvents, shellPage, state, waitForEventCount } from './helpers';
+import { evaluateInShell, launchApp, readEvents, shellPage, state, waitForEvent, waitForEventCount } from './helpers';
 
 // Mirrors LocalStateSchema in src/shared/ipc.ts (subset used by the assertions).
 type LocalState = {
@@ -30,6 +30,7 @@ type LocalState = {
       loaded: boolean;
       historySource: 'agent' | 'local-index';
       lastStopReason?: string;
+      terminalOwned?: boolean;
       error?: string;
       messages: Array<{ role: 'user' | 'agent'; blocks: Array<{ type: string; text?: string; id?: string }> }>;
       toolCalls: Record<string, { id: string; title: string; status: string; kind?: string }>;
@@ -52,6 +53,12 @@ type Hooks = {
   localLoadSession(workspace: string, sessionId: string): Promise<void>;
   localDeleteSession(sessionId: string): Promise<void>;
   localAgentPid(workspace: string): number | null;
+  terminalOpen(options: {
+    kind: 'devin';
+    workspace: string;
+    sessionId: string;
+  }): { ok: true; id: string } | { ok: false; error: string };
+  terminalClose(id: string): boolean;
   setSurface(value: 'cloud' | 'local' | 'settings'): void;
   clipboardWrite(text: string): void;
   clipboardRead(): string;
@@ -670,6 +677,174 @@ test('Local composer keeps unsent text across a surface switch', async () => {
         // already gone
       }
     }
+    rmSync(profile, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Local: thinking indicator and token usage while a prompt runs', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-thinking-'));
+  const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_LOCAL_AGENT_CMD: FAKE_AGENT_CMD,
+    FAKE_ACP_USAGE: '1',
+    FAKE_ACP_PROMPT_DELAY_MS: '1500',
+  });
+  try {
+    await waitForHooks(app);
+    await setSurfaceLocal(app);
+    const ws = await addWorkspace(app, workspace);
+    await expect.poll(async () => (await localState(app)).agents[ws]?.status).toBe('ready');
+    const sessionId = await newSession(app, ws);
+    await expect
+      .poll(() => shellCount(app, `.session-item[data-session-id="${sessionId}"]`))
+      .toBe(1);
+    expect(await shellClick(app, `.session-item[data-session-id="${sessionId}"]`)).toBe(true);
+
+    // In-flight: the thinking indicator with elapsed time shows.
+    await promptNoWait(app, sessionId, 'hello');
+    await expect.poll(async () => (await localState(app)).sessions[sessionId]?.running).toBe(true);
+    await expect.poll(() => shellCount(app, '#thinking')).toBe(1);
+    await expect
+      .poll(async () =>
+        evaluateInShell(app, `document.getElementById('thinking')?.textContent ?? ''`),
+      )
+      .toContain('Thinking…');
+
+    // Turn done: indicator gone, elapsed summary + usage badge rendered.
+    await expect
+      .poll(async () => (await localState(app)).sessions[sessionId]?.running)
+      .toBe(false);
+    await expect.poll(() => shellCount(app, '#thinking')).toBe(0);
+    await expect
+      .poll(async () =>
+        evaluateInShell(app, `document.getElementById('turnSummary')?.textContent ?? ''`),
+      )
+      .toContain('Took ');
+    const usageText = (await evaluateInShell(
+      app,
+      `document.getElementById('tokenUsage')?.textContent ?? ''`,
+    )) as string;
+    expect(usageText).toContain('1.2k / 200k ctx');
+    expect(usageText).toContain('↑1.0k');
+    expect(usageText).toContain('↓234');
+    const tooltip = (await evaluateInShell(
+      app,
+      `document.getElementById('tokenUsage')?.getAttribute('title') ?? ''`,
+    )) as string;
+    expect(tooltip).toContain('Context: 1,234 / 200,000');
+    expect(tooltip).toContain('Total: 1,234');
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('terminal handoff: devin -r takes the session lock; closing reclaims it', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-local-'));
+  const logFile = join(profile, 'events.jsonl');
+  const workspace = mkdtempSync(join(tmpdir(), 'devin-workspaces-ws-'));
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures, {
+    DEVIN_WORKSPACES_LOCAL_AGENT_CMD: FAKE_AGENT_CMD,
+    DEVIN_WORKSPACES_TEST_TERMINAL_CMD: 'node out/fixtures/fakePty.cjs',
+    FAKE_ACP_LOAD: '1',
+    FAKE_ACP_PROMPT_DELAY_MS: '4000',
+  });
+  try {
+    await waitForHooks(app);
+    await setSurfaceLocal(app);
+    const ws = await addWorkspace(app, workspace);
+    await expect.poll(async () => (await localState(app)).agents[ws]?.status).toBe('ready');
+    const sessionId = await newSession(app, ws);
+    const secondId = await newSession(app, ws);
+    await expect
+      .poll(() => shellCount(app, `.session-item[data-session-id="${sessionId}"]`))
+      .toBe(1);
+    await shellClick(app, `.session-item[data-session-id="${sessionId}"]`);
+    const pidBefore = await agentPid(app, ws);
+    expect(pidBefore).toBeGreaterThan(0);
+
+    // Refusal: the handoff restarts the workspace agent, so it is refused
+    // while ANY session in the workspace is still running.
+    await promptNoWait(app, secondId, 'slow turn');
+    await expect
+      .poll(async () => (await localState(app)).sessions[secondId]?.running)
+      .toBe(true);
+    expect(await shellClick(app, '#view-terminal')).toBe(true);
+    await expect
+      .poll(async () =>
+        evaluateInShell(
+          app,
+          `document.getElementById('terminalPane')?.textContent ?? ''`,
+        ),
+      )
+      .toContain('still running');
+    await expect
+      .poll(async () => (await localState(app)).sessions[sessionId]?.terminalOwned ?? false)
+      .toBe(false);
+    expect(
+      (await readEvents(logFile)).some((entry) => entry.event === 'agent-restart'),
+    ).toBe(false);
+
+    // Once the busy session finishes the open succeeds.
+    await expect
+      .poll(async () => (await localState(app)).sessions[secondId]?.running)
+      .toBe(false);
+
+    // Opening a devin terminal for the session: agent restarts to release the
+    // CLI's per-session lock; chat is disabled while the pty owns it.
+    const opened = await app.evaluate(
+      (_e, args: { ws: string; sid: string }) =>
+        (globalThis as G).__devinworkspaces.terminalOpen({
+          kind: 'devin',
+          workspace: args.ws,
+          sessionId: args.sid,
+        }),
+      { ws, sid: sessionId },
+    );
+    expect(opened.ok).toBe(true);
+    await waitForEvent(logFile, 'agent-restart');
+    expect(
+      (await readEvents(logFile)).some(
+        (entry) =>
+          entry.event === 'agent-restart' &&
+          (entry.detail as { reason?: string } | undefined)?.reason === 'terminal-handoff',
+      ),
+    ).toBe(true);
+    await expect.poll(() => agentPid(app, ws)).not.toBe(pidBefore);
+    await expect.poll(async () => (await localState(app)).sessions[sessionId]?.terminalOwned).toBe(
+      true,
+    );
+    await expect.poll(() => shellCount(app, '#terminalOwnedBanner')).toBe(1);
+    expect(await evaluateInShell(app, `document.getElementById('composer')?.disabled ?? null`)).toBe(true);
+    expect(await evaluateInShell(app, `document.getElementById('sendButton')?.disabled ?? null`)).toBe(true);
+
+    // Chat for an owned session refuses.
+    await expect(promptAndWait(app, sessionId, 'hi')).rejects.toThrow(
+      'session is open in the Terminal tab',
+    );
+
+    // Close the terminal -> chat reclaims the session (fresh load).
+    await app.evaluate(
+      (_e, id: string) => (globalThis as G).__devinworkspaces.terminalClose(id),
+      opened.ok ? opened.id : '',
+    );
+    await waitForEvent(logFile, 'session-load');
+    expect(
+      (await readEvents(logFile)).some(
+        (entry) =>
+          entry.event === 'session-load' &&
+          (entry.detail as { sessionId?: string } | undefined)?.sessionId === sessionId,
+      ),
+    ).toBe(true);
+    await expect
+      .poll(async () => (await localState(app)).sessions[sessionId]?.terminalOwned ?? false)
+      .toBe(false);
+    await expect.poll(() => shellCount(app, '#terminalOwnedBanner')).toBe(0);
+  } finally {
+    await app.close().catch(() => undefined);
     rmSync(profile, { recursive: true, force: true });
     rmSync(workspace, { recursive: true, force: true });
   }

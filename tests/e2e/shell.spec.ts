@@ -240,6 +240,77 @@ test('persists settings across relaunch', async () => {
   }
 });
 
+test('splitter drag live-resizes hosted views without raising the shell', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-drag-'));
+  const logFile = join(profile, 'events.jsonl');
+  const app = await launchApp(profile, logFile, join(profile, 'downloads'), fixtures);
+  try {
+    await expect
+      .poll(async () => app.evaluate(() => Boolean((globalThis as any).__devinworkspaces)))
+      .toBe(true);
+    await app.evaluate((_electron, url: string) => {
+      return (
+        globalThis as typeof globalThis & { __devinworkspaces: { open(url: string): string } }
+      ).__devinworkspaces.open(url);
+    }, `${fixtures.githubUrl}/page/drag`);
+    const shell = await shellPage(app);
+    await expect(shell.locator('#splitter')).toBeVisible();
+    type H = {
+      childViews(): Array<{ bounds: { width: number }; url: string | null }>;
+      getDevinBounds(): { width: number; height: number } | null;
+    };
+    const orderBefore = (await app.evaluate(() =>
+      (globalThis as typeof globalThis & { __devinworkspaces: H }).__devinworkspaces.childViews()
+        .map((v) => v.url?.startsWith('app://shell') ? 'shell' : 'hosted'),
+    ));
+    const devinBefore = await app.evaluate(() =>
+      (globalThis as typeof globalThis & { __devinworkspaces: H }).__devinworkspaces.getDevinBounds(),
+    );
+    expect(devinBefore).toBeTruthy();
+
+    const box = (await shell.locator('#splitter').boundingBox())!;
+    const cx = box.x + box.width / 2;
+    const cy = box.y + 120;
+    await shell.mouse.move(cx, cy);
+    await shell.mouse.down();
+    await shell.mouse.move(cx + 100, cy, { steps: 4 });
+
+    // Mid-drag (button still down): no restack, but the devin view resizes.
+    const orderMid = await app.evaluate(() =>
+      (globalThis as typeof globalThis & { __devinworkspaces: H }).__devinworkspaces.childViews()
+        .map((v) => (v.url?.startsWith('app://shell') ? 'shell' : 'hosted')),
+    );
+    expect(orderMid).toEqual(orderBefore);
+    await expect
+      .poll(async () =>
+        (
+          await app.evaluate(() =>
+            (
+              globalThis as typeof globalThis & { __devinworkspaces: H }
+            ).__devinworkspaces.getDevinBounds(),
+          )
+        )?.width,
+      )
+      .toBeGreaterThan(devinBefore!.width);
+
+    await shell.mouse.up();
+    await expect
+      .poll(async () =>
+        (await readEvents(logFile)).some((entry) => entry.event === 'drag-end'),
+      )
+      .toBe(true);
+    const orderAfter = await app.evaluate(() =>
+      (globalThis as typeof globalThis & { __devinworkspaces: H }).__devinworkspaces.childViews()
+        .map((v) => (v.url?.startsWith('app://shell') ? 'shell' : 'hosted')),
+    );
+    expect(orderAfter).toEqual(orderBefore);
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await app.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
 test('migrates legacy spike-state.json into settings.json', async () => {
   const profile = mkdtempSync(join(tmpdir(), 'devin-workspaces-e2e-'));
   const logFile = join(profile, 'events.jsonl');

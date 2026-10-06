@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, type PointerEvent } from 'react';
 import {
   clampPaneWidth,
   leftChrome,
@@ -33,7 +33,6 @@ function currentPos(
 
 export function Splitter({ axis, rect, enabled }: SplitterProps) {
   const dragging = useRef(false);
-  const [guidePos, setGuidePos] = useState<number | null>(null);
   const state = useShellState();
   const chrome = state
     ? leftChrome(
@@ -56,7 +55,6 @@ export function Splitter({ axis, rect, enabled }: SplitterProps) {
         dragging.current = false;
         document.body.classList.remove('dragging');
         document.body.classList.remove('dragging-y');
-        setGuidePos(null);
         window.devinworkspaces.dragCancel('escape');
       }
     };
@@ -64,16 +62,11 @@ export function Splitter({ axis, rect, enabled }: SplitterProps) {
       dragging.current = false;
       document.body.classList.remove('dragging');
       document.body.classList.remove('dragging-y');
-      setGuidePos(null);
-    });
-    const offGuide = window.devinworkspaces.onDragGuide((guide) => {
-      if (dragging.current && guide.axis === axis) setGuidePos(guide.pos);
     });
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
       offReset();
-      offGuide();
     };
   }, [axis]);
 
@@ -90,63 +83,46 @@ export function Splitter({ axis, rect, enabled }: SplitterProps) {
         : 'Resize terminal dock';
 
   return (
-    <>
-      <div
-        id={id}
-        role="separator"
-        aria-orientation={axis === 'y' ? 'horizontal' : 'vertical'}
-        aria-label={label}
-        className="shell-chrome absolute bg-[#2c3949] hover:bg-[#6e9bd0]"
-        style={{
-          left: rect.x,
-          top: rect.y,
-          width: rect.width,
-          height: rect.height,
-          cursor: axis === 'y' ? 'row-resize' : 'col-resize',
-          touchAction: 'none',
-        }}
-        onPointerDown={(event) => {
-          if (event.button !== 0 || !enabled) return;
-          event.preventDefault();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          dragging.current = true;
-          document.body.classList.add(axis === 'y' ? 'dragging-y' : 'dragging');
-          window.devinworkspaces.dragStart(axis, currentPos(axis, pointerPos(event), chrome));
-        }}
-        onPointerMove={(event) => {
-          if (!dragging.current) return;
-          const pos = currentPos(axis, pointerPos(event), chrome);
-          setGuidePos(pos);
-          window.devinworkspaces.dragMove(pos);
-        }}
-        onPointerUp={(event) => {
-          if (!dragging.current) return;
-          dragging.current = false;
-          document.body.classList.remove('dragging');
-          document.body.classList.remove('dragging-y');
-          setGuidePos(null);
-          window.devinworkspaces.dragEnd(currentPos(axis, pointerPos(event), chrome));
-        }}
-        onPointerCancel={() => {
-          if (!dragging.current) return;
-          dragging.current = false;
-          document.body.classList.remove('dragging');
-          document.body.classList.remove('dragging-y');
-          setGuidePos(null);
-          window.devinworkspaces.dragCancel();
-        }}
-      />
-      <div
-        id="dragGuide"
-        aria-hidden="true"
-        className="absolute bg-[#91c4ff] pointer-events-none"
-        style={{
-          display: guidePos === null ? 'none' : 'block',
-          ...(axis === 'y'
-            ? { left: rect.x, top: guidePos ?? rect.y, width: rect.width, height: 2 }
-            : { left: guidePos ?? rect.x, top: rect.y, width: 2, height: rect.height }),
-        }}
-      />
-    </>
+    <div
+      id={id}
+      role="separator"
+      aria-orientation={axis === 'y' ? 'horizontal' : 'vertical'}
+      aria-label={label}
+      className="shell-chrome absolute bg-[#2c3949] hover:bg-[#6e9bd0]"
+      style={{
+        left: rect.x,
+        top: rect.y,
+        width: rect.width,
+        height: rect.height,
+        cursor: axis === 'y' ? 'row-resize' : 'col-resize',
+        touchAction: 'none',
+      }}
+      onPointerDown={(event) => {
+        if (event.button !== 0 || !enabled) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        dragging.current = true;
+        document.body.classList.add(axis === 'y' ? 'dragging-y' : 'dragging');
+        window.devinworkspaces.dragStart(axis, currentPos(axis, pointerPos(event), chrome));
+      }}
+      onPointerMove={(event) => {
+        if (!dragging.current) return;
+        window.devinworkspaces.dragMove(currentPos(axis, pointerPos(event), chrome));
+      }}
+      onPointerUp={(event) => {
+        if (!dragging.current) return;
+        dragging.current = false;
+        document.body.classList.remove('dragging');
+        document.body.classList.remove('dragging-y');
+        window.devinworkspaces.dragEnd(currentPos(axis, pointerPos(event), chrome));
+      }}
+      onPointerCancel={() => {
+        if (!dragging.current) return;
+        dragging.current = false;
+        document.body.classList.remove('dragging');
+        document.body.classList.remove('dragging-y');
+        window.devinworkspaces.dragCancel();
+      }}
+    />
   );
 }

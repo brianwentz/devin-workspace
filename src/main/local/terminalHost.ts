@@ -47,6 +47,9 @@ interface TerminalEntry {
   profile: string | null;
   proc: pty.IPty;
   exitCode: number | null;
+  // Devin-kind: whether exit hands the session lock back to the acp agent.
+  // close() sets it; false for delete/workspace-removal/quit paths.
+  reclaimOnExit: boolean;
   pending: string;
   timer: NodeJS.Timeout | null;
   // F2: cumulative output bytes since the last sampled `terminal-data` log.
@@ -79,13 +82,21 @@ function resolveOnPath(name: string): string | null {
   }
 }
 
-// One interactive `devin` CLI pty per local session (fresh TUI — no `-r`, so
-// each session gets its own context). The external binary is spawned
+// One interactive `devin` CLI pty per local session — a selected session
+// resumes with `devin -r <id>` in its own pty. The external binary is spawned
 // via node-pty/ConPTY — never node (RunAsNode fuse is off). A full command
 // override exists only in test mode (DEVIN_WORKSPACES_TEST_TERMINAL_CMD).
 export class TerminalHost {
   private readonly terminals = new Map<string, TerminalEntry>();
   private readonly bySession = new Map<string, string>();
+  private readonly inflightBySession = new Map<string, Promise<OpenResult>>();
+
+  // Injected from index.ts (avoids a circular acpHost import): releasing a
+  // session's CLI lock before a `devin -r` spawn, reclaiming it on close.
+  sessionGate: {
+    release: (sessionId: string) => Promise<void>;
+    reclaim: (sessionId: string) => Promise<void>;
+  } | null = null;
 
   constructor(private readonly testMode: boolean) {}
 
@@ -277,7 +288,28 @@ export class TerminalHost {
     return env;
   }
 
-  open(options: TerminalOpenOptions, cols = 120, rows = 30): OpenResult {
+  async open(options: TerminalOpenOptions, cols = 120, rows = 30): Promise<OpenResult> {
+    if (options.kind === 'devin') {
+      // The release step awaits an agent restart (seconds) — serialize opens
+      // per session so a second caller can't slip past the bySession check.
+      const inflight = this.inflightBySession.get(options.sessionId);
+      if (inflight) return inflight;
+      const pending = this.spawnTerminal(options, cols, rows).finally(() => {
+        if (this.inflightBySession.get(options.sessionId) === pending) {
+          this.inflightBySession.delete(options.sessionId);
+        }
+      });
+      this.inflightBySession.set(options.sessionId, pending);
+      return pending;
+    }
+    return this.spawnTerminal(options, cols, rows);
+  }
+
+  private async spawnTerminal(
+    options: TerminalOpenOptions,
+    cols: number,
+    rows: number,
+  ): Promise<OpenResult> {
     const workspaces = (state.settings?.current.workspaces ?? []).map((w) => resolve(w));
     const normalized =
       options.kind === 'devin'
@@ -306,16 +338,44 @@ export class TerminalHost {
         if (existing && existing.exitCode === null) return { ok: true, id: existingId };
       }
     }
+    // Resolve before any handoff work so a broken command never touches the
+    // session's terminalOwned state.
     const command = this.resolveCommand(options);
     if ('error' in command) {
       log('local', 'terminal-open', { detail: { cwd: normalized, ok: false } });
       return { ok: false, error: command.error };
     }
+    if (options.kind === 'devin') {
+      // `devin -r` takes the CLI's per-session lock — chat for this session is
+      // released first (agent restart), reclaimed when this pty closes.
+      try {
+        await this.sessionGate?.release(options.sessionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // A handoff refusal (another session still running) is a user-facing
+        // outcome, not a fault — return it without the error log.
+        if ((error as { name?: string }).name !== 'TerminalHandoffRefused') {
+          log('local', 'terminal-session-release-error', {
+            detail: { sessionId: options.sessionId, message },
+          });
+        }
+        return { ok: false, error: message };
+      }
+      // The release await opened a window for a parallel caller — re-check.
+      const existingId = this.bySession.get(options.sessionId);
+      if (existingId) {
+        const existing = this.terminals.get(existingId);
+        if (existing && existing.exitCode === null) return { ok: true, id: existingId };
+      }
+    }
     let proc: pty.IPty;
     try {
       // Lazy: a missing/broken native addon must not break app startup.
       const nodePty = require('node-pty') as typeof pty;
-      const args = command.appendCwd ? [...command.args, '--cd', normalized] : command.args;
+      const args = [
+        ...(command.appendCwd ? [...command.args, '--cd', normalized] : command.args),
+        ...(options.kind === 'devin' ? ['-r', options.sessionId] : []),
+      ];
       proc = nodePty.spawn(command.file, args, {
         cwd: normalized,
         cols,
@@ -325,11 +385,14 @@ export class TerminalHost {
         useConpty: true,
       });
     } catch (error) {
+      // The session was released for a pty that never started — hand it back.
+      if (options.kind === 'devin') void this.sessionGate?.reclaim(options.sessionId);
       log('local', 'terminal-open', {
         detail: { cwd: normalized, ok: false, error: String(error) },
       });
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
+    const spawnedAt = Date.now();
     const entry: TerminalEntry = {
       id: randomUUID(),
       kind: options.kind,
@@ -339,6 +402,7 @@ export class TerminalHost {
       profile: command.label,
       proc,
       exitCode: null,
+      reclaimOnExit: options.kind === 'devin',
       pending: '',
       timer: null,
       bytesOut: 0,
@@ -368,6 +432,17 @@ export class TerminalHost {
       if (entry.sessionId && this.bySession.get(entry.sessionId) === entry.id) {
         this.bySession.delete(entry.sessionId);
       }
+      // A fast non-zero exit is usually the acp lock still being held (e.g. a
+      // stale process we didn't restart) — but it also fires for a missing or
+      // unauthenticated CLI, so treat the event as a hint, not proof; the
+      // Restart button is the recovery either way.
+      if (entry.sessionId && exitCode !== 0 && Date.now() - spawnedAt < 3000) {
+        log('local', 'terminal-session-locked', { detail: { sessionId: entry.sessionId } });
+      }
+      // Single reclaim site: close() kills the pty which lands here.
+      if (entry.sessionId && entry.reclaimOnExit) {
+        void this.sessionGate?.reclaim(entry.sessionId);
+      }
       const view = state.shellView;
       if (view && !view.webContents.isDestroyed()) {
         view.webContents.send(IpcChannels.terminalExit, {
@@ -386,6 +461,7 @@ export class TerminalHost {
         ok: true,
         pid: proc.pid,
         ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
+        resume: entry.sessionId !== null,
       },
     });
     this.onChange?.();
@@ -470,9 +546,10 @@ export class TerminalHost {
     return true;
   }
 
-  close(id: string): boolean {
+  close(id: string, options: { reclaim?: boolean } = {}): boolean {
     const entry = this.terminals.get(id);
     if (!entry) return false;
+    entry.reclaimOnExit = options.reclaim ?? true;
     try {
       entry.proc.kill();
     } catch {
@@ -491,13 +568,13 @@ export class TerminalHost {
   closeForWorkspace(workspace: string): void {
     const normalized = resolve(workspace);
     for (const entry of [...this.terminals.values()]) {
-      if (entry.kind === 'devin' && entry.cwd === normalized) this.close(entry.id);
+      if (entry.kind === 'devin' && entry.cwd === normalized) this.close(entry.id, { reclaim: false });
     }
   }
 
   closeForSession(sessionId: string): void {
     const id = this.bySession.get(sessionId);
-    if (id) this.close(id);
+    if (id) this.close(id, { reclaim: false });
   }
 
   pid(id: string): number | null {
@@ -536,7 +613,7 @@ export class TerminalHost {
             });
           }
         }
-        this.close(id);
+        this.close(id, { reclaim: false });
       } catch (error) {
         log('local', 'terminal-dispose-error', {
           detail: { id, message: error instanceof Error ? error.message : String(error) },
