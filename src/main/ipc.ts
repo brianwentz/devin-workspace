@@ -44,7 +44,7 @@ import { prStore } from './prs';
 import { handleLink } from './routing';
 import { checkForUpdatesNow, hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
-import { BadgeRenderedSchema, CloudContextMenuArg, CloudCopyLinkArg, CloudFolderCreateArg, CloudFolderDeleteArg, CloudFolderRenameArg, CloudFolderReorderArg, CloudSessionArchiveArg, CloudSessionMoveArg, CloudShowArchivedArg, NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
+import { BadgeRenderedSchema, CloudContextMenuArg, CloudCopyLinkArg, CloudFolderCreateArg, CloudFolderDeleteArg, CloudFolderRenameArg, CloudFolderReorderArg, CloudNewSessionArg, CloudSessionArchiveArg, CloudSessionMoveArg, CloudShowArchivedArg, NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
 import { cloudSessions } from './cloudSessions';
@@ -298,6 +298,10 @@ export function setupIpc(): void {
   guardedOn(IpcChannels.cloudShowArchived, (_event, payload: unknown) => {
     const parsed = CloudShowArchivedArg.safeParse(payload);
     if (parsed.success) cloudSessions().setShowArchived(parsed.data.value);
+  });
+  guardedOn(IpcChannels.cloudNewSession, (_event, payload: unknown) => {
+    const parsed = CloudNewSessionArg.safeParse(payload);
+    if (parsed.success) cloudSessions().newSession(parsed.data.folder);
   });
   // Credentials: never log IPC payloads (they may carry secrets).
   guardedHandle(IpcChannels.credentialsList, () => state.credentials?.list() ?? []);

@@ -344,6 +344,16 @@ const api = {
     }>,
   cloudShowArchived: (value: boolean) =>
     ipcRenderer.send(IpcChannels.cloudShowArchived, { value }),
+  cloudNewSession: (folder: string | null) => {
+    if (folder === null) {
+      ipcRenderer.send(IpcChannels.cloudNewSession, { folder: null });
+      return;
+    }
+    const trimmed = folder.trim();
+    if (trimmed.length >= 1 && trimmed.length <= 100) {
+      ipcRenderer.send(IpcChannels.cloudNewSession, { folder: trimmed });
+    }
+  },
   // Taskbar badge: main asks the shell to render, replies get {count,size}.
   onBadgeRender: (callback: (request: BadgeRender) => void) => {
     const listener = (_event: unknown, request: BadgeRender) => callback(request);

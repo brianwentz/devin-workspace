@@ -184,6 +184,8 @@ export function registerTestHooks(): void {
       cloudMenuItems: () => cloudSessions().menuItems(),
       cloudMenuClick: (id: string) => cloudSessions().clickMenuItem(id), // returns {action}
       cloudRefresh: () => cloudSessions().refresh('test'),
+      cloudNewSession: (folder: string | null) => cloudSessions().newSession(folder),
+      cloudNoteHomeNavigation: (id: string) => cloudSessions().noteHomeNavigation(id),
       listPrs: () => openPrs(),
       openSessionPr: (sessionId: string, url: string) => openSessionPr(sessionId, url),
       prsPanelOpen: () => state.prsPanelOpen,

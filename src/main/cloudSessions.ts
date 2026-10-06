@@ -3,8 +3,10 @@
 // read inside the devinView via executeJavaScript and never leaves this
 // class. No titles/folder names/user ids/tokens are ever logged.
 
-import { app, clipboard, dialog, Menu, net, shell } from 'electron';
+import { app, clipboard, dialog, Menu, net, shell, webContents } from 'electron';
 import { readFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   acpWsUrl,
   buildFolderPageParams,
@@ -17,6 +19,7 @@ import {
   type CloudListResult,
   type CloudSession,
 } from '../core/cloudAcp';
+import { parseCloudCache, serializeCloudCache } from '../core/cloudCache';
 import {
   addFolder,
   moveSession,
@@ -30,6 +33,7 @@ import { CloudSessionSchema, type CloudState } from '../shared/ipc';
 import { z } from 'zod';
 import { log } from './log';
 import { cloudViews } from './cloudViews';
+import { openNewSession } from './shortcuts';
 import { parseSessionId } from '../core/sessions';
 import { originOf, state, testMode } from './state';
 import { applyLayout, notifyShell } from './window';
@@ -44,8 +48,13 @@ const POLL_FOCUSED_MS = 15_000;
 const POLL_IDLE_MS = 60_000;
 const BACKOFF_MIN_MS = 2_000;
 const BACKOFF_MAX_MS = 60_000;
+const CONNECT_TIMEOUT_MS = 20_000;
+const WATCHDOG_MS = 30_000;
 const ORG_SYNC_DEBOUNCE_MS = 2_000;
 const FOLDER_PAGE_SIZE = 20;
+// Window in which a home→session rekey is filed under a pending new-session
+// folder — beyond that the navigation is treated as unrelated.
+const NEW_SESSION_FILE_WINDOW_MS = 15 * 60_000;
 
 type TokenFailReason = 'view-not-ready' | 'no-devindebug' | 'login-required' | 'timeout' | 'error';
 
@@ -60,6 +69,7 @@ type Pending = {
   resolve: (message: Record<string, unknown>) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  socket: WebSocket;
 };
 
 class CloudSessions {
@@ -81,6 +91,8 @@ class CloudSessions {
   private backoffMs = BACKOFF_MIN_MS;
   private retryTimer: NodeJS.Timeout | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
+  private connectTimer: NodeJS.Timeout | null = null;
+  private watchdogTimer: NodeJS.Timeout | null = null;
   private lastSnapshotJson = '';
   private started = false;
   private fixtureFile: string | null = null;
@@ -95,6 +107,9 @@ class CloudSessions {
   private lastOrgSyncAt = 0;
   private emptyListSynced = false;
   private showArchived = false;
+  private cached = false;
+  private lastCacheJson = '';
+  private pendingNewSession: { folder: string; at: number } | null = null;
   private lastError: { op: string; message: string } | null = null;
   // Test mode records every mutation ({op, method, path, body}) — no network.
   private mutations: { op: string; payload: Record<string, unknown> }[] = [];
@@ -120,6 +135,7 @@ class CloudSessions {
       liveSessionIds: cloudViews().publicInfo().liveSessionIds,
       showArchived: this.showArchived,
       lastError: this.lastError,
+      cached: this.cached,
     };
   }
 
@@ -128,8 +144,13 @@ class CloudSessions {
     this.started = true;
     if (testMode) {
       this.fixtureFile = process.env.DEVIN_WORKSPACES_TEST_CLOUD_SESSIONS ?? null;
+      const cacheFile = process.env.DEVIN_WORKSPACES_TEST_CLOUD_CACHE ?? null;
       if (this.fixtureFile) {
         this.loadFixture('start');
+      } else if (cacheFile) {
+        // Cache-only test mode: render the cached list under 'connecting'.
+        this.setStatus('connecting');
+        this.loadCache(cacheFile);
       } else {
         // The fixture tenant has no devinDebug — stay inert.
         this.setStatus('disabled');
@@ -138,11 +159,15 @@ class CloudSessions {
       return;
     }
     this.setStatus('connecting');
+    this.loadCache(join(app.getPath('userData'), 'cloud-cache.json'));
     // The pool fires this on every active-view navigation/finish-load AND on
     // each activation — the token re-read gates itself on the tenant URL.
     this.unsubActiveNavigate = cloudViews().onActiveNavigate(this.onViewReady);
     this.emit();
     void this.obtainToken();
+    // Self-heal for any "no socket, no timer, nothing in flight" wedge.
+    this.watchdogTimer = setInterval(() => this.watchdog(), WATCHDOG_MS);
+    this.watchdogTimer.unref?.();
   }
 
   stop(): void {
@@ -159,6 +184,20 @@ class CloudSessions {
       return;
     }
     if (!this.started || (testMode && !this.fixtureFile)) return;
+    if (reason === 'shell' && this.socket?.readyState !== WebSocket.OPEN) {
+      // Manual refresh — force a reconnect instead of waiting out a hung
+      // socket or a long backoff.
+      if (this.retryTimer) {
+        clearTimeout(this.retryTimer);
+        this.retryTimer = null;
+      }
+      this.closeSocket();
+      this.token = null;
+      this.backoffMs = BACKOFF_MIN_MS;
+      log('cloud', 'cloud-refresh-force', { detail: { status: this.status } });
+      void this.obtainToken();
+      return;
+    }
     if (!this.token) {
       void this.obtainToken();
       return;
@@ -211,6 +250,7 @@ class CloudSessions {
   // Sidebar row click: the stored url is verified against the tenant before
   // navigating so a tampered payload can't steer the Cloud view.
   openSession(sessionId: string): void {
+    this.pendingNewSession = null;
     const session = this.sessions.find((s) => s.id === sessionId);
     if (!session || parseSessionId(session.url, state.tenantUrl) !== sessionId) {
       log('cloud', 'cloud-open', { detail: { sessionId, found: false } });
@@ -220,6 +260,39 @@ class CloudSessions {
     cloudViews().show(sessionId, session.url);
     applyLayout();
     log('cloud', 'cloud-open', { detail: { sessionId } });
+  }
+
+  // 'New session' entry points record a pending folder, then reuse the
+  // Ctrl+N path (the web app's composer lives on the tenant root). When the
+  // HOME view navigates to the session the composer created, rekey() calls
+  // noteHomeNavigation which files it via the sessions/folder mutation.
+  newSession(folder: string | null): void {
+    this.pendingNewSession = folder ? { folder, at: Date.now() } : null;
+    if (testMode) {
+      this.mutations.push({ op: 'new-session', payload: { folder } });
+    }
+    log('cloud', 'cloud-new-session', { detail: { inFolder: folder !== null } });
+    openNewSession();
+  }
+
+  noteHomeNavigation(sessionId: string): void {
+    const pending = this.pendingNewSession;
+    if (!pending) return;
+    this.pendingNewSession = null;
+    if (Date.now() - pending.at > NEW_SESSION_FILE_WINDOW_MS) return;
+    // The id is already listed — the user clicked an existing session in the
+    // web app's own sidebar, not a freshly created one.
+    if (this.sessions.some((s) => s.id === sessionId)) {
+      log('cloud', 'cloud-new-session-skip', { detail: { reason: 'existing' } });
+      return;
+    }
+    void this.mutate(
+      'session-file',
+      'POST',
+      'sessions/folder',
+      { devin_id: `devin-${sessionId}`, folder: pending.folder },
+      (d) => d,
+    );
   }
 
   prefetchSession(sessionId: string): void {
@@ -443,6 +516,10 @@ class CloudSessions {
     const items: Electron.MenuItemConstructorOptions[] = [];
 
     if (arg.kind === 'header') {
+      items.push(
+        { label: 'New session', click: () => this.newSession(null) },
+        { type: 'separator' },
+      );
       items.push({
         label: 'Show archived sessions',
         type: 'checkbox',
@@ -452,6 +529,8 @@ class CloudSessions {
     } else if (arg.kind === 'folder' && arg.name) {
       const name = arg.name;
       items.push(
+        { label: 'New session in folder', click: () => this.newSession(name) },
+        { type: 'separator' },
         {
           label: 'Rename…',
           click: () => {
@@ -559,6 +638,52 @@ class CloudSessions {
       detail: "Sessions stay — they're just unfoldered.",
     });
     if (response === 0) void this.folderDelete(name);
+  }
+
+  // --- cache --------------------------------------------------------------
+
+  private loadCache(path: string): void {
+    let text: string;
+    try {
+      text = readFileSync(path, 'utf8');
+    } catch {
+      return; // No cache file (or unreadable) — silent.
+    }
+    const cache = parseCloudCache(text, state.tenantUrl);
+    if (!cache) {
+      log('cloud', 'cloud-cache', { detail: { loaded: false } });
+      return;
+    }
+    this.sessions = cache.sessions;
+    this.folders = cache.folders;
+    this.folderTotals = cache.folderTotals;
+    this.lastSyncAt = cache.savedAt;
+    this.cached = true;
+    log('cloud', 'cloud-cache', {
+      detail: {
+        loaded: true,
+        count: cache.sessions.length,
+        folders: cache.folders.length,
+        ageMs: Date.now() - Date.parse(cache.savedAt),
+      },
+    });
+  }
+
+  private writeCache(): void {
+    const json = serializeCloudCache({
+      tenantUrl: state.tenantUrl,
+      savedAt: this.lastSyncAt ?? new Date().toISOString(),
+      sessions: this.sessions,
+      folders: this.folders,
+      folderTotals: this.folderTotals,
+    });
+    if (json === this.lastCacheJson) return;
+    this.lastCacheJson = json;
+    writeFile(join(app.getPath('userData'), 'cloud-cache.json'), json).catch((error: unknown) => {
+      log('cloud', 'cloud-cache-error', {
+        detail: { message: String(error).slice(0, 200) },
+      });
+    });
   }
 
   // --- fixture mode -------------------------------------------------------
@@ -704,6 +829,7 @@ class CloudSessions {
       this.folderTotals = {};
       this.folderOffsets.clear();
       this.emptyListSynced = false;
+      this.cached = false;
       log('cloud', 'cloud-org-change', { detail: { reason } });
       this.connect();
       this.emit();
@@ -756,6 +882,14 @@ class CloudSessions {
     this.emit();
     const socket = new WebSocket(acpWsUrl(state.tenantUrl, this.token, this.orgId));
     this.socket = socket;
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.socket === socket && socket.readyState === WebSocket.CONNECTING) {
+        log('cloud', 'cloud-connect', { detail: { ok: false, reason: 'timeout' } });
+        this.closeSocket();
+        this.scheduleReconnect();
+      }
+    }, CONNECT_TIMEOUT_MS);
 
     socket.addEventListener('message', (event) => {
       let message: Record<string, unknown>;
@@ -774,8 +908,12 @@ class CloudSessions {
     });
     socket.addEventListener('close', (event) => {
       if (this.socket !== socket) return;
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
       this.socket = null;
-      this.failPending('ws closed');
+      this.failPending('ws closed', socket);
       log('cloud', 'cloud-close', { detail: { code: event.code } });
       this.scheduleReconnect();
     });
@@ -783,6 +921,10 @@ class CloudSessions {
       // 'close' follows — reconnect logic lives there.
     });
     socket.addEventListener('open', () => {
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
       void this.handshake(socket);
     });
   }
@@ -810,8 +952,7 @@ class CloudSessions {
       this.backoffMs = BACKOFF_MIN_MS;
       await this.identify();
       await this.list('connect');
-      this.setStatus('ready');
-      this.emit();
+      if (this.socket !== socket) return;
       this.schedulePoll();
     } catch (error) {
       if (this.socket !== socket) return;
@@ -856,16 +997,16 @@ class CloudSessions {
     this.userId = null;
   }
 
-  private async list(reason: string): Promise<void> {
-    if (!this.orgId) return;
+  private async list(reason: string): Promise<boolean> {
+    if (!this.orgId) return false;
     // Coalesce: a queued list just marks dirty and one follow-up runs after.
     if (this.listInFlight) {
       this.listDirty = reason;
-      return;
+      return false;
     }
     this.listInFlight = true;
     try {
-      await this.listOnce(reason);
+      return await this.listOnce(reason);
     } finally {
       this.listInFlight = false;
       if (this.listDirty !== null) {
@@ -878,62 +1019,81 @@ class CloudSessions {
     }
   }
 
-  private async listOnce(reason: string): Promise<void> {
+  private async listOnce(reason: string): Promise<boolean> {
     const orgId = this.orgId!;
     const startedAt = Date.now();
-    try {
-      const message = await this.request(
-        'session/list',
-        buildListParams({
-          orgId,
-          userId: this.userId,
-          archivedStatus: this.showArchived ? 'ALL' : 'ACTIVE',
-        }),
-        LIST_TIMEOUT_MS,
-      );
-      if (message.error) {
-        const rpcError = message.error as { code?: unknown; message?: unknown };
-        this.onRpcError('list', rpcError);
-        return;
-      }
-      const result: CloudListResult = parseListResult(message.result, orgId);
-      this.sessions = result.sessions;
-      this.folders = result.folders;
-      this.folderTotals = result.folderTotals;
-      // Keep loadMore offsets aligned with what the fresh page contains.
-      this.folderOffsets.clear();
-      for (const session of result.sessions) {
-        if (session.folder !== null) {
-          this.folderOffsets.set(
-            session.folder,
-            (this.folderOffsets.get(session.folder) ?? 0) + 1,
-          );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const socket = this.socket;
+      try {
+        const message = await this.request(
+          'session/list',
+          buildListParams({
+            orgId,
+            userId: this.userId,
+            archivedStatus: this.showArchived ? 'ALL' : 'ACTIVE',
+          }),
+          LIST_TIMEOUT_MS,
+        );
+        if (message.error) {
+          const rpcError = message.error as { code?: unknown; message?: unknown };
+          this.onRpcError('list', rpcError);
+          return false;
         }
+        const result: CloudListResult = parseListResult(message.result, orgId);
+        this.sessions = result.sessions;
+        this.folders = result.folders;
+        this.folderTotals = result.folderTotals;
+        // Keep loadMore offsets aligned with what the fresh page contains.
+        this.folderOffsets.clear();
+        for (const session of result.sessions) {
+          if (session.folder !== null) {
+            this.folderOffsets.set(
+              session.folder,
+              (this.folderOffsets.get(session.folder) ?? 0) + 1,
+            );
+          }
+        }
+        this.lastSyncAt = new Date().toISOString();
+        this.error = null;
+        this.lastError = null;
+        this.cached = false;
+        this.setStatus('ready');
+        log('cloud', 'cloud-list', {
+          detail: {
+            count: result.sessions.length,
+            folders: result.folders.length,
+            durationMs: Date.now() - startedAt,
+            reason,
+          },
+        });
+        this.emit();
+        if (!testMode) this.writeCache();
+        // A totally empty result usually means the page is on another org for
+        // multi-org users — re-read devinDebug.getOrgId() once per connection.
+        if (result.sessions.length === 0 && result.folders.length === 0 && !this.emptyListSynced) {
+          this.emptyListSynced = true;
+          void this.syncOrg('empty-list');
+        }
+        return true;
+      } catch (error) {
+        // A replacement socket's own handshake re-lists — don't tear it down.
+        if (this.socket !== socket) return false;
+        // One retry on a still-open socket before tearing it down.
+        if (
+          attempt === 0 &&
+          String(error) === 'Error: request timeout' &&
+          socket?.readyState === WebSocket.OPEN
+        ) {
+          log('cloud', 'cloud-list-retry', { detail: { reason } });
+          continue;
+        }
+        this.onError('list', error);
+        this.closeSocket();
+        this.scheduleReconnect();
+        return false;
       }
-      this.lastSyncAt = new Date().toISOString();
-      this.error = null;
-      this.lastError = null;
-      this.setStatus('ready');
-      log('cloud', 'cloud-list', {
-        detail: {
-          count: result.sessions.length,
-          folders: result.folders.length,
-          durationMs: Date.now() - startedAt,
-          reason,
-        },
-      });
-      this.emit();
-      // A totally empty result usually means the page is on another org for
-      // multi-org users — re-read devinDebug.getOrgId() once per connection.
-      if (result.sessions.length === 0 && result.folders.length === 0 && !this.emptyListSynced) {
-        this.emptyListSynced = true;
-        void this.syncOrg('empty-list');
-      }
-    } catch (error) {
-      this.onError('list', error);
-      this.closeSocket();
-      this.scheduleReconnect();
     }
+    return false;
   }
 
   private request(
@@ -952,23 +1112,31 @@ class CloudSessions {
         this.pending.delete(id);
         reject(new Error('request timeout'));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, socket });
       socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
     });
   }
 
-  private failPending(message: string): void {
-    for (const entry of this.pending.values()) {
+  // With a socket arg, only that socket's orphans fail — a replacement
+  // socket's in-flight requests survive a stale closeSocket().
+  private failPending(message: string, socket?: WebSocket): void {
+    for (const [id, entry] of this.pending) {
+      if (socket !== undefined && entry.socket !== socket) continue;
+      this.pending.delete(id);
       clearTimeout(entry.timer);
       entry.reject(new Error(message));
     }
-    this.pending.clear();
   }
 
   private closeSocket(): void {
     const socket = this.socket;
     this.socket = null;
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
     if (socket) {
+      this.failPending('ws closed', socket);
       try {
         socket.close();
       } catch {
@@ -1002,7 +1170,10 @@ class CloudSessions {
 
   private schedulePoll(): void {
     if (this.pollTimer || !this.started) return;
-    const focused = state.windowRef?.isFocused() === true;
+    // BaseWindow.isFocused() is false while a hosted WebContentsView holds
+    // keyboard focus — count any focused webContents as 'focused'.
+    const focused =
+      state.windowRef?.isFocused() === true || webContents.getFocusedWebContents() !== null;
     this.pollTimer = setTimeout(
       () => {
         this.pollTimer = null;
@@ -1013,11 +1184,34 @@ class CloudSessions {
     );
   }
 
+  private watchdog(): void {
+    if (!this.started || testMode) return;
+    const live =
+      this.socket?.readyState === WebSocket.OPEN ||
+      this.socket?.readyState === WebSocket.CONNECTING;
+    if (live || this.retryTimer || this.tokenInFlight) return;
+    log('cloud', 'cloud-watchdog', {
+      detail: {
+        status: this.status,
+        socket: this.socket?.readyState ?? null,
+        hasToken: this.token !== null,
+        syncInFlight: this.syncInFlight !== null,
+        listInFlight: this.listInFlight,
+      },
+    });
+    this.token = null;
+    void this.obtainToken();
+  }
+
   private clearTimers(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
     this.retryTimer = null;
     this.pollTimer = null;
+    this.connectTimer = null;
+    this.watchdogTimer = null;
   }
 
   // --- state / logging ----------------------------------------------------

@@ -114,6 +114,7 @@ export const IpcChannels = {
   cloudCopyLink: 'cloud:copyLink',
   cloudContextMenu: 'cloud:contextMenu',
   cloudShowArchived: 'cloud:showArchived',
+  cloudNewSession: 'cloud:newSession',
   // Taskbar badge: main asks the shell to render, the shell sends back a PNG.
   badgeRender: 'badge:render',
   badgeRendered: 'badge:rendered',
@@ -423,6 +424,9 @@ export const CloudStateSchema = z.object({
   showArchived: z.boolean(),
   // Transient mutation failure; cleared by the next successful list.
   lastError: z.object({ op: z.string(), message: z.string() }).nullable(),
+  // True while the displayed list came from userData/cloud-cache.json and no
+  // live session/list has replaced it yet.
+  cached: z.boolean(),
 });
 export type CloudState = z.infer<typeof CloudStateSchema>;
 export const UpdateCheckSourceSchema = z.enum([
@@ -654,6 +658,7 @@ export const CloudContextMenuArg = z.object({
   y: z.number().finite(),
 });
 export const CloudShowArchivedArg = z.object({ value: z.boolean() });
+export const CloudNewSessionArg = z.object({ folder: CloudFolderName.nullable() });
 
 // Arg schemas for ipcMain.on channels (safeParse; invalid payloads ignored).
 export const TabIdArg = z.string();
