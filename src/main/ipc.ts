@@ -7,6 +7,10 @@ import {
   CredentialRevealSchema,
   CredentialSaveSchema,
   CredentialUpdateSchema,
+  CloudLoadMoreArg,
+  CloudOpenArg,
+  CloudPanelArg,
+  CloudPrefetchArg,
   DragCancelReasonArg,
   DragPosArg,
   DragStartArg,
@@ -34,15 +38,17 @@ import { refreshAnalyticsView } from './analytics';
 import { settingsFlushDone } from './settingsFlush';
 import { identityResolver } from './identity';
 import { log } from './log';
-import { notificationStore } from './notifications';
+import { badgeIconSize, notificationStore } from './notifications';
 import { notifier, openNotification, openPr, openPrs } from './notifier';
 import { prStore } from './prs';
 import { handleLink } from './routing';
 import { checkForUpdatesNow, hasDownloadedUpdate, installUpdate, releaseNotesReply } from './updater';
 import { historyAction, navigationTarget } from './shortcuts';
-import { NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
+import { BadgeRenderedSchema, CloudContextMenuArg, CloudCopyLinkArg, CloudFolderCreateArg, CloudFolderDeleteArg, CloudFolderRenameArg, CloudFolderReorderArg, CloudSessionArchiveArg, CloudSessionMoveArg, CloudShowArchivedArg, NotificationIdArg, NotificationPanelArg, PrOpenArg, PrPanelArg, PrUrlArg, UpdateCheckArg } from '../shared/ipc';
 import { state } from './state';
 import { keepAliveMs } from './tabs';
+import { cloudSessions } from './cloudSessions';
+import { cloudKeepAliveMs, cloudViews } from './cloudViews';
 import {
   applyLayout,
   beginDrag,
@@ -54,6 +60,7 @@ import {
   setNotificationsPanel,
   setPrsPanel,
   setPaneOpen,
+  setSessionsOpen,
 } from './window';
 
 // "Reload all tabs in this session" (strip menu + test hook).
@@ -76,17 +83,24 @@ export function applySettingsPatch(patch: SettingsPatch): Settings {
   const next: Settings = state.settings!.merge(patch);
   notifier.onSettingsChanged(previousSettings, next);
   if (next.pane.open !== state.paneOpen) setPaneOpen(next.pane.open, 'settings');
+  // Skip layout churn on the quit-flush path — it sits inside the settings
+  // commit round trip and must stay cheap.
+  if (!state.shuttingDown && next.sessions.open !== state.sessionsOpen)
+    setSessionsOpen(next.sessions.open, 'settings');
+  state.sessionsWidth = next.sessions.width;
   // Raw 0..1 preference; the px guards are applied when laying out.
   state.paneFraction = clampFraction01(next.pane.fraction);
   state.surface = next.surface;
   state.tabManager?.setKeepAliveMs(keepAliveMs(next.tabs.keepAliveHours));
   state.tabManager?.setMaxLiveTabs(next.tabs.maxLiveTabs);
+  cloudViews().setLimits({
+    maxLiveViews: next.sessions.maxLiveViews,
+    keepAliveMs: cloudKeepAliveMs(next.sessions.keepAliveHours),
+  });
   if (next.tenantUrl !== previousTenant) {
     state.tenantUrl = next.tenantUrl;
     log('shell', 'tenant-changed', { url: next.tenantUrl });
-    state.devinView?.webContents.loadURL(next.tenantUrl).catch((error: unknown) => {
-      log('devin', 'load-error', { url: next.tenantUrl, detail: { message: String(error) } });
-    });
+    cloudViews().reset(next.tenantUrl);
     const analytics = analyticsUrl(next.tenantUrl);
     state.analyticsView?.webContents.loadURL(analytics).catch((error: unknown) => {
       log('analytics', 'load-error', { url: analytics, detail: { message: String(error) } });
@@ -228,6 +242,63 @@ export function setupIpc(): void {
     const parsed = DragCancelReasonArg.safeParse(reason);
     cancelDrag(true, parsed.success ? parsed.data : 'pointer-cancel');
   });
+  // Cloud session sidebar.
+  guardedOn(IpcChannels.cloudOpen, (_event, payload: unknown) => {
+    const parsed = CloudOpenArg.safeParse(payload);
+    if (parsed.success) cloudSessions().openSession(parsed.data.sessionId);
+  });
+  guardedOn(IpcChannels.cloudRefresh, () => cloudSessions().refresh('shell'));
+  guardedOn(IpcChannels.cloudLoadMore, (_event, payload: unknown) => {
+    const parsed = CloudLoadMoreArg.safeParse(payload);
+    if (parsed.success) cloudSessions().loadMore(parsed.data.folder);
+  });
+  guardedOn(IpcChannels.cloudPanel, (_event, payload: unknown) => {
+    const parsed = CloudPanelArg.safeParse(payload);
+    if (parsed.success) setSessionsOpen(parsed.data.open, 'rail');
+  });
+  guardedOn(IpcChannels.cloudPrefetch, (_event, payload: unknown) => {
+    const parsed = CloudPrefetchArg.safeParse(payload);
+    if (parsed.success) cloudSessions().prefetchSession(parsed.data.sessionId);
+  });
+  // Cloud sidebar mutations — REST ops live in cloudSessions; log ids/names
+  // nowhere (handlers stay zod-safeParse + void).
+  guardedOn(IpcChannels.cloudFolderCreate, (_event, payload: unknown) => {
+    const parsed = CloudFolderCreateArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderCreate(parsed.data.name);
+  });
+  guardedOn(IpcChannels.cloudFolderRename, (_event, payload: unknown) => {
+    const parsed = CloudFolderRenameArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderRename(parsed.data.oldName, parsed.data.newName);
+  });
+  guardedOn(IpcChannels.cloudFolderDelete, (_event, payload: unknown) => {
+    const parsed = CloudFolderDeleteArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderDelete(parsed.data.name);
+  });
+  guardedOn(IpcChannels.cloudFolderReorder, (_event, payload: unknown) => {
+    const parsed = CloudFolderReorderArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().folderReorder(parsed.data.names);
+  });
+  guardedOn(IpcChannels.cloudSessionMove, (_event, payload: unknown) => {
+    const parsed = CloudSessionMoveArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().sessionMove(parsed.data.sessionId, parsed.data.folder);
+  });
+  guardedOn(IpcChannels.cloudSessionArchive, (_event, payload: unknown) => {
+    const parsed = CloudSessionArchiveArg.safeParse(payload);
+    if (parsed.success) void cloudSessions().sessionArchive(parsed.data.sessionId, parsed.data.archive);
+  });
+  guardedOn(IpcChannels.cloudCopyLink, (_event, payload: unknown) => {
+    const parsed = CloudCopyLinkArg.safeParse(payload);
+    if (parsed.success) cloudSessions().copyLink(parsed.data.sessionId);
+  });
+  guardedHandle(IpcChannels.cloudContextMenu, (_event, payload: unknown) => {
+    const parsed = CloudContextMenuArg.safeParse(payload);
+    if (!parsed.success) return { action: null };
+    return cloudSessions().contextMenu(parsed.data);
+  });
+  guardedOn(IpcChannels.cloudShowArchived, (_event, payload: unknown) => {
+    const parsed = CloudShowArchivedArg.safeParse(payload);
+    if (parsed.success) cloudSessions().setShowArchived(parsed.data.value);
+  });
   // Credentials: never log IPC payloads (they may carry secrets).
   guardedHandle(IpcChannels.credentialsList, () => state.credentials?.list() ?? []);
   guardedHandle(IpcChannels.credentialsSave, async (_event, payload: unknown) => {
@@ -338,6 +409,13 @@ function setupExtrasIpc(): void {
   guardedOn(IpcChannels.notificationsPanel, (_e, arg: unknown) => {
     const parsed = NotificationPanelArg.safeParse(arg);
     if (parsed.success) setNotificationsPanel(parsed.data.open);
+  });
+  // Shell-rendered taskbar badge; the reply is the current desired spec so a
+  // shell that mounted late can re-render and converge.
+  guardedHandle(IpcChannels.badgeRendered, (_e, arg: unknown) => {
+    const parsed = BadgeRenderedSchema.parse(arg);
+    notificationStore().applyBadgeIcon(parsed.dataUrl);
+    return { count: notificationStore().unread(), size: badgeIconSize() };
   });
   // Service-user identity: read the resolved source + masked id; reset clears
   // identity.json and re-runs resolution (never returns the raw user id).

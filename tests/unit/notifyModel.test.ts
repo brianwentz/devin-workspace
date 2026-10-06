@@ -17,7 +17,7 @@ import {
   openPullRequests,
   truncateTitle,
 } from '../../src/core/notifyModel';
-import { badgeLabel, encodePng, renderBadgePng } from '../../src/core/badgePng';
+import { badgeLabel, badgeSpec } from '../../src/core/badge';
 
 const make = (id: string, status: string, detail: string | null = null): DevinSession => ({
   session_id: id,
@@ -68,7 +68,7 @@ describe('pollInterval / backoffMs', () => {
   });
 });
 
-describe('badge png', () => {
+describe('badge spec', () => {
   it('labels 1-9 and 9+', () => {
     expect(badgeLabel(0)).toBe('');
     expect(badgeLabel(1)).toBe('1');
@@ -77,15 +77,14 @@ describe('badge png', () => {
     expect(badgeLabel(42)).toBe('9+');
   });
 
-  it('emits a well-formed PNG with the requested dimensions', () => {
-    const png = renderBadgePng(3, { size: 16 });
-    expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    expect(png.subarray(12, 16).toString('ascii')).toBe('IHDR');
-    expect(png.readUInt32BE(16)).toBe(16);
-    expect(png.readUInt32BE(20)).toBe(16);
-    expect(png.subarray(png.length - 8, png.length - 4).toString('ascii')).toBe('IEND');
-    expect(renderBadgePng(12).length).toBeGreaterThan(50);
-    expect(() => encodePng(2, 2, new Uint8Array(3))).toThrow();
+  it('sizes the label font from the badge size', () => {
+    const one = badgeSpec(3, 24);
+    expect(one.label).toBe('3');
+    expect(one.fontPx).toBe(Math.round(24 * 0.62));
+    const plus = badgeSpec(12, 24);
+    expect(plus.label).toBe('9+');
+    expect(plus.fontPx).toBe(Math.round(24 * 0.52));
+    expect(one.color).toBe('#e01e5a');
   });
 });
 

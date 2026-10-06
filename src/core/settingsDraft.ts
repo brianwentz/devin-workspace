@@ -9,6 +9,9 @@ export interface SettingsDraft {
   allowExternal: boolean;
   keepAliveHours: string;
   maxLiveTabs: string;
+  sessionsOpen: boolean;
+  sessionsMaxLiveViews: string;
+  sessionsKeepAliveHours: string;
   terminalAllSurfaces: boolean;
   terminalShell: string;
   userId: string;
@@ -27,6 +30,9 @@ export const DRAFT_TAB: Record<DraftField, SettingsTabId> = {
   allowExternal: 'links',
   keepAliveHours: 'general',
   maxLiveTabs: 'general',
+  sessionsOpen: 'general',
+  sessionsMaxLiveViews: 'general',
+  sessionsKeepAliveHours: 'general',
   terminalAllSurfaces: 'general',
   terminalShell: 'general',
   userId: 'notifications',
@@ -46,6 +52,9 @@ export function draftFromSettings(settings: Settings): SettingsDraft {
     allowExternal: settings.routing.allowExternal,
     keepAliveHours: String(settings.tabs.keepAliveHours),
     maxLiveTabs: String(settings.tabs.maxLiveTabs),
+    sessionsOpen: settings.sessions.open,
+    sessionsMaxLiveViews: String(settings.sessions.maxLiveViews),
+    sessionsKeepAliveHours: String(settings.sessions.keepAliveHours),
     terminalAllSurfaces: settings.terminal.allSurfaces,
     terminalShell: settings.terminal.shell,
     userId: settings.notifications.userId,
@@ -73,6 +82,9 @@ export function isDraftDirty(draft: SettingsDraft, settings: Settings): boolean 
     draft.allowExternal !== base.allowExternal ||
     Number(draft.keepAliveHours) !== Number(base.keepAliveHours) ||
     Number(draft.maxLiveTabs) !== Number(base.maxLiveTabs) ||
+    draft.sessionsOpen !== base.sessionsOpen ||
+    Number(draft.sessionsMaxLiveViews) !== Number(base.sessionsMaxLiveViews) ||
+    Number(draft.sessionsKeepAliveHours) !== Number(base.sessionsKeepAliveHours) ||
     draft.terminalAllSurfaces !== base.terminalAllSurfaces ||
     draft.terminalShell.trim() !== base.terminalShell ||
     draft.userId.trim() !== base.userId ||
@@ -102,6 +114,20 @@ export function validateDraft(
   if (!Number.isInteger(maxLive) || maxLive < 1 || maxLive > 40) {
     errors.maxLiveTabs = 'Max live tabs must be a whole number between 1 and 40';
   }
+  const sessionsMaxLive = Number(draft.sessionsMaxLiveViews);
+  if (!Number.isInteger(sessionsMaxLive) || sessionsMaxLive < 1 || sessionsMaxLive > 20) {
+    errors.sessionsMaxLiveViews =
+      'Cloud sessions kept loaded must be a whole number between 1 and 20';
+  }
+  const sessionsKeepAlive = Number(draft.sessionsKeepAliveHours);
+  if (
+    !Number.isFinite(sessionsKeepAlive) ||
+    sessionsKeepAlive < 0 ||
+    sessionsKeepAlive > 168
+  ) {
+    errors.sessionsKeepAliveHours =
+      'Keep hidden Cloud sessions live for must be between 0 and 168 hours';
+  }
   for (const [index, rule] of draft.linkRules.entries()) {
     const pattern = rule.pattern.trim();
     if (!pattern) {
@@ -126,6 +152,11 @@ export function validateDraft(
         rules: draft.linkRules.map((rule) => ({ ...rule, pattern: rule.pattern.trim() })),
       },
       tabs: { keepAliveHours: keepAlive, maxLiveTabs: maxLive },
+      sessions: {
+        open: draft.sessionsOpen,
+        maxLiveViews: sessionsMaxLive,
+        keepAliveHours: sessionsKeepAlive,
+      },
       terminal: { allSurfaces: draft.terminalAllSurfaces, shell: draft.terminalShell.trim() },
       notifications: { userId: draft.userId.trim(), orgId: draft.orgId.trim() },
     },
@@ -140,6 +171,9 @@ const PATH_TO_FIELD: Record<string, DraftField> = {
   'routing.rules': 'linkRules',
   'tabs.keepAliveHours': 'keepAliveHours',
   'tabs.maxLiveTabs': 'maxLiveTabs',
+  'sessions.open': 'sessionsOpen',
+  'sessions.maxLiveViews': 'sessionsMaxLiveViews',
+  'sessions.keepAliveHours': 'sessionsKeepAliveHours',
   'terminal.allSurfaces': 'terminalAllSurfaces',
   'terminal.shell': 'terminalShell',
   'notifications.userId': 'userId',

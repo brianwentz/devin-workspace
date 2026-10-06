@@ -2,15 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   clampFraction01,
   clampPaneWidth,
+  clampSessionsWidth,
   clampTerminalHeight,
   computeBounds,
   DEFAULT_PANE_FRACTION,
+  DEFAULT_SESSIONS_WIDTH,
   DEFAULT_TERMINAL_HEIGHT,
   fractionFromPx,
+  leftChrome,
   MIN_TERMINAL_HEIGHT,
   paneAvailable,
   paneToggleWindowWidth,
   paneWidthPx,
+  RAIL_WIDTH,
+  SESSIONS_MAX_WIDTH,
+  SESSIONS_MIN_WIDTH,
+  SPLITTER_WIDTH,
   type LayoutState,
 } from '../../src/core/layout';
 
@@ -20,6 +27,8 @@ function layout(overrides: Partial<LayoutState> = {}): LayoutState {
     paneFraction: DEFAULT_PANE_FRACTION,
     terminalOpen: false,
     terminalHeight: DEFAULT_TERMINAL_HEIGHT,
+    sessionsOpen: false,
+    sessionsWidth: DEFAULT_SESSIONS_WIDTH,
     ...overrides,
   };
 }
@@ -245,7 +254,7 @@ describe('pane fraction helpers', () => {
     expect(clampPaneWidth(2000, 1400)).toBe(698);
     // In range → unchanged px.
     expect(clampPaneWidth(500, 1400)).toBe(500);
-    // Wide window: 3000 - 56 - 6 - 640 = 2298 > 1200 — the old cap is gone.
+    // Wide window: 3000 - 56 - 6 - 640 = 2298 — no fixed cap.
     expect(clampPaneWidth(2500, 3000)).toBe(2298);
   });
 
@@ -255,5 +264,90 @@ describe('pane fraction helpers', () => {
     expect(clampFraction01(-1)).toBe(0);
     expect(clampFraction01(2)).toBe(1);
     expect(clampFraction01(Number.NaN)).toBe(DEFAULT_PANE_FRACTION);
+  });
+});
+
+describe('sessions column', () => {
+  it('sits right of the rail, full height, and shifts devin.x', () => {
+    const bounds = computeBounds(
+      { width: 1400, height: 900 },
+      layout({ sessionsOpen: true, sessionsWidth: 260, paneOpen: false }),
+    );
+    expect(bounds.sessions).toEqual({ x: 56, y: 36, width: 260, height: 864 });
+    expect(bounds.sessionsSplitter).toEqual({ x: 316, y: 36, width: 6, height: 864 });
+    expect(bounds.sessionsCollapsed).toBe(false);
+    expect(bounds.devin.x).toBe(56 + 260 + 6);
+    expect(bounds.devin.width).toBe(1400 - 322);
+  });
+
+  it('the dock starts at leftChrome (not the rail)', () => {
+    const bounds = computeBounds(
+      { width: 1400, height: 900 },
+      layout({ sessionsOpen: true, terminalOpen: true, paneOpen: false }),
+    );
+    expect(bounds.terminal?.x).toBe(56 + 260 + 6);
+    expect(bounds.terminal?.width).toBe(bounds.devin.width);
+    // The dock does not shorten the sessions column.
+    expect(bounds.sessions?.height).toBe(900 - 36);
+  });
+
+  it('collapse order: pane first, then sessions', () => {
+    // 1400 - chrome(322) - 6 - 640 = 432 ≥ 320 → pane fits.
+    const wide = computeBounds({ width: 1400, height: 900 }, layout({ sessionsOpen: true }));
+    expect(wide.paneCollapsed).toBe(false);
+    expect(wide.sessions).not.toBeNull();
+    // 1100: pane can't fit (1100-322-6-640 = 132 < 320) → paneCollapsed,
+    // sessions still on (1100 - 322 = 778 ≥ 640).
+    const narrow = computeBounds({ width: 1100, height: 800 }, layout({ sessionsOpen: true }));
+    expect(narrow.paneCollapsed).toBe(true);
+    expect(narrow.sessionsCollapsed).toBe(false);
+    expect(narrow.sessions).not.toBeNull();
+    // 800: even without the pane, 800 - 322 < 640 → sessions collapses too.
+    const tiny = computeBounds({ width: 800, height: 800 }, layout({ sessionsOpen: true }));
+    expect(tiny.sessionsCollapsed).toBe(true);
+    expect(tiny.sessions).toBeNull();
+    expect(tiny.devin.x).toBe(RAIL_WIDTH);
+  });
+
+  it('clampSessionsWidth respects min/max and the devin minimum', () => {
+    expect(clampSessionsWidth(100, 2000)).toBe(SESSIONS_MIN_WIDTH);
+    expect(clampSessionsWidth(9999, 2000)).toBe(SESSIONS_MAX_WIDTH);
+    // Narrow: capped so the devin column keeps MIN_DEVIN_WIDTH.
+    expect(clampSessionsWidth(9999, 1100)).toBe(398);
+  });
+
+  it('leftChrome includes the sessions column only when visible', () => {
+    const open = layout({ sessionsOpen: true });
+    expect(leftChrome(open, 1400)).toBe(RAIL_WIDTH + 260 + SPLITTER_WIDTH);
+    expect(leftChrome(open, 700)).toBe(RAIL_WIDTH); // collapsed
+    expect(leftChrome(layout({ sessionsOpen: false }), 1400)).toBe(RAIL_WIDTH);
+  });
+
+  it('pane toggle widths account for the open column', () => {
+    // 1400, sessions open, pane @0.5: fraction wants 669 px but allowedMax is
+    // 1400 - 322 - 6 - 640 = 432 → splitter.x = 1400 - 432 - 6 = 962.
+    expect(
+      paneToggleWindowWidth(false, 1400, layout({ sessionsOpen: true, paneFraction: 0.5 }), 10000),
+    ).toBe(962);
+    // Opening from 725: the sessions column is collapsed at that width
+    // (725-322 < 640) so leftChrome = 56, devin = 669, pane = 669 → 1400.
+    expect(
+      paneToggleWindowWidth(
+        true,
+        725,
+        layout({ sessionsOpen: true, paneOpen: false, paneFraction: 0.5 }),
+        10000,
+      ),
+    ).toBe(1400);
+    // From a width where the column is actually visible (1400): devin = 1078,
+    // pane = 1078 → target 1400 + 6 + 1078 = 2484.
+    expect(
+      paneToggleWindowWidth(
+        true,
+        1400,
+        layout({ sessionsOpen: true, paneOpen: false, paneFraction: 0.5 }),
+        10000,
+      ),
+    ).toBe(2484);
   });
 });

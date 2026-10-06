@@ -7,6 +7,9 @@ export type PublicState = {
   paneOpen: boolean;
   paneFraction: number;
   paneCollapsed: boolean;
+  sessionsOpen: boolean;
+  sessionsWidth: number;
+  sessionsCollapsed: boolean;
   surface: 'cloud' | 'local' | 'settings' | 'analytics';
   currentSessionId: string | null;
   localSessionId: string | null;
@@ -87,6 +90,7 @@ export type PublicState = {
     lastCheckedAt: string | null;
     error: string | null;
   };
+  cloud: import('../../src/shared/ipc').CloudState;
 };
 
 export async function launchApp(
@@ -109,6 +113,8 @@ export async function launchApp(
       DEVIN_WORKSPACES_LOG: logFile,
       DEVIN_WORKSPACES_DOWNLOAD_DIR: downloadDir,
       DEVIN_WORKSPACES_ALLOW_EXTERNAL: '0',
+      // Legacy specs assume the sessions column is closed (devin.x === RAIL).
+      DEVIN_WORKSPACES_TEST_SESSIONS_OPEN: '0',
       DEVIN_WORKSPACES_TEST_RELEASES_URL: fixtures.apiUrl,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       ...extraEnv,
@@ -584,5 +590,33 @@ export async function keyboardReorderTab(
     },
     orderBefore,
     { timeout: 5000 },
+  );
+}
+
+/**
+ * Deterministic HTML5 drag & drop: dispatch a synthetic drag sequence with a
+ * real DataTransfer so React handlers see the exact MIME types the app uses.
+ * Playwright's dragTo drives the browser's native DnD pipeline, which flakes
+ * on HTML5 draggable elements; this skips the input pipeline entirely.
+ */
+export async function dndMove(page: Page, sourceSel: string, targetSel: string) {
+  await page.evaluate(
+    ([src, tgt]) => {
+      const source = document.querySelector(src as string);
+      const target = document.querySelector(tgt as string);
+      if (!source || !target) {
+        throw new Error(`dndMove: missing element ${!source ? src : tgt}`);
+      }
+      const dataTransfer = new DataTransfer();
+      const fire = (el: Element, type: string, cancelable = true) =>
+        el.dispatchEvent(
+          new DragEvent(type, { bubbles: true, cancelable, dataTransfer }),
+        );
+      fire(source, 'dragstart');
+      fire(target, 'dragover');
+      fire(target, 'drop');
+      fire(source, 'dragend');
+    },
+    [sourceSel, targetSel] as const,
   );
 }

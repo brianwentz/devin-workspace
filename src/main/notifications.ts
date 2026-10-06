@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { nativeImage } from 'electron';
+import { nativeImage, screen } from 'electron';
 import { z } from 'zod';
-import { badgeDataUrl } from '../core/badgePng';
 import {
   addNotification,
   clearNotifications,
@@ -144,16 +143,44 @@ export class NotificationStore {
   }
 
   // Taskbar overlay = unread count (the only surviving OS-level surface).
+  // The glyphs are rendered in the shell renderer (canvas — main has no DOM
+  // and nativeImage can't rasterise SVG); the reply carries the desired
+  // {count,size} so a late mount re-renders.
   private updateBadge(): void {
     const windowRef = state.windowRef;
     if (!windowRef || windowRef.isDestroyed()) return;
+    const count = this.unread();
+    if (count === 0) {
+      windowRef.setOverlayIcon(null, '');
+      log('shell', 'badge', { detail: { count } });
+      return;
+    }
+    this.shellView()?.webContents.send(IpcChannels.badgeRender, {
+      count,
+      size: badgeIconSize(),
+    });
+    log('shell', 'badge', { detail: { count } });
+  }
+
+  private shellView() {
+    return state.shellView && !state.shellView.webContents.isDestroyed()
+      ? state.shellView
+      : null;
+  }
+
+  // Called from the badge:rendered IPC — applies the shell-rendered icon.
+  applyBadgeIcon(dataUrl: string | null): void {
+    const windowRef = state.windowRef;
+    if (!windowRef || windowRef.isDestroyed()) return;
+    const count = this.unread();
+    // A null probe (shell mount) must not clear a badge that is still due;
+    // the reply makes the shell render and call back with the PNG.
+    if (count > 0 && !dataUrl) return;
     try {
-      const count = this.unread();
       windowRef.setOverlayIcon(
-        count > 0 ? nativeImage.createFromDataURL(badgeDataUrl(count)) : null,
+        count > 0 ? nativeImage.createFromDataURL(dataUrl!) : null,
         count > 0 ? `${count} unread notification${count === 1 ? '' : 's'}` : '',
       );
-      log('shell', 'badge', { detail: { count } });
     } catch (error) {
       log('shell', 'badge-error', { detail: { message: String(error) } });
     }
@@ -206,4 +233,10 @@ export function notificationsUnread(): number {
 
 export function notificationsFlush(): void {
   store?.flush();
+}
+
+// Badge icon: 16 logical px at the display's scale factor (16–64 device px).
+export function badgeIconSize(): number {
+  const scale = screen.getPrimaryDisplay().scaleFactor;
+  return Math.min(64, Math.max(16, Math.round(16 * scale)));
 }

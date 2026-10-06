@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { computeBounds, DEFAULT_TERMINAL_HEIGHT, RAIL_WIDTH } from '../core/layout';
+import { renderBadgeDataUrl } from './badge';
 import { handleSettingsFlush } from './settingsDraft';
 import { useShellState } from './store';
 import { Rail } from './components/Rail';
@@ -11,6 +12,7 @@ import { TitleBar } from './components/TitleBar';
 import { Splitter } from './components/Splitter';
 import { TerminalDock } from './components/TerminalDock';
 import { SettingsPanel } from './components/SettingsPanel';
+import { SessionSidebar } from './components/SessionSidebar';
 import { LocalPanel } from './local/LocalPanel';
 
 function useWindowSize(): { width: number; height: number } {
@@ -48,6 +50,26 @@ export function App() {
   // Quit-time implicit save: main sends settings:flush inside shutdown().
   useEffect(() => window.devinworkspaces.onSettingsFlush(handleSettingsFlush), []);
 
+  // Taskbar badge: render the requested PNG here (canvas) and reply until the
+  // acknowledged count matches — the reply re-converges a late-mounting shell.
+  useEffect(() => {
+    let stopped = false;
+    const send = async (dataUrl: string | null): Promise<void> => {
+      const want = await window.devinworkspaces.badgeRendered(dataUrl);
+      if (stopped) return;
+      const rendered = renderBadgeDataUrl(want.count, want.size);
+      if (rendered !== dataUrl) await send(rendered);
+    };
+    const off = window.devinworkspaces.onBadgeRender((request) => {
+      void send(renderBadgeDataUrl(request.count, request.size));
+    });
+    void send(null);
+    return () => {
+      stopped = true;
+      off();
+    };
+  }, []);
+
   if (!state) return null;
   const terminalVisible =
     state.terminalOpen && (state.surface === 'cloud' || state.settings.terminal.allSurfaces);
@@ -56,6 +78,8 @@ export function App() {
     paneFraction: state.paneFraction,
     terminalOpen: terminalVisible,
     terminalHeight: state.terminalHeight,
+    sessionsOpen: state.sessionsOpen && state.surface === 'cloud',
+    sessionsWidth: state.sessionsWidth,
   });
   const paneVisible = state.paneOpen && !bounds.paneCollapsed;
   const mainRect = bounds.devin;
@@ -69,6 +93,10 @@ export function App() {
         terminalOpen={state.terminalOpen}
         terminalAllSurfaces={state.settings.terminal.allSurfaces}
       />
+      {state.surface === 'cloud' && bounds.sessions && <SessionSidebar rect={bounds.sessions} />}
+      {bounds.sessionsSplitter && (
+        <Splitter axis="s" rect={bounds.sessionsSplitter} enabled={state.sessionsOpen} />
+      )}
       <TitleBar
         windowWidth={size.width}
         paneVisible={paneVisible && bounds.ghTab !== null}

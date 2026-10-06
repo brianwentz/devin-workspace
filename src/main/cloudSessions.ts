@@ -1,0 +1,1063 @@
+// Cloud session sidebar data layer. Opens a JSON-RPC websocket to
+// wss://<tenant>/api/acp/live using the web app's own access token — which is
+// read inside the devinView via executeJavaScript and never leaves this
+// class. No titles/folder names/user ids/tokens are ever logged.
+
+import { app, clipboard, dialog, Menu, net, shell } from 'electron';
+import { readFileSync } from 'node:fs';
+import {
+  acpWsUrl,
+  buildFolderPageParams,
+  buildInitializeParams,
+  buildListParams,
+  parseListResult,
+  parseUsersInfo,
+  sanitizeToken,
+  usersInfoUrl,
+  type CloudListResult,
+  type CloudSession,
+} from '../core/cloudAcp';
+import {
+  addFolder,
+  moveSession,
+  removeFolder,
+  renameFolder,
+  reorderFolders,
+  setArchived,
+  type CloudListData,
+} from '../core/sessionTree';
+import { CloudSessionSchema, type CloudState } from '../shared/ipc';
+import { z } from 'zod';
+import { log } from './log';
+import { cloudViews } from './cloudViews';
+import { parseSessionId } from '../core/sessions';
+import { originOf, state, testMode } from './state';
+import { applyLayout, notifyShell } from './window';
+
+const TOKEN_BACKOFF_MIN_MS = 2_000;
+const TOKEN_BACKOFF_MAX_MS = 20_000;
+const TOKEN_GRACE_MS = 90_000;
+const REQUEST_TIMEOUT_MS = 20_000;
+const LIST_TIMEOUT_MS = 30_000;
+const TOKEN_TIMEOUT_MS = 15_000;
+const POLL_FOCUSED_MS = 15_000;
+const POLL_IDLE_MS = 60_000;
+const BACKOFF_MIN_MS = 2_000;
+const BACKOFF_MAX_MS = 60_000;
+const ORG_SYNC_DEBOUNCE_MS = 2_000;
+const FOLDER_PAGE_SIZE = 20;
+
+type TokenFailReason = 'view-not-ready' | 'no-devindebug' | 'login-required' | 'timeout' | 'error';
+
+const FixtureSchema = z.object({
+  sessions: z.array(CloudSessionSchema),
+  folders: z.array(z.string()).default([]),
+  folderTotals: z.record(z.string(), z.number()).default({}),
+  nextCursor: z.string().nullable().default(null),
+});
+
+type Pending = {
+  resolve: (message: Record<string, unknown>) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+class CloudSessions {
+  private token: string | null = null;
+  // Kept so error messages logged after a rotation are still scrubbed.
+  private lastToken: string | null = null;
+  private orgId: string | null = null;
+  private userId: string | null = null;
+  private userPreferencesUrl: string | null = null;
+  private socket: WebSocket | null = null;
+  private pending = new Map<number, Pending>();
+  private nextId = 1;
+  private sessions: CloudSession[] = [];
+  private folders: string[] = [];
+  private folderTotals: Record<string, number> = {};
+  private status: CloudState['status'] = 'disabled';
+  private lastSyncAt: string | null = null;
+  private error: string | null = null;
+  private backoffMs = BACKOFF_MIN_MS;
+  private retryTimer: NodeJS.Timeout | null = null;
+  private pollTimer: NodeJS.Timeout | null = null;
+  private lastSnapshotJson = '';
+  private started = false;
+  private fixtureFile: string | null = null;
+  private folderOffsets = new Map<string, number>();
+  private unsubActiveNavigate: (() => void) | null = null;
+  private tokenInFlight: Promise<void> | null = null;
+  private tokenBackoffMs = TOKEN_BACKOFF_MIN_MS;
+  private firstTokenAttemptAt: number | null = null;
+  private listInFlight = false;
+  private listDirty: string | null = null;
+  private syncInFlight: Promise<void> | null = null;
+  private lastOrgSyncAt = 0;
+  private emptyListSynced = false;
+  private showArchived = false;
+  private lastError: { op: string; message: string } | null = null;
+  // Test mode records every mutation ({op, method, path, body}) — no network.
+  private mutations: { op: string; payload: Record<string, unknown> }[] = [];
+  private readonly onViewReady = () => {
+    if (!this.token) {
+      void this.obtainToken();
+      return;
+    }
+    // Follow the page's current org — the view may switch tenants.
+    if (Date.now() - this.lastOrgSyncAt < ORG_SYNC_DEBOUNCE_MS) return;
+    this.lastOrgSyncAt = Date.now();
+    void this.syncOrg('navigate');
+  };
+
+  snapshot(): CloudState {
+    return {
+      status: this.status,
+      lastSyncAt: this.lastSyncAt,
+      error: this.error,
+      folders: this.folders,
+      folderTotals: this.folderTotals,
+      sessions: this.sessions,
+      liveSessionIds: cloudViews().publicInfo().liveSessionIds,
+      showArchived: this.showArchived,
+      lastError: this.lastError,
+    };
+  }
+
+  start(): void {
+    if (this.started) return;
+    this.started = true;
+    if (testMode) {
+      this.fixtureFile = process.env.DEVIN_WORKSPACES_TEST_CLOUD_SESSIONS ?? null;
+      if (this.fixtureFile) {
+        this.loadFixture('start');
+      } else {
+        // The fixture tenant has no devinDebug — stay inert.
+        this.setStatus('disabled');
+      }
+      this.emit();
+      return;
+    }
+    this.setStatus('connecting');
+    // The pool fires this on every active-view navigation/finish-load AND on
+    // each activation — the token re-read gates itself on the tenant URL.
+    this.unsubActiveNavigate = cloudViews().onActiveNavigate(this.onViewReady);
+    this.emit();
+    void this.obtainToken();
+  }
+
+  stop(): void {
+    this.started = false;
+    this.clearTimers();
+    this.unsubActiveNavigate?.();
+    this.unsubActiveNavigate = null;
+    this.closeSocket();
+  }
+
+  refresh(reason: string): void {
+    if (this.fixtureFile) {
+      this.loadFixture(reason);
+      return;
+    }
+    if (!this.started || (testMode && !this.fixtureFile)) return;
+    if (!this.token) {
+      void this.obtainToken();
+      return;
+    }
+    void (async () => {
+      // The page may have switched orgs — a reconnect re-lists via the
+      // handshake, so only list when we're still on the same socket.
+      const socketBefore = this.socket;
+      await this.syncOrg(reason);
+      if (this.socket === socketBefore && this.socket?.readyState === WebSocket.OPEN) {
+        void this.list(reason);
+      }
+    })();
+  }
+
+  loadMore(folder: string): void {
+    // Fixture mode has no live socket — paging is a no-op there.
+    if (this.fixtureFile || !this.started) return;
+    if (this.socket?.readyState !== WebSocket.OPEN || !this.orgId) return;
+    const rootsOffset =
+      this.folderOffsets.get(folder) ??
+      this.sessions.filter((s) => s.folder === folder).length;
+    const params = buildFolderPageParams({
+      orgId: this.orgId,
+      userId: this.userId,
+      folder,
+      rootsOffset,
+    });
+    void this.request('session/list', params, LIST_TIMEOUT_MS)
+      .then((message) => {
+        const result = parseListResult(message.result, this.orgId!);
+        const seen = new Set(this.sessions.map((s) => s.id));
+        const fresh = result.sessions.filter((s) => !seen.has(s.id));
+        this.sessions = [...this.sessions, ...fresh];
+        this.folderOffsets.set(folder, rootsOffset + fresh.length);
+        if (Object.keys(result.folderTotals).length) {
+          this.folderTotals = { ...this.folderTotals, ...result.folderTotals };
+        }
+        const total = this.folderTotals[folder];
+        log('cloud', 'cloud-more', {
+          detail: { count: fresh.length, hasMore: total != null && total > rootsOffset + fresh.length },
+        });
+        this.emit();
+      })
+      .catch((error: unknown) => {
+        this.onError('list-more', error);
+      });
+  }
+
+  // Sidebar row click: the stored url is verified against the tenant before
+  // navigating so a tampered payload can't steer the Cloud view.
+  openSession(sessionId: string): void {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session || parseSessionId(session.url, state.tenantUrl) !== sessionId) {
+      log('cloud', 'cloud-open', { detail: { sessionId, found: false } });
+      return;
+    }
+    state.surface = 'cloud';
+    cloudViews().show(sessionId, session.url);
+    applyLayout();
+    log('cloud', 'cloud-open', { detail: { sessionId } });
+  }
+
+  prefetchSession(sessionId: string): void {
+    if (this.status !== 'ready') return;
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session || parseSessionId(session.url, state.tenantUrl) !== sessionId) return;
+    cloudViews().prefetch(sessionId, session.url);
+  }
+
+  // --- mutations (folders / move / archive) -------------------------------
+  // Same REST base + headers as users/info. Log only {op, ok, status} —
+  // never names or ids. `applyLocal` models the change for test mode (the
+  // fake backend) while real calls re-list on success.
+
+  private async mutate(
+    op: string,
+    method: 'POST' | 'DELETE',
+    path: string,
+    body: unknown,
+    applyLocal: (data: CloudListData) => CloudListData,
+  ): Promise<void> {
+    if (testMode) {
+      this.mutations.push({ op, payload: { method, path, body } });
+      if (this.fixtureFile) {
+        const next = applyLocal({
+          sessions: this.sessions,
+          folders: this.folders,
+          folderTotals: this.folderTotals,
+        });
+        this.sessions = next.sessions;
+        this.folders = next.folders;
+        this.folderTotals = next.folderTotals;
+        this.lastSyncAt = new Date().toISOString();
+        this.emit();
+      }
+      log('cloud', 'cloud-mutate', { detail: { op, ok: true, status: 0 } });
+      return;
+    }
+    const url = `${state.tenantUrl.replace(/\/+$/, '')}/api/${path}`;
+    const send = () =>
+      net.fetch(url, {
+        method,
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          'x-cog-org-id': this.orgId ?? '',
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    try {
+      let response = await send();
+      if (response.status === 401) {
+        // Stale token — re-read once through the single-flight path, retry once.
+        this.token = null;
+        await this.obtainToken();
+        if (this.token) response = await send();
+      }
+      const ok = response.status >= 200 && response.status < 300;
+      log('cloud', 'cloud-mutate', { detail: { op, ok, status: response.status } });
+      if (!ok) {
+        this.setMutationError(op, `HTTP ${response.status}`);
+        return;
+      }
+      this.lastError = null;
+      if (this.socket?.readyState === WebSocket.OPEN) void this.list('mutate');
+    } catch {
+      log('cloud', 'cloud-mutate', { detail: { op, ok: false, status: -1 } });
+      this.setMutationError(op, 'network');
+    }
+  }
+
+  private setMutationError(op: string, message: string): void {
+    this.lastError = { op, message };
+    this.emit();
+  }
+
+  mutationLog(): { op: string; payload: Record<string, unknown> }[] {
+    return this.mutations;
+  }
+
+  // Test-mode menu seam (see contextMenu): last popup description + click.
+  private pendingMenu = new Map<string, Electron.MenuItemConstructorOptions>();
+  private lastMenuDesc: Record<string, unknown>[] = [];
+  private pendingAction: 'rename' | 'new-folder' | null = null;
+
+  menuItems(): Record<string, unknown>[] {
+    return this.lastMenuDesc;
+  }
+
+  clickMenuItem(id: string): { action: 'rename' | 'new-folder' | null } {
+    const item = this.pendingMenu.get(id);
+    if (!item?.click) return { action: null };
+    // Native checkboxes toggle before firing click — mirror that.
+    const next = !(item.checked ?? false);
+    item.checked = next;
+    item.click(
+      { checked: next } as Electron.MenuItem,
+      state.windowRef!,
+      {} as Electron.KeyboardEvent,
+    );
+    const action = this.pendingAction;
+    this.pendingAction = null;
+    return { action };
+  }
+
+  private userFolders(): string[] {
+    return this.folders.filter((f) => f !== 'pinned' && f !== 'participated');
+  }
+
+  folderCreate(name: string): Promise<void> {
+    return this.mutate('folder-create', 'POST', 'sessions/folder/create', { folder: name }, (d) =>
+      addFolder(d, name),
+    );
+  }
+
+  folderRename(oldName: string, newName: string): Promise<void> {
+    return this.mutate(
+      'folder-rename',
+      'POST',
+      'sessions/folder/rename',
+      { old_name: oldName, new_name: newName },
+      (d) => renameFolder(d, oldName, newName),
+    );
+  }
+
+  folderDelete(name: string): Promise<void> {
+    return this.mutate(
+      'folder-delete',
+      'DELETE',
+      `sessions/folder?name=${encodeURIComponent(name)}`,
+      undefined,
+      (d) => removeFolder(d, name),
+    );
+  }
+
+  folderReorder(names: string[]): Promise<void> {
+    const userFolders = names.filter((n) => n !== 'pinned' && n !== 'participated');
+    return this.mutate(
+      'folder-reorder',
+      'POST',
+      'sessions/folder/reorder',
+      { folder_names: userFolders },
+      (d) => reorderFolders(d, userFolders),
+    );
+  }
+
+  sessionMove(sessionId: string, folder: string | null): Promise<void> {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) return Promise.resolve();
+    if (folder === null) {
+      return this.mutate(
+        'session-move',
+        'DELETE',
+        `sessions/folder/${session.acpId}`,
+        undefined,
+        (d) => moveSession(d, sessionId, null),
+      );
+    }
+    return this.mutate(
+      'session-move',
+      'POST',
+      'sessions/folder',
+      { devin_id: session.acpId, folder },
+      (d) => moveSession(d, sessionId, folder),
+    );
+  }
+
+  sessionArchive(sessionId: string, archive: boolean): Promise<void> {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) return Promise.resolve();
+    return this.mutate(
+      'session-archive',
+      'POST',
+      'sessions/bulk-archive',
+      { session_ids: [session.acpId], archive, close_pr_urls: [] },
+      (d) => setArchived(d, sessionId, archive),
+    );
+  }
+
+  sessionLink(sessionId: string): string | null {
+    if (!this.sessions.some((s) => s.id === sessionId)) return null;
+    return new URL(`/sessions/${sessionId}`, state.tenantUrl).toString();
+  }
+
+  copyLink(sessionId: string): void {
+    const link = this.sessionLink(sessionId);
+    if (!link) return;
+    if (testMode) {
+      // Record the write so e2e doesn't depend on the OS clipboard.
+      this.mutations.push({ op: 'copy-link', payload: { link } });
+    }
+    clipboard.writeText(link);
+  }
+
+  setShowArchived(value: boolean): void {
+    if (this.showArchived === value) return;
+    this.showArchived = value;
+    if (testMode) {
+      this.mutations.push({ op: 'show-archived', payload: { value } });
+    }
+    this.emit();
+    if (this.socket?.readyState === WebSocket.OPEN) void this.list('shell');
+  }
+
+  // --- context menus ------------------------------------------------------
+  // Native menus popped at the shell window; the invoke resolves to an
+  // action the shell completes inline ({action: 'rename'|'new-folder'}).
+
+  async contextMenu(arg: {
+    kind: 'session' | 'folder' | 'header';
+    sessionId?: string | undefined;
+    name?: string | undefined;
+    x: number;
+    y: number;
+  }): Promise<{
+    action: 'rename' | 'new-folder' | null;
+    items?: Record<string, unknown>[];
+  }> {
+    this.pendingAction = null;
+    const items: Electron.MenuItemConstructorOptions[] = [];
+
+    if (arg.kind === 'header') {
+      items.push({
+        label: 'Show archived sessions',
+        type: 'checkbox',
+        checked: this.showArchived,
+        click: (item) => this.setShowArchived(item.checked),
+      });
+    } else if (arg.kind === 'folder' && arg.name) {
+      const name = arg.name;
+      items.push(
+        {
+          label: 'Rename…',
+          click: () => {
+            this.pendingAction = 'rename';
+          },
+        },
+        {
+          label: 'Delete…',
+          click: () => void this.confirmDeleteFolder(name),
+        },
+      );
+    } else if (arg.kind === 'session' && arg.sessionId) {
+      const session = this.sessions.find((s) => s.id === arg.sessionId);
+      if (!session) return { action: null };
+      const link = new URL(`/sessions/${session.id}`, state.tenantUrl).toString();
+      const submenu: Electron.MenuItemConstructorOptions[] = this.folders.map((name) => ({
+        label: name,
+        type: 'checkbox',
+        checked: session.folder === name,
+        click: () => void this.sessionMove(session.id, name),
+      }));
+      submenu.push(
+        { type: 'separator' },
+        {
+          label: 'Remove from folder',
+          enabled: session.folder !== null,
+          click: () => void this.sessionMove(session.id, null),
+        },
+        {
+          label: 'New folder…',
+          click: () => {
+            this.pendingAction = 'new-folder';
+          },
+        },
+      );
+      items.push(
+        { label: 'Copy link', click: () => this.copyLink(session.id) },
+        { label: 'Open in browser', click: () => void shell.openExternal(session.url || link) },
+        { type: 'separator' },
+        { label: 'Move to folder', submenu },
+        { type: 'separator' },
+        {
+          label: session.isArchived ? 'Unarchive' : 'Archive',
+          click: () => void this.sessionArchive(session.id, !session.isArchived),
+        },
+      );
+    } else {
+      return { action: null };
+    }
+
+    if (items.length === 0) return { action: null };
+    if (testMode) {
+      // e2e can't click a native popup — return a description instead; the
+      // cloudMenuItems/cloudMenuClick hooks drive the same callbacks.
+      this.pendingMenu.clear();
+      let n = 0;
+      const assign = (list: Electron.MenuItemConstructorOptions[]) =>
+        list.forEach((item) => {
+          if (item.type === 'separator') return;
+          item.id = `m${n++}`;
+          this.pendingMenu.set(item.id, item);
+          if (Array.isArray(item.submenu)) {
+            assign(item.submenu as Electron.MenuItemConstructorOptions[]);
+          }
+        });
+      assign(items);
+      const describe = (
+        list: Electron.MenuItemConstructorOptions[],
+      ): Record<string, unknown>[] =>
+        list.map((item) => ({
+          id: item.id,
+          label: item.label ?? item.role ?? '',
+          type: item.type ?? 'normal',
+          enabled: item.enabled !== false,
+          ...(item.type === 'checkbox' ? { checked: item.checked } : {}),
+          ...(item.submenu
+            ? { submenu: describe(item.submenu as Electron.MenuItemConstructorOptions[]) }
+            : {}),
+        }));
+      this.lastMenuDesc = describe(items);
+      return { action: null, items: this.lastMenuDesc };
+    }
+    const menu = Menu.buildFromTemplate(items);
+    await new Promise<void>((resolve) => {
+      const opts: Electron.PopupOptions = {
+        x: Math.round(arg.x),
+        y: Math.round(arg.y),
+        callback: () => resolve(),
+      };
+      if (state.windowRef) menu.popup({ ...opts, window: state.windowRef });
+      else menu.popup(opts);
+    });
+    return { action: this.pendingAction };
+  }
+
+  private async confirmDeleteFolder(name: string): Promise<void> {
+    const win = state.windowRef;
+    if (!win) return;
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Delete', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Delete folder "${name}"?`,
+      detail: "Sessions stay — they're just unfoldered.",
+    });
+    if (response === 0) void this.folderDelete(name);
+  }
+
+  // --- fixture mode -------------------------------------------------------
+
+  private loadFixture(reason: string): void {
+    try {
+      const parsed = FixtureSchema.parse(JSON.parse(readFileSync(this.fixtureFile!, 'utf8')));
+      this.sessions = parsed.sessions;
+      this.folders = parsed.folders;
+      this.folderTotals = parsed.folderTotals;
+      this.error = null;
+      this.lastSyncAt = new Date().toISOString();
+      this.setStatus('ready');
+      log('cloud', 'cloud-list', {
+        detail: {
+          count: this.sessions.length,
+          folders: this.folders.length,
+          durationMs: 0,
+          reason: `fixture-${reason}`,
+        },
+      });
+    } catch (error) {
+      this.setStatus('error', String(error));
+      log('cloud', 'cloud-error', { detail: { kind: 'fixture', message: String(error).slice(0, 200) } });
+    }
+    this.emit();
+  }
+
+  // --- token acquisition --------------------------------------------------
+
+  private obtainToken(): Promise<void> {
+    if (testMode) return Promise.resolve(); // no devinDebug on the fixture tenant
+    if (this.tokenInFlight) return this.tokenInFlight;
+    const work = this.obtainTokenInner().finally(() => {
+      this.tokenInFlight = null;
+    });
+    this.tokenInFlight = work;
+    return work;
+  }
+
+  private async obtainTokenInner(): Promise<void> {
+    // A did-navigate-triggered call must not race a pending retry timer —
+    // whoever runs first clears it so connect() can't fire twice.
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    // Already live or mid-handshake — don't churn a healthy socket.
+    if (
+      this.token &&
+      (this.socket?.readyState === WebSocket.OPEN ||
+        this.socket?.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    this.firstTokenAttemptAt ??= Date.now();
+    let failReason: TokenFailReason | null = null;
+    const identity = await this.readPageIdentity((reason) => {
+      failReason = reason;
+    });
+    if (!identity) {
+      this.onTokenFailure(failReason ?? 'error');
+      return;
+    }
+    this.token = identity.token;
+    this.lastToken = identity.token;
+    this.orgId = identity.orgId;
+    this.backoffMs = BACKOFF_MIN_MS;
+    this.tokenBackoffMs = TOKEN_BACKOFF_MIN_MS;
+    this.firstTokenAttemptAt = null;
+    log('cloud', 'cloud-token', { detail: { ok: true } });
+    this.emit();
+    this.connect();
+  }
+
+  // Reads the page's CURRENT token + org — devinDebug.getOrgId() reports
+  // whichever org the web app has selected, which can change after startup
+  // for multi-org users. onFail carries the fixed failure reason.
+  private async readPageIdentity(
+    onFail?: (reason: TokenFailReason) => void,
+  ): Promise<{ token: string; orgId: string } | null> {
+    const contents = state.devinView?.webContents;
+    const tenantOrigin = originOf(state.tenantUrl);
+    if (
+      !contents ||
+      contents.isDestroyed() ||
+      contents.isLoading() ||
+      originOf(contents.getURL()) !== tenantOrigin
+    ) {
+      onFail?.('view-not-ready');
+      return null;
+    }
+    try {
+      const credentials = (await Promise.race([
+        contents.executeJavaScript(
+          'window.devinDebug?.getAccessToken ? window.devinDebug.getAccessToken().then(t => [t, window.devinDebug.getOrgId()]) : null',
+        ),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('token timeout')), TOKEN_TIMEOUT_MS),
+        ),
+      ])) as [string | null, string] | null;
+      const token = credentials?.[0] ?? null;
+      const orgId = credentials?.[1] ?? null;
+      if (!token || !orgId) {
+        onFail?.(credentials === null ? 'no-devindebug' : 'login-required');
+        return null;
+      }
+      return { token, orgId };
+    } catch (error) {
+      const message = String(error);
+      onFail?.(
+        message === 'Error: token timeout'
+          ? 'timeout'
+          : /login required/i.test(message)
+            ? 'login-required'
+            : 'error',
+      );
+      return null;
+    }
+  }
+
+  private syncOrg(reason: string): Promise<void> {
+    if (this.syncInFlight) return this.syncInFlight;
+    const work = this.syncOrgInner(reason).finally(() => {
+      this.syncInFlight = null;
+    });
+    this.syncInFlight = work;
+    return work;
+  }
+
+  private async syncOrgInner(reason: string): Promise<void> {
+    if (!this.started || testMode || this.fixtureFile) return;
+    const identity = await this.readPageIdentity();
+    if (!identity) return;
+    if (identity.orgId !== this.orgId && (this.socket !== null || this.token !== null)) {
+      // The ws url carries org_id — a reconnect is required, and the new
+      // handshake's list('connect') re-fills the sidebar.
+      this.token = identity.token;
+      this.lastToken = identity.token;
+      this.orgId = identity.orgId;
+      this.sessions = [];
+      this.folders = [];
+      this.folderTotals = {};
+      this.folderOffsets.clear();
+      this.emptyListSynced = false;
+      log('cloud', 'cloud-org-change', { detail: { reason } });
+      this.connect();
+      this.emit();
+      return;
+    }
+    if (identity.token !== this.token) {
+      // Rotated token on the same org — keep the socket, refresh the copy.
+      this.token = identity.token;
+      this.lastToken = identity.token;
+    }
+  }
+
+  // Every obtainToken failure path funnels here. Never clobber a live or
+  // handshaking connection's status; 'no-token' means signed out — a still-
+  // bootstrapping tenant page is 'connecting', not 'no-token'.
+  private onTokenFailure(reason: TokenFailReason): void {
+    if (
+      this.token &&
+      (this.socket?.readyState === WebSocket.OPEN ||
+        this.socket?.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    const contents = state.devinView?.webContents;
+    const viewOrigin =
+      contents && !contents.isDestroyed() ? originOf(contents.getURL()) : null;
+    const tenantOrigin = originOf(state.tenantUrl);
+    // Sitting on an external login page (Okta/auth.devin.ai) is a real
+    // signed-out signal; about:blank ('null' origin) and the tenant origin are
+    // just "still bootstrapping".
+    const externalLogin =
+      viewOrigin !== null && viewOrigin !== 'null' && viewOrigin !== tenantOrigin;
+    const graceExpired =
+      this.firstTokenAttemptAt !== null &&
+      Date.now() - this.firstTokenAttemptAt > TOKEN_GRACE_MS;
+    this.setStatus(externalLogin || graceExpired ? 'no-token' : 'connecting');
+    log('cloud', 'cloud-token', { detail: { ok: false, reason } });
+    this.scheduleRetry(this.tokenBackoffMs);
+    this.tokenBackoffMs = Math.min(this.tokenBackoffMs * 2, TOKEN_BACKOFF_MAX_MS);
+    this.emit();
+  }
+
+  // --- websocket ----------------------------------------------------------
+
+  private connect(): void {
+    if (!this.token || !this.orgId) return;
+    this.closeSocket();
+    this.emptyListSynced = false;
+    this.setStatus('connecting');
+    this.emit();
+    const socket = new WebSocket(acpWsUrl(state.tenantUrl, this.token, this.orgId));
+    this.socket = socket;
+
+    socket.addEventListener('message', (event) => {
+      let message: Record<string, unknown>;
+      try {
+        message = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      const id = typeof message.id === 'number' ? message.id : null;
+      if (id !== null && this.pending.has(id)) {
+        const entry = this.pending.get(id)!;
+        this.pending.delete(id);
+        clearTimeout(entry.timer);
+        entry.resolve(message);
+      }
+    });
+    socket.addEventListener('close', (event) => {
+      if (this.socket !== socket) return;
+      this.socket = null;
+      this.failPending('ws closed');
+      log('cloud', 'cloud-close', { detail: { code: event.code } });
+      this.scheduleReconnect();
+    });
+    socket.addEventListener('error', () => {
+      // 'close' follows — reconnect logic lives there.
+    });
+    socket.addEventListener('open', () => {
+      void this.handshake(socket);
+    });
+  }
+
+  private async handshake(socket: WebSocket): Promise<void> {
+    try {
+      const init = await this.request('initialize', buildInitializeParams(app.getVersion()));
+      if (init.error) {
+        const rpcError = init.error as { code?: unknown; message?: unknown };
+        this.onRpcError('initialize', rpcError);
+        this.closeSocket();
+        this.scheduleReconnect();
+        return;
+      }
+      const initResult = init.result as Record<string, unknown> | undefined;
+      const prefsUrl = (
+        (initResult?.agentCapabilities as Record<string, unknown> | undefined)?._meta as
+          | Record<string, unknown>
+          | undefined
+      )?.['cognition.ai/userPreferencesUrl'];
+      this.userPreferencesUrl = typeof prefsUrl === 'string' ? prefsUrl : null;
+      const protocolVersion =
+        typeof initResult?.protocolVersion === 'number' ? initResult.protocolVersion : undefined;
+      log('cloud', 'cloud-connect', { detail: { ok: true, protocolVersion } });
+      this.backoffMs = BACKOFF_MIN_MS;
+      await this.identify();
+      await this.list('connect');
+      this.setStatus('ready');
+      this.emit();
+      this.schedulePoll();
+    } catch (error) {
+      if (this.socket !== socket) return;
+      this.onError('handshake', error);
+      this.closeSocket();
+      this.scheduleReconnect();
+    }
+  }
+
+  private async identify(): Promise<void> {
+    const urls = [usersInfoUrl(state.tenantUrl)];
+    if (this.userPreferencesUrl && /^https:\/\//.test(this.userPreferencesUrl)) {
+      urls.push(this.userPreferencesUrl);
+    }
+    for (const url of urls) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+        const response = await net.fetch(url, {
+          headers: {
+            authorization: `Bearer ${this.token}`,
+            'x-cog-org-id': this.orgId ?? '',
+            accept: 'application/json',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (response.status >= 200 && response.status < 300) {
+          const info = parseUsersInfo(await response.json());
+          this.userId = info.userId;
+          log('cloud', 'cloud-identity', { detail: { ok: true, status: response.status } });
+          return;
+        }
+        log('cloud', 'cloud-identity', { detail: { ok: false, status: response.status } });
+      } catch (error) {
+        log('cloud', 'cloud-identity', {
+          detail: { ok: false, message: this.scrub(String(error)) },
+        });
+      }
+    }
+    // Proceed without the participant filter — the list still works.
+    this.userId = null;
+  }
+
+  private async list(reason: string): Promise<void> {
+    if (!this.orgId) return;
+    // Coalesce: a queued list just marks dirty and one follow-up runs after.
+    if (this.listInFlight) {
+      this.listDirty = reason;
+      return;
+    }
+    this.listInFlight = true;
+    try {
+      await this.listOnce(reason);
+    } finally {
+      this.listInFlight = false;
+      if (this.listDirty !== null) {
+        const next = this.listDirty;
+        this.listDirty = null;
+        // The failed list closed the socket — the reconnect path re-lists
+        // ('connect') anyway, so don't fire a doomed request.
+        if (this.socket?.readyState === WebSocket.OPEN) void this.list(next);
+      }
+    }
+  }
+
+  private async listOnce(reason: string): Promise<void> {
+    const orgId = this.orgId!;
+    const startedAt = Date.now();
+    try {
+      const message = await this.request(
+        'session/list',
+        buildListParams({
+          orgId,
+          userId: this.userId,
+          archivedStatus: this.showArchived ? 'ALL' : 'ACTIVE',
+        }),
+        LIST_TIMEOUT_MS,
+      );
+      if (message.error) {
+        const rpcError = message.error as { code?: unknown; message?: unknown };
+        this.onRpcError('list', rpcError);
+        return;
+      }
+      const result: CloudListResult = parseListResult(message.result, orgId);
+      this.sessions = result.sessions;
+      this.folders = result.folders;
+      this.folderTotals = result.folderTotals;
+      // Keep loadMore offsets aligned with what the fresh page contains.
+      this.folderOffsets.clear();
+      for (const session of result.sessions) {
+        if (session.folder !== null) {
+          this.folderOffsets.set(
+            session.folder,
+            (this.folderOffsets.get(session.folder) ?? 0) + 1,
+          );
+        }
+      }
+      this.lastSyncAt = new Date().toISOString();
+      this.error = null;
+      this.lastError = null;
+      this.setStatus('ready');
+      log('cloud', 'cloud-list', {
+        detail: {
+          count: result.sessions.length,
+          folders: result.folders.length,
+          durationMs: Date.now() - startedAt,
+          reason,
+        },
+      });
+      this.emit();
+      // A totally empty result usually means the page is on another org for
+      // multi-org users — re-read devinDebug.getOrgId() once per connection.
+      if (result.sessions.length === 0 && result.folders.length === 0 && !this.emptyListSynced) {
+        this.emptyListSynced = true;
+        void this.syncOrg('empty-list');
+      }
+    } catch (error) {
+      this.onError('list', error);
+      this.closeSocket();
+      this.scheduleReconnect();
+    }
+  }
+
+  private request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      const socket = this.socket;
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        reject(new Error('ws not open'));
+        return;
+      }
+      const id = this.nextId++;
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error('request timeout'));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    });
+  }
+
+  private failPending(message: string): void {
+    for (const entry of this.pending.values()) {
+      clearTimeout(entry.timer);
+      entry.reject(new Error(message));
+    }
+    this.pending.clear();
+  }
+
+  private closeSocket(): void {
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      try {
+        socket.close();
+      } catch {
+        // already closed
+      }
+    }
+  }
+
+  // --- scheduling ---------------------------------------------------------
+
+  private scheduleReconnect(): void {
+    if (!this.started || this.retryTimer) return;
+    this.setStatus('connecting');
+    // The token may have rotated — re-read it before reconnecting.
+    this.token = null;
+    this.emit();
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.obtainToken();
+    }, this.backoffMs);
+    this.backoffMs = Math.min(this.backoffMs * 2, BACKOFF_MAX_MS);
+  }
+
+  private scheduleRetry(ms: number): void {
+    if (!this.started || this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.obtainToken();
+    }, ms);
+  }
+
+  private schedulePoll(): void {
+    if (this.pollTimer || !this.started) return;
+    const focused = state.windowRef?.isFocused() === true;
+    this.pollTimer = setTimeout(
+      () => {
+        this.pollTimer = null;
+        if (this.socket?.readyState === WebSocket.OPEN) void this.list('poll');
+        this.schedulePoll();
+      },
+      focused ? POLL_FOCUSED_MS : POLL_IDLE_MS,
+    );
+  }
+
+  private clearTimers(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.retryTimer = null;
+    this.pollTimer = null;
+  }
+
+  // --- state / logging ----------------------------------------------------
+
+  private setStatus(status: CloudState['status'], error?: string): void {
+    this.status = status;
+    this.error = error !== undefined ? this.scrub(error).slice(0, 200) : status === 'ready' ? null : this.error;
+  }
+
+  private onRpcError(kind: string, rpcError: { code?: unknown; message?: unknown }): void {
+    const message = this.scrub(String(rpcError.message ?? 'rpc error')).slice(0, 200);
+    this.setStatus('error', message);
+    log('cloud', 'cloud-error', {
+      detail: { kind, code: typeof rpcError.code === 'number' ? rpcError.code : null, message },
+    });
+    this.emit();
+  }
+
+  private onError(kind: string, error: unknown): void {
+    const message = this.scrub(String(error)).slice(0, 200);
+    log('cloud', 'cloud-error', { detail: { kind, message } });
+    this.setStatus('error', message);
+    this.emit();
+  }
+
+  private scrub(message: string): string {
+    return sanitizeToken(sanitizeToken(message, this.token ?? ''), this.lastToken ?? '');
+  }
+
+  private emit(): void {
+    const json = JSON.stringify(this.snapshot());
+    if (json === this.lastSnapshotJson) return;
+    this.lastSnapshotJson = json;
+    notifyShell();
+  }
+}
+
+let instance: CloudSessions | null = null;
+
+export function cloudSessions(): CloudSessions {
+  instance ??= new CloudSessions();
+  return instance;
+}

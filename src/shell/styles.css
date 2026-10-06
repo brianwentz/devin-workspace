@@ -17,10 +17,12 @@ body,
   background: transparent;
 }
 
-button {
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
+@layer base {
+  button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
 }
 
 button:disabled {
